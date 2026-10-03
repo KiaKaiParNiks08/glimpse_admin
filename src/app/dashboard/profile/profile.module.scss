@@ -1,0 +1,199 @@
+.pageWrap {
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 0.5rem 0;
+}
+
+.pageHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+
+.title {
+  margin: 0;
+  color: #f8fafc;
+  font-size: 1.6rem;
+}
+
+.subtitle {
+  margin: 0.25rem 0 0;
+  color: #94a3b8;
+  font-size: 0.9rem;
+}
+
+.card {
+  border: 1px solid #334155;
+  border-radius: 0.85rem;
+  padding: 1rem;
+  background:
+    radial-gradient(circle at top right, rgba(59, 130, 246, 0.16), transparent 45%),
+    rgba(15, 23, 42, 0.85);
+}
+
+.topSection {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding-bottom: 1rem;
+  border-bottom: 1px solid #334155;
+  margin-bottom: 1rem;
+}
+
+.avatarWrap {
+  width: 84px;
+  height: 84px;
+  border-radius: 999px;
+  overflow: hidden;
+  border: 2px solid #334155;
+  flex-shrink: 0;
+}
+
+.avatarImg {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.avatarFallback {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #e2e8f0;
+  background: linear-gradient(135deg, #2563eb, #4f46e5);
+  font-weight: 700;
+  font-size: 1.1rem;
+}
+
+.topMeta h2 {
+  margin: 0;
+  color: #f8fafc;
+  font-size: 1.1rem;
+}
+
+.topMeta p {
+  margin: 0.2rem 0 0;
+  color: #94a3b8;
+}
+
+.roleBadge {
+  display: inline-block;
+  margin-top: 0.55rem;
+  padding: 0.2rem 0.55rem;
+  font-size: 0.75rem;
+  border-radius: 999px;
+  background: rgba(56, 189, 248, 0.2);
+  color: #7dd3fc;
+  text-transform: capitalize;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.85rem;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.field label {
+  color: #cbd5e1;
+  font-size: 0.82rem;
+}
+
+.input {
+  width: 100%;
+  border: 1px solid #334155;
+  border-radius: 0.55rem;
+  background: #0f172a;
+  color: #e2e8f0;
+  font-size: 0.9rem;
+  padding: 0.56rem 0.7rem;
+}
+
+.value {
+  border: 1px solid transparent;
+  border-radius: 0.55rem;
+  background: rgba(15, 23, 42, 0.35);
+  color: #e2e8f0;
+  font-size: 0.9rem;
+  padding: 0.56rem 0.7rem;
+  min-height: 2.3rem;
+  display: flex;
+  align-items: center;
+}
+
+.imageSection {
+  margin-top: 1rem;
+  padding-top: 1rem;
+  border-top: 1px solid #334155;
+}
+
+.actions {
+  display: flex;
+  gap: 0.6rem;
+  justify-content: flex-end;
+  margin-top: 1rem;
+  flex-wrap: wrap;
+}
+
+.passwordSection {
+  margin-top: 1rem;
+  padding-top: 1rem;
+  border-top: 1px solid #334155;
+}
+
+.passwordSection h3 {
+  margin: 0 0 0.75rem;
+  color: #e2e8f0;
+  font-size: 1rem;
+}
+
+.primaryBtn,
+.secondaryBtn {
+  border-radius: 0.55rem;
+  padding: 0.5rem 0.9rem;
+  font-size: 0.88rem;
+  cursor: pointer;
+}
+
+.primaryBtn {
+  border: none;
+  color: #0f172a;
+  font-weight: 600;
+  background: linear-gradient(to right, #38bdf8, #6366f1);
+}
+
+.secondaryBtn {
+  border: 1px solid #334155;
+  color: #e2e8f0;
+  background: transparent;
+}
+
+.errorText {
+  color: #fca5a5;
+  margin: 0 0 0.75rem;
+}
+
+.successText {
+  color: #86efac;
+  margin: 0 0 0.75rem;
+}
+
+.loading {
+  color: #94a3b8;
+}
+
+@media (max-width: 768px) {
+  .grid {
+    grid-template-columns: 1fr;
+  }
+}

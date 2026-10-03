@@ -1,0 +1,260 @@
+name: CD
+
+on:
+  push:
+    branches:
+      - dev
+  workflow_run:
+    workflows:
+      - CI
+    types:
+      - completed
+    branches:
+      - dev
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Target environment"
+        required: true
+        type: choice
+        options:
+          - dev
+          - prod
+        default: dev
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cd-${{ github.ref_name || github.event.workflow_run.head_branch || 'manual' }}-${{ github.event.inputs.environment || 'dev' }}
+  cancel-in-progress: true
+
+jobs:
+  deploy-dev:
+    if: |
+      (github.event_name == 'push' && github.ref == 'refs/heads/dev') ||
+      (github.event_name == 'workflow_run' &&
+       github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.head_branch == 'dev')
+    name: Deploy to DEV
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: dev
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: npm ci
+
+      - name: Build
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          NODE_OPTIONS: --max-old-space-size=4096
+        run: npm run build
+
+      - name: Deploy application (dev)
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_SSH_KEY_B64: ${{ secrets.DEPLOY_SSH_KEY_B64 }}
+          APP_DIR: ${{ secrets.APP_DIR }}
+          APP_START_CMD: ${{ secrets.APP_START_CMD }}
+          APP_BUILD_CMD: ${{ secrets.APP_BUILD_CMD }}
+        run: |
+          mkdir -p ~/.ssh
+          if [ -z "$DEPLOY_SSH_KEY_B64" ]; then
+            echo "DEPLOY_SSH_KEY_B64 is empty. Set GitHub environment secret DEPLOY_SSH_KEY_B64."
+            exit 1
+          fi
+          printf '%s' "$DEPLOY_SSH_KEY_B64" | tr -d '\r\n\t ' | base64 -d > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keygen -l -f ~/.ssh/deploy_key >/dev/null 2>&1 || {
+            echo "Invalid private key format in DEPLOY_SSH_KEY_B64."
+            exit 1
+          }
+          
+          if [ -z "$DEPLOY_HOST" ]; then
+            echo "DEPLOY_HOST is empty. Set GitHub environment secret DEPLOY_HOST."
+            exit 1
+          fi
+          case "$DEPLOY_HOST" in
+            http*|*/*|*:*:*)
+              echo "DEPLOY_HOST looks invalid: '$DEPLOY_HOST'. Use host/IP only (no protocol/path)."
+              exit 1
+              ;;
+          esac
+          
+          for attempt in 1 2 3 4 5; do
+            if ssh-keyscan -T 10 -H "$DEPLOY_HOST" >> ~/.ssh/known_hosts 2>/dev/null; then
+              break
+            fi
+            if [ "$attempt" -eq 5 ]; then
+              echo "Unable to resolve/reach DEPLOY_HOST after retries: $DEPLOY_HOST"
+              exit 1
+            fi
+            echo "ssh-keyscan failed (attempt $attempt). Retrying in 5s..."
+            sleep 5
+          done
+          
+          ssh -o BatchMode=yes -o ConnectTimeout=15 -i ~/.ssh/deploy_key "$DEPLOY_USER@$DEPLOY_HOST" "echo SSH auth ok" || {
+            echo "SSH authentication failed. Verify DEPLOY_USER and DEPLOY_SSH_KEY (private key), and ensure matching public key exists in ~/.ssh/authorized_keys on server."
+            exit 1
+          }
+
+          REMOTE_BUILD_CMD="${APP_BUILD_CMD:-npm ci && npm run prisma:generate && npm run build}"
+          REMOTE_START_CMD="pm2 stop dev-nextjs || true; ${APP_START_CMD:-pm2 restart dev-nextjs || pm2 start npm --name dev-nextjs -- start}"
+
+          ssh -i ~/.ssh/deploy_key "$DEPLOY_USER@$DEPLOY_HOST" "bash -lc '
+            set -e
+            export PATH=\"\$HOME/.nvm/versions/node/*/bin:\$HOME/.local/bin:\$PATH\"
+            [ -s \"\$HOME/.nvm/nvm.sh\" ] && . \"\$HOME/.nvm/nvm.sh\" || true
+            [ -s /etc/profile ] && . /etc/profile || true
+            command -v node >/dev/null 2>&1 || { echo \"node not found on server PATH\"; exit 1; }
+            command -v npm >/dev/null 2>&1 || { echo \"npm not found on server PATH\"; exit 1; }
+            cd \"$APP_DIR\"
+            # Ensure local Next.js binaries are available (fixes `next: not found`).
+            export PATH=\"$APP_DIR/node_modules/.bin:\$PATH\"
+            export NODE_ENV=production
+            export DATABASE_URL=\"${DATABASE_URL}\"
+            export NODE_OPTIONS=\"--max-old-space-size=4096\"
+            git fetch origin
+            git checkout dev
+            git reset --hard origin/dev
+            $REMOTE_BUILD_CMD
+            # If the build output is missing, rebuild defensively.
+            if [ ! -f .next/BUILD_ID ] || [ ! -f .next/required-server-files.json ] || [ ! -f .next/server/middleware-manifest.json ]; then
+              echo \"Build output missing (.next/required-server-files.json). Rebuilding...\"
+              [ -x node_modules/.bin/next ] || npm ci
+              npm run prisma:generate || true
+              npm run build
+            fi
+            # Validate the build output before attempting to start PM2.
+            [ -f .next/required-server-files.json ] || { echo \"Missing .next/required-server-files.json\"; ls -la .next || true; exit 1; }
+            [ -f .next/BUILD_ID ] || { echo \"Missing .next/BUILD_ID\"; ls -la .next || true; exit 1; }
+            [ -f .next/server/middleware-manifest.json ] || { echo \"Missing .next/server/middleware-manifest.json\"; ls -la .next/server || true; exit 1; }
+            $REMOTE_START_CMD
+          '"
+
+  deploy-manual:
+    if: github.event_name == 'workflow_dispatch'
+    name: Deploy (Manual)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: ${{ inputs.environment }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: npm ci
+
+      - name: Build
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          NODE_OPTIONS: --max-old-space-size=4096
+        run: npm run build
+
+      - name: Deploy application
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          TARGET_BRANCH: ${{ inputs.environment == 'prod' && 'main' || 'dev' }}
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_SSH_KEY_B64: ${{ secrets.DEPLOY_SSH_KEY_B64 }}
+          APP_DIR: ${{ secrets.APP_DIR }}
+          APP_START_CMD: ${{ secrets.APP_START_CMD }}
+          APP_BUILD_CMD: ${{ secrets.APP_BUILD_CMD }}
+        run: |
+          mkdir -p ~/.ssh
+          if [ -z "$DEPLOY_SSH_KEY_B64" ]; then
+            echo "DEPLOY_SSH_KEY_B64 is empty. Set GitHub environment secret DEPLOY_SSH_KEY_B64."
+            exit 1
+          fi
+          printf '%s' "$DEPLOY_SSH_KEY_B64" | tr -d '\r\n\t ' | base64 -d > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keygen -l -f ~/.ssh/deploy_key >/dev/null 2>&1 || {
+            echo "Invalid private key format in DEPLOY_SSH_KEY_B64."
+            exit 1
+          }
+          
+          if [ -z "$DEPLOY_HOST" ]; then
+            echo "DEPLOY_HOST is empty. Set GitHub environment secret DEPLOY_HOST."
+            exit 1
+          fi
+          case "$DEPLOY_HOST" in
+            http*|*/*|*:*:*)
+              echo "DEPLOY_HOST looks invalid: '$DEPLOY_HOST'. Use host/IP only (no protocol/path)."
+              exit 1
+              ;;
+          esac
+          
+          for attempt in 1 2 3 4 5; do
+            if ssh-keyscan -T 10 -H "$DEPLOY_HOST" >> ~/.ssh/known_hosts 2>/dev/null; then
+              break
+            fi
+            if [ "$attempt" -eq 5 ]; then
+              echo "Unable to resolve/reach DEPLOY_HOST after retries: $DEPLOY_HOST"
+              exit 1
+            fi
+            echo "ssh-keyscan failed (attempt $attempt). Retrying in 5s..."
+            sleep 5
+          done
+          
+          ssh -o BatchMode=yes -o ConnectTimeout=15 -i ~/.ssh/deploy_key "$DEPLOY_USER@$DEPLOY_HOST" "echo SSH auth ok" || {
+            echo "SSH authentication failed. Verify DEPLOY_USER and DEPLOY_SSH_KEY (private key), and ensure matching public key exists in ~/.ssh/authorized_keys on server."
+            exit 1
+          }
+
+          REMOTE_BUILD_CMD="${APP_BUILD_CMD:-npm ci && npm run prisma:generate && npm run build}"
+          REMOTE_START_CMD="pm2 stop dev-nextjs || true; ${APP_START_CMD:-pm2 restart dev-nextjs || pm2 start npm --name dev-nextjs -- start}"
+
+          ssh -i ~/.ssh/deploy_key "$DEPLOY_USER@$DEPLOY_HOST" "bash -lc '
+            set -e
+            export PATH=\"\$HOME/.nvm/versions/node/*/bin:\$HOME/.local/bin:\$PATH\"
+            [ -s \"\$HOME/.nvm/nvm.sh\" ] && . \"\$HOME/.nvm/nvm.sh\" || true
+            [ -s /etc/profile ] && . /etc/profile || true
+            command -v node >/dev/null 2>&1 || { echo \"node not found on server PATH\"; exit 1; }
+            command -v npm >/dev/null 2>&1 || { echo \"npm not found on server PATH\"; exit 1; }
+            cd \"$APP_DIR\"
+            # Ensure local Next.js binaries are available (fixes `next: not found`).
+            export PATH=\"$APP_DIR/node_modules/.bin:\$PATH\"
+            export NODE_ENV=production
+            export DATABASE_URL=\"${DATABASE_URL}\"
+            export NODE_OPTIONS=\"--max-old-space-size=4096\"
+            git fetch origin
+            git checkout $TARGET_BRANCH
+            git reset --hard origin/$TARGET_BRANCH
+            $REMOTE_BUILD_CMD
+            # If the build output is missing, rebuild defensively.
+            if [ ! -f .next/BUILD_ID ] || [ ! -f .next/required-server-files.json ] || [ ! -f .next/server/middleware-manifest.json ]; then
+              echo \"Build output missing (.next/required-server-files.json). Rebuilding...\"
+              [ -x node_modules/.bin/next ] || npm ci
+              npm run prisma:generate || true
+              npm run build
+            fi
+            # Validate the build output before attempting to start PM2.
+            [ -f .next/required-server-files.json ] || { echo \"Missing .next/required-server-files.json\"; ls -la .next || true; exit 1; }
+            [ -f .next/BUILD_ID ] || { echo \"Missing .next/BUILD_ID\"; ls -la .next || true; exit 1; }
+            [ -f .next/server/middleware-manifest.json ] || { echo \"Missing .next/server/middleware-manifest.json\"; ls -la .next/server || true; exit 1; }
+            $REMOTE_START_CMD
+          '"

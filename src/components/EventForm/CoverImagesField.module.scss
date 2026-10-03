@@ -1,0 +1,144 @@
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.label {
+  display: block;
+  margin-bottom: 0.15rem;
+  font-size: 0.8rem;
+  color: #cbd5e1;
+}
+
+.required {
+  color: #f97373;
+}
+
+.note {
+  margin: 0;
+  font-size: 0.75rem;
+  color: #94a3b8;
+  line-height: 1.35;
+}
+
+.fileInputHidden {
+  position: absolute;
+  width: 0;
+  height: 0;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.grid {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+  gap: 0.6rem;
+}
+
+.tile {
+  position: relative;
+  border: 1px solid #334155;
+  border-radius: 0.5rem;
+  background: #0f172a;
+  overflow: hidden;
+  cursor: grab;
+  transition: border-color 0.15s, opacity 0.15s, transform 0.15s;
+
+  &:active {
+    cursor: grabbing;
+  }
+}
+
+.tileDragging {
+  opacity: 0.4;
+}
+
+.tileDropTarget {
+  border-color: #38bdf8;
+  transform: scale(1.03);
+}
+
+.badge {
+  position: absolute;
+  top: 0.35rem;
+  left: 0.35rem;
+  z-index: 1;
+  padding: 0.1rem 0.45rem;
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.85);
+  color: #e2e8f0;
+  font-size: 0.7rem;
+  font-weight: 600;
+}
+
+.thumb {
+  display: block;
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  object-fit: cover;
+  pointer-events: none;
+}
+
+.actions {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.25rem;
+  padding: 0.3rem;
+}
+
+.iconBtn {
+  flex: 1;
+  padding: 0.2rem 0;
+  border: 1px solid #334155;
+  border-radius: 0.35rem;
+  background: rgba(30, 41, 59, 0.8);
+  color: #cbd5e1;
+  font-size: 0.85rem;
+  cursor: pointer;
+
+  &:hover:not(:disabled) {
+    border-color: #64748b;
+    color: #f1f5f9;
+  }
+
+  &:disabled {
+    opacity: 0.35;
+    cursor: not-allowed;
+  }
+}
+
+.removeBtn:hover:not(:disabled) {
+  border-color: #f87171;
+  color: #fca5a5;
+}
+
+.addBtn {
+  padding: 0.5rem 0.75rem;
+  border-radius: 0.5rem;
+  border: 1px dashed #475569;
+  background: rgba(15, 23, 42, 0.6);
+  color: #94a3b8;
+  font-size: 0.875rem;
+  cursor: pointer;
+  align-self: flex-start;
+
+  &:hover:not(:disabled) {
+    border-color: #64748b;
+    color: #cbd5e1;
+  }
+
+  &:disabled {
+    opacity: 0.6;
+    cursor: wait;
+  }
+}
+
+.error {
+  margin: 0;
+  color: #fca5a5;
+  font-size: 0.8rem;
+}

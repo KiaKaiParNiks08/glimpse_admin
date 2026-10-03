@@ -1,0 +1,705 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model app_configurations {
+  id                        String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  platform                  String    @unique @db.VarChar(20)
+  app_name                  String?   @db.VarChar(150)
+  store_url                 String
+  current_version           String?   @db.VarChar(20)
+  minimum_supported_version String?   @db.VarChar(20)
+  force_update              Boolean?  @default(false)
+  is_active                 Boolean?  @default(true)
+  created_at                DateTime? @default(now()) @db.Timestamptz(6)
+  updated_at                DateTime? @default(now()) @db.Timestamptz(6)
+}
+
+model cms_pages {
+  id         String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  slug       String       @unique @db.VarChar(100)
+  title      String       @db.VarChar(200)
+  content    String
+  status     page_status? @default(draft)
+  created_at DateTime?    @default(now()) @db.Timestamptz(6)
+  updated_at DateTime?    @default(now()) @db.Timestamptz(6)
+}
+
+model comments {
+  id                String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  post_id           String          @db.Uuid
+  user_id           String          @db.Uuid
+  parent_comment_id String?         @db.Uuid
+  comment_text      String
+  status            comment_status? @default(active)
+  created_at        DateTime?       @default(now()) @db.Timestamptz(6)
+  updated_at        DateTime?       @default(now()) @db.Timestamptz(6)
+  comments          comments?       @relation("commentsTocomments", fields: [parent_comment_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  other_comments    comments[]      @relation("commentsTocomments")
+  posts             posts           @relation(fields: [post_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  users             users           @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([post_id], map: "idx_comments_post_id")
+  @@index([user_id], map: "idx_comments_user_id")
+}
+
+model event_admins {
+  id                                    String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  event_id                              String    @db.Uuid
+  user_id                               String    @db.Uuid
+  assigned_by                           String?   @db.Uuid
+  created_at                            DateTime? @default(now()) @db.Timestamptz(6)
+  users_event_admins_assigned_byTousers users?    @relation("event_admins_assigned_byTousers", fields: [assigned_by], references: [id], onUpdate: NoAction, map: "fk_event_admin_assigned_by")
+  events                                events    @relation(fields: [event_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_event_admin_event")
+  users_event_admins_user_idTousers     users     @relation("event_admins_user_idTousers", fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_event_admin_user")
+
+  @@unique([event_id, user_id], map: "unique_event_admin")
+  @@index([event_id], map: "idx_event_admins_event_id")
+  @@index([user_id], map: "idx_event_admins_user_id")
+}
+
+model event_categories {
+  id          String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name        String    @db.VarChar(100)
+  slug        String    @unique @db.VarChar(120)
+  description String?
+  icon_url    String?
+  banner_url  String?
+  is_active   Boolean?  @default(true)
+  created_by  String?   @db.Uuid
+  created_at  DateTime? @default(now()) @db.Timestamptz(6)
+  updated_at  DateTime? @default(now()) @db.Timestamptz(6)
+  users       users?    @relation(fields: [created_by], references: [id], onUpdate: NoAction, map: "fk_event_category_created_by")
+  events      events[]
+
+  @@index([created_by], map: "idx_event_categories_created_by")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model event_day_media {
+  id               String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  event_day_id     String           @db.Uuid
+  /// Session the media was uploaded for (null only for legacy rows whose day had no session).
+  event_session_id String?          @db.Uuid
+  media_url        String
+  media_type       String           @db.VarChar(10)
+  uploaded_by      String?          @db.Uuid
+  display_order    Int?             @default(0)
+  created_at       DateTime?        @default(now()) @db.Timestamptz(6)
+  media_key        String?
+  event_days       event_days       @relation(fields: [event_day_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_day_media_day")
+  event_sessions   event_sessions?  @relation(fields: [event_session_id], references: [id], onUpdate: NoAction, map: "fk_day_media_session")
+  users            users?           @relation(fields: [uploaded_by], references: [id], onUpdate: NoAction, map: "fk_day_media_user")
+  user_favorites   user_favorites[]
+
+  @@index([event_day_id], map: "idx_event_day_media_event_day_id")
+  @@index([event_session_id], map: "idx_event_day_media_event_session_id")
+}
+
+model event_days {
+  id              String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  event_id        String            @db.Uuid
+  title           String?           @db.VarChar(100)
+  date            DateTime          @db.Date
+  created_at      DateTime?         @default(now()) @db.Timestamptz(6)
+  updated_at      DateTime?         @default(now()) @db.Timestamptz(6)
+  event_day_media event_day_media[]
+  events          events            @relation(fields: [event_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_event_day_event")
+  event_sessions  event_sessions[]
+
+  @@unique([event_id, date], map: "event_days_event_date_key")
+  @@index([event_id], map: "idx_event_days_event_id")
+}
+
+model event_explore_items {
+  id              String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  event_id        String        @db.Uuid
+  explore_item_id String        @db.Uuid
+  is_active       Boolean?      @default(true)
+  created_at      DateTime?     @default(now()) @db.Timestamptz(6)
+  updated_at      DateTime?     @default(now()) @db.Timestamptz(6)
+  events          events        @relation(fields: [event_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_event_explore_event")
+  explore_items   explore_items @relation(fields: [explore_item_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_event_explore_item")
+
+  @@unique([event_id, explore_item_id], map: "unique_event_explore")
+  @@index([event_id], map: "idx_event_explore_items_event_id")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model event_guests {
+  id                                   String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  event_id                             String          @db.Uuid
+  user_id                              String          @db.Uuid
+  venue_contact_id                     String?         @db.Uuid
+  rsvp_status                          String          @default("pending") @db.VarChar(20)
+  invited_by                           String?         @db.Uuid
+  joined_at                            DateTime?       @default(now()) @db.Timestamptz(6)
+  created_at                           DateTime?       @default(now()) @db.Timestamptz(6)
+  updated_at                           DateTime?       @default(now()) @db.Timestamptz(6)
+  wedding_side                         String?         @db.VarChar(20)
+  users_event_guests_invited_byTousers users?          @relation("event_guests_invited_byTousers", fields: [invited_by], references: [id], onUpdate: NoAction, map: "fk_invited_by")
+  users_event_guests_user_idTousers    users           @relation("event_guests_user_idTousers", fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_user")
+  venue_contacts                       venue_contacts? @relation(fields: [venue_contact_id], references: [id], onUpdate: NoAction, map: "fk_venue_contact")
+
+  @@unique([event_id, user_id], map: "unique_event_user")
+  @@index([event_id], map: "idx_event_guests_event_id")
+  @@index([user_id], map: "idx_event_guests_user_id")
+}
+
+/// Cover images of an event in display order; events.cover_image mirrors the first one.
+model event_cover_images {
+  id            String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  event_id      String    @db.Uuid
+  image_url     String
+  display_order Int       @default(0)
+  created_at    DateTime? @default(now()) @db.Timestamptz(6)
+  events        events    @relation(fields: [event_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_event_cover_images_event")
+
+  @@index([event_id, display_order], map: "idx_event_cover_images_event_order")
+}
+
+model event_highlights {
+  id            String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  event_id      String    @db.Uuid
+  title         String    @db.VarChar(200)
+  description   String?
+  media_url     String?
+  media_type    String?   @default("image") @db.VarChar(10)
+  display_order Int?      @default(0)
+  is_active     Boolean?  @default(true)
+  created_at    DateTime? @default(now()) @db.Timestamptz(6)
+  updated_at    DateTime? @default(now()) @db.Timestamptz(6)
+  events        events    @relation(fields: [event_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_event_highlight_event")
+
+  @@unique([event_id, display_order], map: "event_highlights_event_display_order_key")
+  @@index([event_id], map: "idx_event_highlights_event_id")
+}
+
+model event_offering_master {
+  id                      String                    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  title                   String                    @unique @db.VarChar(200)
+  description             String?
+  created_by              String?                   @db.Uuid
+  created_at              DateTime?                 @default(now()) @db.Timestamptz(6)
+  updated_at              DateTime?                 @default(now()) @db.Timestamptz(6)
+  users                   users?                    @relation(fields: [created_by], references: [id], onUpdate: NoAction, map: "fk_offering_master_created_by")
+  event_offerings         event_offerings[]
+  event_session_offerings event_session_offerings[]
+}
+
+model event_offerings {
+  id                    String                @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  event_id              String                @db.Uuid
+  offering_master_id    String                @db.Uuid
+  is_active             Boolean?              @default(true)
+  created_by            String?               @db.Uuid
+  created_at            DateTime?             @default(now()) @db.Timestamptz(6)
+  updated_at            DateTime?             @default(now()) @db.Timestamptz(6)
+  users                 users?                @relation(fields: [created_by], references: [id], onUpdate: NoAction, map: "fk_event_offering_created_by")
+  events                events                @relation(fields: [event_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_event_offering_event")
+  event_offering_master event_offering_master @relation(fields: [offering_master_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_event_offering_master")
+
+  @@unique([event_id, offering_master_id], map: "event_offerings_event_master_key")
+  @@index([event_id], map: "idx_event_offerings_event_id")
+  @@index([offering_master_id], map: "idx_event_offerings_offering_master_id")
+}
+
+model event_organizers {
+  id             String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  event_id       String           @db.Uuid
+  name           String           @db.VarChar(200)
+  logo_url       String?
+  contact_email  String?          @db.VarChar(150)
+  contact_phone  String?          @db.VarChar(50)
+  website_url    String?
+  created_by     String?          @db.Uuid
+  created_at     DateTime?        @default(now()) @db.Timestamptz(6)
+  updated_at     DateTime?        @default(now()) @db.Timestamptz(6)
+  users          users?           @relation(fields: [created_by], references: [id], onUpdate: NoAction, map: "fk_organizer_created_by")
+  events         events           @relation(fields: [event_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_organizer_event")
+  event_sessions event_sessions[]
+
+  @@unique([event_id, name], map: "event_organizers_event_name_key")
+  @@index([event_id], map: "idx_event_organizers_event_id")
+}
+
+model event_session_offerings {
+  id                    String                @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  event_session_id      String                @db.Uuid
+  offering_master_id    String                @db.Uuid
+  created_at            DateTime?             @default(now()) @db.Timestamptz(6)
+  updated_at            DateTime?             @default(now()) @db.Timestamptz(6)
+  event_offering_master event_offering_master @relation(fields: [offering_master_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_session_offering_master")
+  event_sessions        event_sessions        @relation(fields: [event_session_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_session_offering_session")
+
+  @@unique([event_session_id, offering_master_id], map: "event_session_offerings_session_master_key")
+  @@index([event_session_id], map: "idx_event_session_offerings_session_id")
+  @@index([offering_master_id], map: "idx_event_session_offerings_master_id")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model event_sessions {
+  id                      String                    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  event_day_id            String                    @db.Uuid
+  title                   String                    @db.VarChar(150)
+  description             String?
+  start_time              DateTime?                 @db.Time(6)
+  end_time                DateTime?                 @db.Time(6)
+  venue_id                String?                   @db.Uuid
+  status                  String?                   @default("upcoming") @db.VarChar(20)
+  created_at              DateTime?                 @default(now()) @db.Timestamptz(6)
+  updated_at              DateTime?                 @default(now()) @db.Timestamptz(6)
+  event_session_bg_url    String?
+  event_organizer_id      String?                   @db.Uuid
+  session_theme           String?                   @db.VarChar(200)
+  venue_subvenue_id       String?                   @db.Uuid
+  event_day_media         event_day_media[]
+  event_session_offerings event_session_offerings[]
+  event_days              event_days                @relation(fields: [event_day_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_session_day")
+  event_organizers        event_organizers?         @relation(fields: [event_organizer_id], references: [id], onUpdate: NoAction, map: "fk_session_organizer")
+  venues                  venues?                   @relation(fields: [venue_id], references: [id], onUpdate: NoAction, map: "fk_session_venue")
+  venue_subvenues         venue_subvenues?          @relation(fields: [venue_subvenue_id], references: [id], onUpdate: NoAction, map: "fk_session_venue_subvenue")
+
+  @@unique([event_day_id, title], map: "event_sessions_day_title_key")
+  @@index([event_day_id], map: "idx_event_sessions_event_day_id")
+  @@index([event_organizer_id], map: "idx_event_sessions_event_organizer_id")
+  @@index([venue_id], map: "idx_event_sessions_venue_id")
+  @@index([venue_subvenue_id], map: "idx_event_sessions_venue_subvenue_id")
+}
+
+/// Master list of app color themes (app + button) for events.
+model app_themes {
+  id                     String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name                   String    @db.VarChar(150)
+  primary_color          String    @db.VarChar(20)
+  secondary_color        String    @db.VarChar(20)
+  created_at             DateTime? @default(now()) @db.Timestamptz(6)
+  updated_at             DateTime? @default(now()) @db.Timestamptz(6)
+  button_primary_color   String    @db.VarChar(20)
+  button_secondary_color String    @db.VarChar(20)
+  events                 events[]
+
+  @@index([name], map: "idx_app_themes_name")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model events {
+  id                                   String                @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  category_id                          String                @db.Uuid
+  title                                String                @db.VarChar(200)
+  slug                                 String                @unique @db.VarChar(220)
+  event_code                           String                @unique @db.VarChar(20)
+  description                          String?
+  theme                                String?               @db.VarChar(150)
+  cover_image                          String?
+  start_date                           DateTime              @db.Date
+  end_date                             DateTime              @db.Date
+  main_venue_id                        String?               @db.Uuid
+  status                               String                @default("draft") @db.VarChar(20)
+  created_by                           String                @db.Uuid
+  created_at                           DateTime?             @default(now()) @db.Timestamptz(6)
+  updated_at                           DateTime?             @default(now()) @db.Timestamptz(6)
+  e_invite_pdf_url                     String?
+  app_theme_id                         String?               @db.Uuid
+  post_event_pdf_url                   String?
+  post_event_pdf_key                   String?
+  post_event_pdf_original_name         String?               @db.VarChar(500)
+  post_event_pdf_size                  Int?
+  post_event_pdf_uploaded_by           String?               @db.Uuid
+  post_event_pdf_uploaded_at           DateTime?             @db.Timestamptz(6)
+  groom_name                           String?               @db.VarChar(200)
+  bride_name                           String?               @db.VarChar(200)
+  greetings_text                       String?
+  /// Required by the panel when the category is a corporate event
+  linkedin_url                         String?               @db.VarChar(500)
+  /// Watermark drawn over gallery images: top_left | top_right | center | bottom_left | bottom_right, opacity 0-100,
+  /// size = side of the square in actual image pixels (16-120).
+  watermark_url                        String?
+  watermark_position                   String                @default("bottom_right") @db.VarChar(20)
+  watermark_opacity                    Int                   @default(70)
+  watermark_size                       Int                   @default(48)
+  /// Mobile dashboard section settings; at least one phase per section must stay on (DB check constraints).
+  current_happening_title              String?               @db.VarChar(150)
+  current_happening_show_pre_event     Boolean               @default(true)
+  current_happening_show_ongoing_event Boolean               @default(true)
+  current_happening_show_post_event    Boolean               @default(true)
+  post_event_pdf_title                 String?               @db.VarChar(200)
+  post_event_pdf_show_pre_event        Boolean               @default(true)
+  post_event_pdf_show_ongoing_event    Boolean               @default(true)
+  post_event_pdf_show_post_event       Boolean               @default(true)
+  current_happening                    current_happening[]
+  event_cover_images                   event_cover_images[]
+  event_admins                         event_admins[]
+  event_days                           event_days[]
+  event_explore_items                  event_explore_items[]
+  event_highlights                     event_highlights[]
+  event_offerings                      event_offerings[]
+  event_organizers                     event_organizers[]
+  app_themes                           app_themes?           @relation(fields: [app_theme_id], references: [id], onUpdate: NoAction, map: "fk_event_app_theme")
+  event_categories                     event_categories      @relation(fields: [category_id], references: [id], onUpdate: NoAction, map: "fk_event_category")
+  users                                users                 @relation(fields: [created_by], references: [id], onUpdate: NoAction, map: "fk_event_created_by")
+  venues                               venues?               @relation(fields: [main_venue_id], references: [id], onUpdate: NoAction, map: "fk_event_main_venue")
+  events_admin                         events_admin[]
+  user_favorites                       user_favorites[]
+
+  @@index([category_id], map: "idx_events_category_id")
+  @@index([created_by], map: "idx_events_created_by")
+  @@index([main_venue_id], map: "idx_events_main_venue_id")
+  @@index([app_theme_id], map: "idx_events_app_theme_id")
+  @@index([slug], map: "idx_events_slug")
+  @@index([start_date], map: "idx_events_start_date")
+  @@index([status], map: "idx_events_status")
+}
+
+model events_admin {
+  id         String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  user_id    String?   @db.Uuid
+  event_id   String?   @db.Uuid
+  created_at DateTime? @default(now()) @db.Timestamptz(6)
+  events     events?   @relation(fields: [event_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  users      users?    @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@unique([user_id, event_id])
+  @@index([event_id], map: "idx_events_admin_event_id")
+  @@index([user_id], map: "idx_events_admin_user_id")
+}
+
+model explore_categories {
+  id             String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  title          String          @unique @db.VarChar(150)
+  description    String?
+  background_url String?
+  created_at     DateTime?       @default(now()) @db.Timestamptz(6)
+  updated_at     DateTime?       @default(now()) @db.Timestamptz(6)
+  explore_items  explore_items[]
+}
+
+model explore_items {
+  id                  String                @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  category_id         String                @db.Uuid
+  title               String                @db.VarChar(200)
+  description         String?
+  address             String?               @db.VarChar(300)
+  city                String?               @db.VarChar(100)
+  state               String?               @db.VarChar(100)
+  country             String?               @db.VarChar(100)
+  latitude            Decimal?              @db.Decimal(10, 7)
+  longitude           Decimal?              @db.Decimal(10, 7)
+  created_at          DateTime?             @default(now()) @db.Timestamptz(6)
+  updated_at          DateTime?             @default(now()) @db.Timestamptz(6)
+  event_explore_items event_explore_items[]
+  explore_categories  explore_categories    @relation(fields: [category_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_explore_item_category")
+
+  @@unique([category_id, title], map: "explore_items_category_title_key")
+  @@index([category_id], map: "idx_explore_items_category_id")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model notifications {
+  id                                           String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  recipient_user_id                            String            @db.Uuid
+  sender_user_id                               String?           @db.Uuid
+  notification_type                            notification_type
+  reference_id                                 String?           @db.Uuid
+  reference_type                               String?           @db.VarChar(20)
+  title                                        String?           @db.VarChar(255)
+  message                                      String?
+  is_read                                      Boolean?          @default(false)
+  is_deleted                                   Boolean?          @default(false)
+  created_at                                   DateTime?         @default(now()) @db.Timestamptz(6)
+  users_notifications_recipient_user_idTousers users             @relation("notifications_recipient_user_idTousers", fields: [recipient_user_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  users_notifications_sender_user_idTousers    users?            @relation("notifications_sender_user_idTousers", fields: [sender_user_id], references: [id], onUpdate: NoAction)
+
+  @@index([created_at], map: "idx_notifications_created_at")
+  @@index([is_read], map: "idx_notifications_is_read")
+  @@index([recipient_user_id], map: "idx_notifications_recipient_user_id")
+}
+
+model post_likes {
+  id         String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  post_id    String    @db.Uuid
+  user_id    String    @db.Uuid
+  created_at DateTime? @default(now()) @db.Timestamptz(6)
+  posts      posts     @relation(fields: [post_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  users      users     @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@unique([post_id, user_id])
+  @@index([post_id], map: "idx_post_likes_post_id")
+  @@index([user_id], map: "idx_post_likes_user_id")
+}
+
+model post_media {
+  id            String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  post_id       String     @db.Uuid
+  media_type    media_type
+  media_url     String
+  thumbnail_url String?
+  media_order   Int?       @default(1)
+  metadata      Json?
+  created_at    DateTime?  @default(now()) @db.Timestamptz(6)
+  posts         posts      @relation(fields: [post_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([post_id], map: "idx_post_media_post_id")
+}
+
+model posts {
+  id             String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  user_id        String           @db.Uuid
+  caption        String?
+  status         post_status?     @default(active)
+  like_count     Int?             @default(0)
+  comment_count  Int?             @default(0)
+  created_at     DateTime?        @default(now()) @db.Timestamptz(6)
+  updated_at     DateTime?        @default(now()) @db.Timestamptz(6)
+  comments       comments[]
+  post_likes     post_likes[]
+  post_media     post_media[]
+  users          users            @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  user_favorites user_favorites[]
+
+  @@index([created_at], map: "idx_posts_created_at")
+  @@index([user_id], map: "idx_posts_user_id")
+}
+
+model roles {
+  id          Int       @id @default(autoincrement())
+  name        String    @unique @db.VarChar(50)
+  description String?
+  created_at  DateTime? @default(now()) @db.Timestamp(6)
+  users       users[]
+}
+
+model user_otps {
+  id          String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  user_id     String    @db.Uuid
+  otp         String    @db.VarChar(6)
+  expires_at  DateTime  @db.Timestamptz(6)
+  is_verified Boolean?  @default(false)
+  created_at  DateTime? @default(now()) @db.Timestamptz(6)
+  users       users     @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_user_otp_user")
+
+  @@index([user_id], map: "idx_user_otps_user_id")
+}
+
+model users {
+  id                                                   String                  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  full_name                                            String                  @db.VarChar(100)
+  country_code                                         String?                 @db.VarChar(100)
+  email                                                String                  @unique @db.VarChar(150)
+  password_hash                                        String
+  role_id                                              Int
+  is_active                                            Boolean?                @default(true)
+  created_at                                           DateTime?               @default(now()) @db.Timestamp(6)
+  updated_at                                           DateTime?               @default(now()) @db.Timestamp(6)
+  avatar_url                                           String?
+  mobile_number                                        String?                 @db.VarChar(20)
+  instagram_id                                         String?
+  comments                                             comments[]
+  event_admins_event_admins_assigned_byTousers         event_admins[]          @relation("event_admins_assigned_byTousers")
+  event_admins_event_admins_user_idTousers             event_admins[]          @relation("event_admins_user_idTousers")
+  event_categories                                     event_categories[]
+  event_day_media                                      event_day_media[]
+  event_guests_event_guests_invited_byTousers          event_guests[]          @relation("event_guests_invited_byTousers")
+  event_guests_event_guests_user_idTousers             event_guests[]          @relation("event_guests_user_idTousers")
+  event_offering_master                                event_offering_master[]
+  event_offerings                                      event_offerings[]
+  event_organizers                                     event_organizers[]
+  events                                               events[]
+  events_admin                                         events_admin[]
+  notifications_notifications_recipient_user_idTousers notifications[]         @relation("notifications_recipient_user_idTousers")
+  notifications_notifications_sender_user_idTousers    notifications[]         @relation("notifications_sender_user_idTousers")
+  post_likes                                           post_likes[]
+  posts                                                posts[]
+  user_devices                                         user_devices[]
+  user_otps                                            user_otps[]
+  user_favorites                                       user_favorites[]
+  roles                                                roles                   @relation(fields: [role_id], references: [id], onUpdate: NoAction)
+
+  @@index([role_id], map: "idx_users_role_id")
+}
+
+model venue_contacts {
+  id           String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  venue_id     String?        @db.Uuid
+  name         String         @db.VarChar(255)
+  image_url    String?
+  phone_number String?        @db.VarChar(20)
+  email        String?        @db.VarChar(255)
+  role         String?        @db.VarChar(255)
+  is_primary   Boolean?
+  created_at   DateTime?      @default(now()) @db.Timestamptz(6)
+  event_guests event_guests[]
+  venues       venues?        @relation(fields: [venue_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([venue_id], map: "idx_venue_contacts_venue_id")
+}
+
+model venue_facilities {
+  id         String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  venue_id   String?   @db.Uuid
+  name       String    @db.VarChar(255)
+  image_url  String?
+  created_at DateTime? @default(now()) @db.Timestamptz(6)
+  venues     venues?   @relation(fields: [venue_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([venue_id], map: "idx_venue_facilities_venue_id")
+}
+
+model venue_photos {
+  id         String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  venue_id   String?   @db.Uuid
+  image_url  String
+  alt_text   String?   @db.VarChar(255)
+  sort_order Int?      @default(0)
+  created_at DateTime? @default(now()) @db.Timestamptz(6)
+  venues     venues?   @relation(fields: [venue_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([venue_id], map: "idx_venue_photos_venue_id")
+}
+
+/// Named areas or halls under a main venue (title + description only).
+model venue_subvenues {
+  id             String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  venue_id       String           @db.Uuid
+  title          String           @db.VarChar(255)
+  description    String?
+  created_at     DateTime?        @default(now()) @db.Timestamptz(6)
+  event_sessions event_sessions[]
+  venues         venues           @relation(fields: [venue_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([venue_id], map: "idx_venue_subvenues_venue_id")
+}
+
+model venues {
+  id               String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name             String             @db.VarChar(255)
+  address          String
+  description      String?
+  bg_image_url     String?
+  latitude         Decimal?           @db.Decimal(10, 8)
+  longitude        Decimal?           @db.Decimal(11, 8)
+  city             String?            @db.VarChar(100)
+  state_name       String?            @db.VarChar(100)
+  country          String?            @db.VarChar(100)
+  postal_code      String?            @db.VarChar(20)
+  created_at       DateTime?          @default(now()) @db.Timestamptz(6)
+  updated_at       DateTime?          @default(now()) @db.Timestamptz(6)
+  event_sessions   event_sessions[]
+  events           events[]
+  venue_contacts   venue_contacts[]
+  venue_facilities venue_facilities[]
+  venue_photos     venue_photos[]
+  venue_subvenues  venue_subvenues[]
+
+  @@index([city], map: "idx_venues_city")
+  @@index([country], map: "idx_venues_country")
+}
+
+model current_happening {
+  id               String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  event_id         String             @db.Uuid
+  title            String
+  description      String?
+  bg_image_url     String
+  happening_date   DateTime           @db.Date
+  is_active        Boolean?           @default(true)
+  display_order    Int?               @default(0)
+  created_at       DateTime?          @default(now()) @db.Timestamptz(6)
+  updated_at       DateTime?          @default(now()) @db.Timestamptz(6)
+  events           events             @relation(fields: [event_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  happening_photos happening_photos[]
+
+  @@index([is_active, display_order, happening_date(sort: Desc)], map: "idx_current_happening_active_order")
+  @@index([event_id], map: "idx_current_happening_event_id")
+}
+
+model happening_photos {
+  id                String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  happening_id      String            @db.Uuid
+  image_url         String
+  media_type        String            @default("image") @db.VarChar(10)
+  alt_text          String?           @db.VarChar(255)
+  sort_order        Int?              @default(0)
+  created_at        DateTime?         @default(now()) @db.Timestamptz(6)
+  current_happening current_happening @relation(fields: [happening_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([happening_id, sort_order], map: "idx_happening_photos_happening_id")
+}
+
+model user_devices {
+  id           String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  user_id      String      @db.Uuid
+  device_type  device_type
+  device_id    String      @db.VarChar(255)
+  is_active    Boolean?    @default(true)
+  last_seen_at DateTime?   @db.Timestamptz(6)
+  created_at   DateTime?   @default(now()) @db.Timestamptz(6)
+  updated_at   DateTime?   @default(now()) @db.Timestamptz(6)
+  users        users       @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_user_devices_user")
+
+  @@unique([user_id, device_id])
+  @@index([device_type], map: "idx_user_devices_device_type")
+  @@index([user_id], map: "idx_user_devices_user_id")
+}
+
+/// A user's favorite item within one event. Exactly one target column is set, matching item_type
+/// (enforced by the user_favorites_target_check constraint).
+model user_favorites {
+  id                 String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  user_id            String           @db.Uuid
+  event_id           String           @db.Uuid
+  item_type          String           @db.VarChar(20)
+  event_day_media_id String?          @db.Uuid
+  post_id            String?          @db.Uuid
+  created_at         DateTime?        @default(now()) @db.Timestamptz(6)
+  users              users            @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_user_favorites_user")
+  events             events           @relation(fields: [event_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_user_favorites_event")
+  event_day_media    event_day_media? @relation(fields: [event_day_media_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_user_favorites_day_media")
+  posts              posts?           @relation(fields: [post_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_user_favorites_post")
+
+  @@unique([user_id, event_id, event_day_media_id], map: "unique_user_favorite_day_media")
+  @@unique([user_id, event_id, post_id], map: "unique_user_favorite_post")
+  @@index([user_id, event_id, created_at(sort: Desc)], map: "idx_user_favorites_user_event_created")
+  @@index([event_day_media_id], map: "idx_user_favorites_day_media")
+  @@index([post_id], map: "idx_user_favorites_post")
+}
+
+enum comment_status {
+  active
+  deleted
+}
+
+enum media_type {
+  image
+  video
+}
+
+enum notification_type {
+  post_like
+  post_comment
+  event_invite
+  event_update
+  event_reminder
+  general
+}
+
+enum page_status {
+  draft
+  published
+}
+
+enum post_status {
+  active
+  deleted
+}
+
+enum device_type {
+  android
+  ios
+  web
+}

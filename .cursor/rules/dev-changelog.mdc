@@ -1,0 +1,15 @@
+---
+description: Keep DEV_CHANGELOG.md up to date with dated file changes
+alwaysApply: true
+---
+
+# Dev changelog
+
+`DEV_CHANGELOG.md` (repo root) is the record of local work: which files changed on which date, why,
+how to undo DB changes, local test data, and open items.
+
+- At the start of a session, read `DEV_CHANGELOG.md` to recover context (setup steps, recent features, known issues).
+- After changing files, add them under a dated heading `## YYYY-MM-DD — <feature>` with **New files** / **Modified files** lists and a one-line reason each. Use the date from the session timestamp.
+- For every new Prisma migration, add an "Undo the DB part" SQL block (drop objects + delete the `_prisma_migrations` row).
+- Record any test data inserted into the local DB and how to delete it.
+- Move items out of "Known open items" when they are fixed.

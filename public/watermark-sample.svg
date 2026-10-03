@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="800" viewBox="0 0 1200 800">
+  <defs>
+    <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#f9c58d"/>
+      <stop offset="0.55" stop-color="#f492a0"/>
+      <stop offset="1" stop-color="#7b5ea7"/>
+    </linearGradient>
+    <linearGradient id="ground" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#3d2c5e"/>
+      <stop offset="1" stop-color="#1c1433"/>
+    </linearGradient>
+  </defs>
+  <rect width="1200" height="800" fill="url(#sky)"/>
+  <circle cx="820" cy="330" r="110" fill="#ffe3a3" opacity="0.9"/>
+  <path d="M0 560 L180 420 L320 520 L500 360 L700 540 L880 430 L1040 520 L1200 440 L1200 800 L0 800 Z" fill="#5a4380" opacity="0.85"/>
+  <path d="M0 640 L220 540 L420 620 L640 520 L860 630 L1060 560 L1200 610 L1200 800 L0 800 Z" fill="url(#ground)"/>
+  <g fill="#fff3d6" opacity="0.9">
+    <circle cx="160" cy="120" r="4"/><circle cx="260" cy="70" r="3"/><circle cx="420" cy="150" r="3"/>
+    <circle cx="980" cy="90" r="4"/><circle cx="1100" cy="170" r="3"/><circle cx="620" cy="60" r="3"/>
+  </g>
+  <g fill="#1c1433" opacity="0.8">
+    <rect x="540" y="560" width="120" height="120" rx="6"/>
+    <path d="M520 565 L600 500 L680 565 Z"/>
+  </g>
+  <text x="60" y="760" font-family="Arial, sans-serif" font-size="28" fill="#fff3d6" opacity="0.7">Sample image</text>
+</svg>

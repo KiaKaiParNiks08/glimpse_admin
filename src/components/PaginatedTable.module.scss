@@ -1,0 +1,101 @@
+.wrapper {
+  border-radius: 0.75rem;
+  border: 1px solid #1f2937;
+  overflow: hidden;
+  background: radial-gradient(circle at top left, rgba(37, 99, 235, 0.08), transparent), #020617;
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.875rem;
+}
+
+.headRow {
+  background-color: rgba(15, 23, 42, 0.9);
+}
+
+.cell {
+  padding: 0.55rem 0.9rem;
+  font-size: 0.8rem;
+  color: #e5e7eb;
+}
+
+.headCell {
+  text-align: left;
+  padding: 0.6rem 0.9rem;
+  font-size: 0.75rem;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #9ca3af;
+}
+
+.headCellActions {
+  @extend .headCell;
+  text-align: right;
+}
+
+.rowDivider {
+  border-top: 1px solid #020617;
+}
+
+.emptyCell {
+  padding: 0.9rem;
+  text-align: center;
+  color: #6b7280;
+  font-size: 0.85rem;
+}
+
+.paginationBar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-top: 1rem;
+  padding: 0.5rem 0;
+  font-size: 0.875rem;
+  color: #94a3b8;
+}
+
+.paginationSummary {
+  font-size: 0.8125rem;
+  color: #9ca3af;
+}
+
+.pagination {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  font-size: 0.75rem;
+  color: #9ca3af;
+}
+
+.paginationButton {
+  min-width: 2rem;
+  padding: 0.35rem 0.6rem;
+  border-radius: 0.375rem;
+  border: 1px solid #1f2937;
+  background-color: #0b1120;
+  color: #e5e7eb;
+  font-size: 0.75rem;
+  cursor: pointer;
+
+  &:disabled {
+    background-color: #020617;
+    cursor: default;
+  }
+}
+
+.paginationButtonActive {
+  background-color: rgba(59, 130, 246, 0.25);
+  border-color: rgba(59, 130, 246, 0.5);
+  color: #93c5fd;
+}
+
+.paginationEllipsis {
+  padding: 0 0.25rem;
+  color: #6b7280;
+  user-select: none;
+}

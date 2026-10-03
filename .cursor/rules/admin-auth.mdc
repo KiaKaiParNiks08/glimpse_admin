@@ -1,0 +1,41 @@
+---
+description: Admin panel login/session rules that prevent the /login ⇄ /dashboard redirect loop
+globs: src/app/login/**,src/app/dashboard/**,src/app/actions/profile.ts,src/app/api/admin/**,src/lib/admin-*.ts,src/lib/jwt.ts,src/lib/api/**,src/middleware.ts
+alwaysApply: false
+---
+
+# Admin auth: never create a redirect loop
+
+Login stores the same admin JWT in two places:
+- the httpOnly cookie `glimps_admin_session` (shared by all tabs, read on the server);
+- `sessionStorage['glimps_admin_token']` (per tab, sent as `Authorization: Bearer` to `/api/*`).
+
+A loop happens when one page redirects on one copy and the other page on the other copy
+(2026-10-03: a new tab had the cookie but no token, and `/login` and `/dashboard` bounced forever).
+
+## Rules
+
+1. **The cookie decides.** Only `src/app/login/layout.tsx` (server) may redirect `/login` → `/dashboard`.
+   Never redirect away from `/login` based on sessionStorage.
+2. **The dashboard layout syncs the token.** After `getMyProfileAction()` passes, it always copies
+   the cookie's JWT into sessionStorage (`getAdminTokenFromSessionAction` + `setAdminJwtInSessionStorage`)
+   before rendering pages. Pages may rely on the token being present.
+3. **Leaving for /login always clears both copies.** Use `signOutToLogin(router)` from
+   `src/lib/admin-sign-out.ts` — never a bare `router.replace('/login')` or `window.location.href = '/login'`.
+
+```tsx
+// ❌ BAD — the cookie survives, /login sends the user straight back
+.catch(() => router.replace('/login'));
+
+// ✅ GOOD
+.catch(() => void signOutToLogin(router));
+```
+
+4. Log out must not depend on a Bearer-protected API to clear the cookie (`signOutToLogin` uses a server action).
+5. The cookie's `maxAge` must match the JWT TTL (`getAdminJwtTtlSeconds()`), so both expire together.
+6. Any new protected admin page goes under `src/app/dashboard/` (it inherits the layout's check and token sync).
+
+## Before deploying
+
+`ADMIN_JWT_SECRET` set (long, random, same on every instance); the proxy forwards `X-Forwarded-Proto`.
+After deploying: log in, open a new tab, log out, log in, delete the cookie and reload — never a loop.

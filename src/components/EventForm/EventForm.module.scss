@@ -1,0 +1,252 @@
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.section {
+  margin-top: 0.5rem;
+}
+
+.sectionTitle {
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: #e2e8f0;
+  margin-bottom: 0.5rem;
+}
+
+.fieldRow {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.field {
+  flex: 1;
+  min-width: 120px;
+}
+
+.label {
+  display: block;
+  margin-bottom: 0.15rem;
+  font-size: 0.8rem;
+  color: #cbd5e1;
+}
+
+.required {
+  color: #f97373;
+}
+
+.input,
+.select,
+.textarea {
+  width: 100%;
+  padding: 0.45rem 0.65rem;
+  border-radius: 0.5rem;
+  border: 1px solid #334155;
+  background-color: #0f172a;
+  color: #e2e8f0;
+  font-size: 0.875rem;
+  outline: none;
+}
+
+.textarea {
+  min-height: 4rem;
+  resize: vertical;
+}
+
+.select {
+  padding-right: 1.8rem;
+  appearance: none;
+}
+
+.error {
+  color: #fca5a5;
+  font-size: 0.875rem;
+  margin-bottom: 0.25rem;
+}
+
+.actions {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 1rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid #334155;
+}
+
+.btnPrimary {
+  padding: 0.5rem 1rem;
+  border-radius: 0.5rem;
+  border: none;
+  background: linear-gradient(to right, #38bdf8, #6366f1);
+  color: #0f172a;
+  font-weight: 600;
+  font-size: 0.875rem;
+  cursor: pointer;
+
+  &:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+  }
+}
+
+.btnSecondary {
+  padding: 0.5rem 1rem;
+  border-radius: 0.5rem;
+  border: 1px solid #334155;
+  background: transparent;
+  color: #e2e8f0;
+  font-size: 0.875rem;
+  cursor: pointer;
+}
+
+.themeRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: flex-end;
+}
+
+.themeSelectWrap {
+  flex: 1 1 200px;
+}
+
+.themeAddBtn {
+  padding: 0.45rem 0.75rem;
+  border-radius: 0.5rem;
+  border: 1px solid #475569;
+  background: #1e293b;
+  color: #e2e8f0;
+  font-size: 0.8rem;
+  cursor: pointer;
+  white-space: nowrap;
+
+  &:hover {
+    border-color: #64748b;
+  }
+}
+
+.themePreview {
+  display: flex;
+  gap: 0.25rem;
+  margin-top: 0.35rem;
+}
+
+.themeSwatch {
+  width: 1.5rem;
+  height: 1.5rem;
+  border-radius: 0.25rem;
+  border: 1px solid #334155;
+}
+
+.addModalOverlay {
+  position: fixed;
+  inset: 0;
+  /* Above dashboard modals; in-DOM picker avoids native color dialog stacking bugs */
+  z-index: 10000;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 1rem;
+  background: rgba(15, 23, 42, 0.75);
+  overflow-y: auto;
+}
+
+.addModalInner {
+  position: relative;
+  z-index: 1;
+  isolation: isolate;
+  width: 100%;
+  max-width: 26rem;
+  max-height: calc(100vh - 2rem);
+  padding: 1.25rem;
+  border-radius: 0.75rem;
+  border: 1px solid #334155;
+  background: #0f172a;
+  overflow-y: auto;
+  margin: auto 0;
+}
+
+.addModalTitle {
+  margin: 0 0 0.25rem;
+  font-size: 1rem;
+  font-weight: 600;
+  color: #e2e8f0;
+}
+
+.addModalHint {
+  margin: 0 0 0.75rem;
+  font-size: 0.8rem;
+  color: #94a3b8;
+}
+
+.colorRow {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+  margin-top: 0.75rem;
+
+  @media (max-width: 480px) {
+    grid-template-columns: 1fr;
+  }
+}
+
+.colorBlock {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  min-width: 0;
+}
+
+.colorBlockLabel {
+  font-size: 0.8rem;
+  color: #cbd5e1;
+  font-weight: 500;
+}
+
+.hexPickerWrap {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+/* react-colorful root */
+.hexColorPicker {
+  width: 100% !important;
+  height: auto !important;
+  aspect-ratio: 1;
+  max-height: 160px;
+  border-radius: 0.5rem;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08);
+}
+
+.hexCodeLabel {
+  font-size: 0.72rem;
+  color: #94a3b8;
+  margin: 0;
+}
+
+.hexCodeInput {
+  width: 100%;
+  box-sizing: border-box;
+  font-family: ui-monospace, 'Cascadia Code', 'Consolas', monospace;
+  font-size: 0.8rem;
+  letter-spacing: 0.02em;
+  padding: 0.4rem 0.55rem;
+  border-radius: 0.35rem;
+  border: 1px solid #334155;
+  background: #020617;
+  color: #e2e8f0;
+  outline: none;
+
+  &:focus {
+    border-color: #64748b;
+  }
+}
+
+.addModalActions {
+  display: flex;
+  gap: 0.5rem;
+  justify-content: flex-end;
+  margin-top: 1rem;
+}
