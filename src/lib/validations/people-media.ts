@@ -22,4 +22,6 @@ export const peopleMediaRetrySchema = z
     message: 'Send media_asset_id or user_id',
   });
 
-export const myMediaQuerySchema = paginationSchema;
+export const myMediaQuerySchema = paginationSchema.extend({
+  user_id: uuidSchema,
+});

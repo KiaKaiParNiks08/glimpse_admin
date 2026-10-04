@@ -474,6 +474,17 @@ No local test rows were inserted. `npm run prisma:deploy` was tried on 2026-10-0
 
 ---
 
+## 2026-10-04 — My recognized media requires user_id
+
+`GET /api/events/:eventId/my-media` now requires query `user_id`, same as favorites. It must match the app-user token, and only that user's face matches are returned. Session gallery stays on `GET /api/events/day-media`.
+
+**Modified files**
+- `src/lib/validations/people-media.ts` — required `user_id`
+- `src/app/api/events/[event_id]/my-media/route.ts` — uses that user id
+- `README.md` — query documented
+
+---
+
 ## 2026-10-04 — Event planner and photographer
 
 A wizard step after Gallery watermark saves one event planner and one photographer. Mobile reads them from `GET /api/events/team?event_id=`.

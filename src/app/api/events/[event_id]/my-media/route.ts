@@ -8,7 +8,10 @@ import { listMyMedia } from '@/server/people-media/queries';
 
 const paramsSchema = z.object({ event_id: uuidSchema });
 
-/** GET /api/events/:eventId/my-media — photographer and user-post media where this user's face matched. */
+/**
+ * GET /api/events/:eventId/my-media?user_id=&page=&limit=
+ * Media where this user's face matched. user_id must be the signed-in app user.
+ */
 export async function GET(request: Request, context: { params: Promise<{ event_id: string }> }) {
   const user = getUserFromAuthorizationHeader(request);
   if (!user) return forbidden('Not authenticated');
@@ -17,10 +20,11 @@ export async function GET(request: Request, context: { params: Promise<{ event_i
     if (pathError) return pathError;
     const [query, queryError] = parseQuery(new URL(request.url).searchParams, myMediaQuerySchema);
     if (queryError) return queryError;
+    if (query.user_id !== user.id) return forbidden('Forbidden');
 
     const limit = Math.min(query.limit, 50);
     const result = await listMyMedia({
-      userId: user.id,
+      userId: query.user_id,
       eventId: params.event_id,
       page: query.page,
       limit,

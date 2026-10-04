@@ -91,7 +91,7 @@ Photographer files are queued by the existing gallery save: the panel upload and
 | POST | `/api/media/:id/match` | Event admin | Queue the asset again. Returns 202. Does not detect faces in the request. |
 | GET | `/api/media/:id/matches` | Event admin | Matched users and similarity scores. |
 | GET | `/api/media/:id/access` | Uploader, matched guest, or event admin | Opaque `media_url` only. |
-| GET | `/api/events/:eventId/my-media?page=&limit=` | App user who is a guest | Photographer and user-post media where this user's face matched. |
+| GET | `/api/events/:eventId/my-media?user_id=&page=&limit=` | App user who is a guest | Photographer and user-post media where `user_id` matched. `user_id` must be the signed-in user. |
 | GET | `/api/admin/events/:eventId/people-media?page=&status=` | Event admin | Status, face count, match count, errors, guest face-reference jobs. |
 | POST | `/api/admin/events/:eventId/people-media` | Event admin | Body `{ "media_asset_id" }` or `{ "user_id" }` to requeue a failed job. |
 
