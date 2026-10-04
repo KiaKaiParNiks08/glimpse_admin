@@ -14,11 +14,13 @@ import {
   happeningPhotoItemSchema,
   happeningPhotoPathSchema,
   eventWatermarkSchema,
+  eventTeamSchema,
   currentHappeningSettingsSchema,
   postEventReportSettingsSchema,
 } from '@/lib/validations/events';
 import type {
   EventWatermarkInput,
+  EventTeamInput,
   CurrentHappeningSettingsInput,
   PostEventReportSettingsInput,
   ListEventsQuery,
@@ -59,6 +61,7 @@ import {
   setPostEventReportSettings,
   getCorporateLinkedInError,
 } from '@/server/events';
+import { getEventTeam, setEventTeam, type EventTeamContact } from '@/server/event-team';
 import { getEventDaysByEventId } from '@/server/event-days';
 import {
   getEventHighlightsByEventId,
@@ -529,6 +532,68 @@ export async function setEventWatermarkAction(
   } catch (e) {
     console.error(e);
     return { ok: false, error: 'Unable to save watermark' };
+  }
+}
+
+function toStoredContact(value: {
+  name: string;
+  phone?: string | null;
+  email?: string | null;
+  image_url?: string | null;
+}): EventTeamContact | null {
+  const name = value.name.trim();
+  const phone = value.phone?.trim() || null;
+  const email = value.email?.trim() || null;
+  const image_url = value.image_url?.trim() || null;
+  if (!name && !phone && !email && !image_url) return null;
+  return { name, phone, email, image_url };
+}
+
+export type EventTeamActionResult =
+  | { ok: true; data: Awaited<ReturnType<typeof getEventTeam>> }
+  | { ok: false; error: string };
+
+export async function getEventTeamAction(eventId: string): Promise<EventTeamActionResult> {
+  if (!eventId) return { ok: false, error: 'Event ID required' };
+  const sessionRes = await requireAdminSession();
+  if (!sessionRes.ok) return { ok: false, error: sessionRes.error };
+  const allowed = await canAccessEventAsViewer(eventId, sessionRes.session);
+  if (!allowed) return { ok: false, error: 'Forbidden' };
+  try {
+    const data = await getEventTeam(eventId);
+    if (!data) return { ok: false, error: 'Event not found' };
+    return { ok: true, data };
+  } catch (e) {
+    console.error(e);
+    return { ok: false, error: 'Unable to load planner and photographer' };
+  }
+}
+
+export async function setEventTeamAction(
+  eventId: string,
+  body: EventTeamInput
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  if (!eventId) return { ok: false, error: 'Event ID required' };
+  const sessionRes = await requireAdminSession();
+  if (!sessionRes.ok) return { ok: false, error: sessionRes.error };
+  const allowed = await canAccessEventAsViewer(eventId, sessionRes.session);
+  if (!allowed) return { ok: false, error: 'Forbidden' };
+  const parsed = eventTeamSchema.safeParse(body);
+  if (!parsed.success) {
+    const issue = parsed.error.issues[0];
+    const who = issue?.path[0] === 'photographer' ? 'Photographer' : 'Event planner';
+    return { ok: false, error: `${who}: ${issue?.message ?? 'Validation failed'}` };
+  }
+  try {
+    const saved = await setEventTeam(eventId, {
+      planner: toStoredContact(parsed.data.planner),
+      photographer: toStoredContact(parsed.data.photographer),
+    });
+    if (!saved) return { ok: false, error: 'Event not found' };
+    return { ok: true };
+  } catch (e) {
+    console.error(e);
+    return { ok: false, error: 'Unable to save planner and photographer' };
   }
 }
 

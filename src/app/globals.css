@@ -30,3 +30,8 @@ h1 {
 p {
   color: #555;
 }
+
+a[aria-busy='true'],
+button[aria-busy='true'] {
+  cursor: progress;
+}

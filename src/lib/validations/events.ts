@@ -240,6 +240,36 @@ export const listEventDayMediaQuerySchema = z
     message: 'event_session_id or event_day_id is required',
   });
 
+const eventTeamContactSchema = z
+  .object({
+    name: z.string().trim().max(200).optional().default(''),
+    phone: z.string().trim().max(30).optional().nullable(),
+    email: z.string().trim().max(150).optional().nullable(),
+    image_url: z.string().trim().max(2000).optional().nullable(),
+  })
+  .superRefine((value, ctx) => {
+    const phone = value.phone?.trim() || '';
+    const email = value.email?.trim() || '';
+    const image = value.image_url?.trim() || '';
+    const name = value.name.trim();
+    if (!name && !phone && !email && !image) return;
+    if (!name) {
+      ctx.addIssue({ code: 'custom', message: 'Name is required', path: ['name'] });
+    }
+    if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      ctx.addIssue({ code: 'custom', message: 'Enter a valid email', path: ['email'] });
+    }
+  });
+
+export const eventTeamSchema = z.object({
+  planner: eventTeamContactSchema,
+  photographer: eventTeamContactSchema,
+});
+
+export const eventTeamQuerySchema = z.object({
+  event_id: uuidSchema,
+});
+
 /** Gallery watermark settings (wizard step 3). No url = no watermark. */
 export const eventWatermarkSchema = z.object({
   watermark_url: storedMediaUrlSchema,
@@ -330,6 +360,7 @@ export type SetCurrentHappeningInput = z.infer<typeof setCurrentHappeningSchema>
 export type UpsertCurrentHappeningItemInput = z.infer<typeof upsertCurrentHappeningItemSchema>;
 export type HappeningPhotoItemInput = z.infer<typeof happeningPhotoItemSchema>;
 export type SetEventAdminsInput = z.infer<typeof setEventAdminsSchema>;
+export type EventTeamInput = z.infer<typeof eventTeamSchema>;
 export type EventWatermarkInput = z.infer<typeof eventWatermarkSchema>;
 export type CurrentHappeningSettingsInput = z.infer<typeof currentHappeningSettingsSchema>;
 export type PostEventReportSettingsInput = z.infer<typeof postEventReportSettingsSchema>;

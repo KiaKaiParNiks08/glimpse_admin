@@ -2,6 +2,8 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
+import { useRouteProgress } from '@/components/navigation/NavigationProvider';
+import { ContentSkeleton } from '@/components/navigation/ContentSkeleton';
 import styles from '../events.module.scss';
 import { CreateEventWizard } from '../CreateEventWizard';
 import { adminBearerAuthHeader } from '@/lib/admin-jwt-client';
@@ -18,6 +20,7 @@ type Mode = 'create' | 'edit';
 
 export default function AddEditEventPage() {
   const router = useRouter();
+  const { pendingHref, navigate } = useRouteProgress();
   const searchParams = useSearchParams();
   const modeParam = searchParams.get('mode');
   const eventIdParam = searchParams.get('eventId');
@@ -100,7 +103,7 @@ export default function AddEditEventPage() {
   }, [mode, eventId, router]);
 
   if (loadingUser || loadingOptions) {
-    return <p className={styles.wizardLoading}>Loading…</p>;
+    return <ContentSkeleton variant="form" />;
   }
 
   if (!currentUser) {
@@ -118,7 +121,12 @@ export default function AddEditEventPage() {
           <h1>{pageTitle}</h1>
           <p>{mode === 'edit' ? 'Update event details and related data.' : 'Create a new event and configure all steps.'}</p>
         </div>
-        <button type="button" onClick={() => router.push('/dashboard/events')} className={styles.btnSecondary}>
+        <button
+          type="button"
+          onClick={() => navigate('/dashboard/events')}
+          className={styles.btnSecondary}
+          aria-busy={pendingHref === '/dashboard/events' || undefined}
+        >
           Back to events
         </button>
       </div>
@@ -132,8 +140,8 @@ export default function AddEditEventPage() {
           themes={themes}
           createdBy={currentUser.id}
           initialEventId={mode === 'edit' ? eventId : null}
-          onClose={() => router.push('/dashboard/events')}
-          onSuccess={() => router.push('/dashboard/events')}
+          onClose={() => navigate('/dashboard/events')}
+          onSuccess={() => navigate('/dashboard/events')}
         />
       )}
     </div>

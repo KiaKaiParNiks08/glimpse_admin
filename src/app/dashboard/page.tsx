@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { adminBearerAuthHeader } from '@/lib/admin-jwt-client';
 import { signOutToLogin } from '@/lib/admin-sign-out';
 import { DashboardCharts } from './DashboardCharts';
+import { ContentSkeleton } from '@/components/navigation/ContentSkeleton';
 
 export default function DashboardPage() {
   const router = useRouter();
@@ -32,22 +33,21 @@ export default function DashboardPage() {
       .catch(() => void signOutToLogin(router));
   }, [router]);
 
-  if (user === null) {
-    return (
-      <p style={{ color: '#94a3b8' }}>Loading…</p>
-    );
-  }
-
   return (
     <div>
-      <h1 style={{ fontSize: '1.5rem', color: '#f8fafc', marginBottom: '0.5rem' }}>
-        Dashboard
-      </h1>
-      <p style={{ color: '#94a3b8', marginBottom: '1rem' }}>
-        Welcome back. You’re signed in as <strong style={{ color: '#e2e8f0' }}>{user.full_name}</strong>.
-      </p>
-
-      <DashboardCharts />
+      {user === null ? (
+        <ContentSkeleton variant="cards" />
+      ) : (
+        <>
+          <h1 style={{ fontSize: '1.5rem', color: '#0f172a', marginBottom: '0.5rem' }}>
+            Dashboard
+          </h1>
+          <p style={{ color: '#64748b', marginBottom: '1rem' }}>
+            Welcome back. You’re signed in as <strong style={{ color: '#0f172a' }}>{user.full_name}</strong>.
+          </p>
+          <DashboardCharts />
+        </>
+      )}
     </div>
   );
 }

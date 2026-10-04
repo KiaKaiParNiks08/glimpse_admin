@@ -262,4 +262,6 @@
   flex: 1;
   padding: 1.5rem;
   overflow: auto;
+  background: #ffffff;
+  color: #0f172a;
 }

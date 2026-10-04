@@ -14,23 +14,21 @@
 
 .title {
   margin: 0;
-  color: #f8fafc;
+  color: #0f172a;
   font-size: 1.6rem;
 }
 
 .subtitle {
   margin: 0.25rem 0 0;
-  color: #94a3b8;
+  color: #64748b;
   font-size: 0.9rem;
 }
 
 .card {
-  border: 1px solid #334155;
+  border: 1px solid #e2e8f0;
   border-radius: 0.85rem;
   padding: 1rem;
-  background:
-    radial-gradient(circle at top right, rgba(59, 130, 246, 0.16), transparent 45%),
-    rgba(15, 23, 42, 0.85);
+  background: #ffffff;
 }
 
 .topSection {
@@ -38,7 +36,7 @@
   align-items: center;
   gap: 1rem;
   padding-bottom: 1rem;
-  border-bottom: 1px solid #334155;
+  border-bottom: 1px solid #e2e8f0;
   margin-bottom: 1rem;
 }
 
@@ -47,7 +45,7 @@
   height: 84px;
   border-radius: 999px;
   overflow: hidden;
-  border: 2px solid #334155;
+  border: 2px solid #e2e8f0;
   flex-shrink: 0;
 }
 
@@ -64,7 +62,7 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  color: #e2e8f0;
+  color: #0f172a;
   background: linear-gradient(135deg, #2563eb, #4f46e5);
   font-weight: 700;
   font-size: 1.1rem;
@@ -72,13 +70,13 @@
 
 .topMeta h2 {
   margin: 0;
-  color: #f8fafc;
+  color: #0f172a;
   font-size: 1.1rem;
 }
 
 .topMeta p {
   margin: 0.2rem 0 0;
-  color: #94a3b8;
+  color: #64748b;
 }
 
 .roleBadge {
@@ -87,8 +85,8 @@
   padding: 0.2rem 0.55rem;
   font-size: 0.75rem;
   border-radius: 999px;
-  background: rgba(56, 189, 248, 0.2);
-  color: #7dd3fc;
+  background: rgba(15, 23, 42, 0.08);
+  color: #0f172a;
   text-transform: capitalize;
 }
 
@@ -105,16 +103,16 @@
 }
 
 .field label {
-  color: #cbd5e1;
+  color: #334155;
   font-size: 0.82rem;
 }
 
 .input {
   width: 100%;
-  border: 1px solid #334155;
+  border: 1px solid #e2e8f0;
   border-radius: 0.55rem;
-  background: #0f172a;
-  color: #e2e8f0;
+  background: #ffffff;
+  color: #0f172a;
   font-size: 0.9rem;
   padding: 0.56rem 0.7rem;
 }
@@ -122,8 +120,8 @@
 .value {
   border: 1px solid transparent;
   border-radius: 0.55rem;
-  background: rgba(15, 23, 42, 0.35);
-  color: #e2e8f0;
+  background: #f8fafc;
+  color: #0f172a;
   font-size: 0.9rem;
   padding: 0.56rem 0.7rem;
   min-height: 2.3rem;
@@ -134,7 +132,7 @@
 .imageSection {
   margin-top: 1rem;
   padding-top: 1rem;
-  border-top: 1px solid #334155;
+  border-top: 1px solid #e2e8f0;
 }
 
 .actions {
@@ -148,12 +146,12 @@
 .passwordSection {
   margin-top: 1rem;
   padding-top: 1rem;
-  border-top: 1px solid #334155;
+  border-top: 1px solid #e2e8f0;
 }
 
 .passwordSection h3 {
   margin: 0 0 0.75rem;
-  color: #e2e8f0;
+  color: #0f172a;
   font-size: 1rem;
 }
 
@@ -167,29 +165,29 @@
 
 .primaryBtn {
   border: none;
-  color: #0f172a;
+  color: #ffffff;
   font-weight: 600;
-  background: linear-gradient(to right, #38bdf8, #6366f1);
+  background: #0f172a;
 }
 
 .secondaryBtn {
-  border: 1px solid #334155;
-  color: #e2e8f0;
+  border: 1px solid #e2e8f0;
+  color: #0f172a;
   background: transparent;
 }
 
 .errorText {
-  color: #fca5a5;
+  color: #b91c1c;
   margin: 0 0 0.75rem;
 }
 
 .successText {
-  color: #86efac;
+  color: #15803d;
   margin: 0 0 0.75rem;
 }
 
 .loading {
-  color: #94a3b8;
+  color: #64748b;
 }
 
 @media (max-width: 768px) {

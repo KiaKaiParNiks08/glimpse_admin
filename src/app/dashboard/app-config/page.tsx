@@ -9,6 +9,7 @@ import { canAccessModule } from '@/lib/rbac';
 import { listAppConfigurationsAction, type AppConfigurationRow } from '@/app/actions/app-configurations';
 import { AppConfigFormModal } from './AppConfigFormModal';
 import styles from './app-config.module.scss';
+import { ContentSkeleton } from '@/components/navigation/ContentSkeleton';
 
 const PAGE_LIMIT = 10;
 
@@ -107,7 +108,7 @@ export default function AppConfigPage() {
   if (!accessChecked) {
     return (
       <div className={styles.page}>
-        <p style={{ color: '#94a3b8' }}>Loading…</p>
+        <ContentSkeleton />
       </div>
     );
   }

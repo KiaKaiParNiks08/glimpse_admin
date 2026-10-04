@@ -10,7 +10,7 @@
     display: block;
     font-size: 0.8rem;
     font-weight: 500;
-    color: #94a3b8;
+    color: #64748b;
     margin-bottom: 0.25rem;
   }
 
@@ -19,9 +19,9 @@
     width: 100%;
     padding: 0.5rem 0.75rem;
     border-radius: 0.5rem;
-    border: 1px solid #1f2937;
-    background-color: #020617;
-    color: #e5e7eb;
+    border: 1px solid #e2e8f0;
+    background-color: #ffffff;
+    color: #0f172a;
     font-size: 0.875rem;
   }
 
@@ -32,7 +32,7 @@
 }
 
 .errorText {
-  color: #fca5a5;
+  color: #b91c1c;
   font-size: 0.875rem;
   margin-bottom: 0.75rem;
 }
@@ -48,8 +48,8 @@
   padding: 0.5rem 1rem;
   border-radius: 0.5rem;
   border: none;
-  background: linear-gradient(to right, #38bdf8, #6366f1);
-  color: #0f172a;
+  background: #0f172a;
+  color: #ffffff;
   font-weight: 600;
   font-size: 0.875rem;
   cursor: pointer;
@@ -63,9 +63,9 @@
 .btnSecondary {
   padding: 0.5rem 1rem;
   border-radius: 0.5rem;
-  border: 1px solid #334155;
+  border: 1px solid #e2e8f0;
   background: transparent;
-  color: #94a3b8;
+  color: #64748b;
   font-size: 0.875rem;
   cursor: pointer;
 }

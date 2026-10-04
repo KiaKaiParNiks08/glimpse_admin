@@ -96,6 +96,7 @@ model event_day_media {
   event_sessions   event_sessions?  @relation(fields: [event_session_id], references: [id], onUpdate: NoAction, map: "fk_day_media_session")
   users            users?           @relation(fields: [uploaded_by], references: [id], onUpdate: NoAction, map: "fk_day_media_user")
   user_favorites   user_favorites[]
+  media_assets     media_assets?
 
   @@index([event_day_id], map: "idx_event_day_media_event_day_id")
   @@index([event_session_id], map: "idx_event_day_media_event_session_id")
@@ -228,6 +229,23 @@ model event_organizers {
   @@index([event_id], map: "idx_event_organizers_event_id")
 }
 
+/// One event planner and one photographer for an event. role is planner or photographer.
+model event_team {
+  id         String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  event_id   String    @db.Uuid
+  role       String    @db.VarChar(20)
+  name       String    @db.VarChar(200)
+  phone      String?   @db.VarChar(30)
+  email      String?   @db.VarChar(150)
+  image_url  String?
+  created_at DateTime? @default(now()) @db.Timestamptz(6)
+  updated_at DateTime? @default(now()) @db.Timestamptz(6)
+  events     events    @relation(fields: [event_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_event_team_event")
+
+  @@unique([event_id, role], map: "event_team_event_role_key")
+  @@index([event_id], map: "idx_event_team_event_id")
+}
+
 model event_session_offerings {
   id                    String                @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   event_session_id      String                @db.Uuid
@@ -340,12 +358,14 @@ model events {
   event_highlights                     event_highlights[]
   event_offerings                      event_offerings[]
   event_organizers                     event_organizers[]
+  event_team                           event_team[]
   app_themes                           app_themes?           @relation(fields: [app_theme_id], references: [id], onUpdate: NoAction, map: "fk_event_app_theme")
   event_categories                     event_categories      @relation(fields: [category_id], references: [id], onUpdate: NoAction, map: "fk_event_category")
   users                                users                 @relation(fields: [created_by], references: [id], onUpdate: NoAction, map: "fk_event_created_by")
   venues                               venues?               @relation(fields: [main_venue_id], references: [id], onUpdate: NoAction, map: "fk_event_main_venue")
   events_admin                         events_admin[]
   user_favorites                       user_favorites[]
+  media_assets                         media_assets[]
 
   @@index([category_id], map: "idx_events_category_id")
   @@index([created_by], map: "idx_events_created_by")
@@ -442,7 +462,8 @@ model post_media {
   media_order   Int?       @default(1)
   metadata      Json?
   created_at    DateTime?  @default(now()) @db.Timestamptz(6)
-  posts         posts      @relation(fields: [post_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  posts         posts         @relation(fields: [post_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  media_assets  media_assets?
 
   @@index([post_id], map: "idx_post_media_post_id")
 }
@@ -518,6 +539,9 @@ model users {
   user_devices                                         user_devices[]
   user_otps                                            user_otps[]
   user_favorites                                       user_favorites[]
+  user_face_references                                 user_face_references?
+  media_matches                                        media_matches[]
+  media_assets                                         media_assets[]
   roles                                                roles                   @relation(fields: [role_id], references: [id], onUpdate: NoAction)
 
   @@index([role_id], map: "idx_users_role_id")
@@ -677,6 +701,92 @@ enum comment_status {
 enum media_type {
   image
   video
+}
+
+/// Photographer gallery row or user post media, linked to one event for face search.
+model media_assets {
+  id                 String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  event_id           String    @db.Uuid
+  source             String    @db.VarChar(20)
+  media_type         media_type
+  storage_key        String
+  media_url          String
+  content_sha256     String    @db.VarChar(64)
+  idempotency_key    String?   @db.VarChar(120)
+  event_day_media_id String?   @unique @db.Uuid
+  post_media_id      String?   @unique @db.Uuid
+  uploaded_by        String?   @db.Uuid
+  processing_status  String    @default("pending") @db.VarChar(20)
+  face_count         Int       @default(0)
+  attempt_count      Int       @default(0)
+  last_error         String?
+  processed_at       DateTime? @db.Timestamptz(6)
+  next_retry_at      DateTime? @db.Timestamptz(6)
+  created_at         DateTime? @default(now()) @db.Timestamptz(6)
+  updated_at         DateTime? @default(now()) @db.Timestamptz(6)
+  events             events    @relation(fields: [event_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  event_day_media    event_day_media? @relation(fields: [event_day_media_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  post_media         post_media?      @relation(fields: [post_media_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  users              users?           @relation(fields: [uploaded_by], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  media_faces        media_faces[]
+  media_matches      media_matches[]
+
+  @@unique([event_id, content_sha256], map: "media_assets_event_hash_key")
+  @@unique([event_id, idempotency_key], map: "media_assets_event_idempotency_key")
+  @@index([event_id, processing_status], map: "idx_media_assets_event_status")
+  @@index([processing_status, next_retry_at], map: "idx_media_assets_queue")
+}
+
+/// One detected face. The embedding column is written with raw SQL and is never selected by APIs.
+model media_faces {
+  id             String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  media_asset_id String       @db.Uuid
+  face_index     Int
+  confidence     Float
+  box            Json
+  embedding      Unsupported("vector(128)")
+  created_at     DateTime?    @default(now()) @db.Timestamptz(6)
+  media_assets   media_assets @relation(fields: [media_asset_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  media_matches  media_matches[]
+
+  @@unique([media_asset_id, face_index], map: "media_faces_asset_index_key")
+  @@index([media_asset_id], map: "idx_media_faces_asset")
+}
+
+/// One consented face reference per user. Embedding is never returned by APIs.
+model user_face_references {
+  id              String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  user_id         String    @unique @db.Uuid
+  consent         Boolean   @default(false)
+  consent_version String    @default("v1") @db.VarChar(20)
+  consented_at    DateTime? @db.Timestamptz(6)
+  revoked_at      DateTime? @db.Timestamptz(6)
+  storage_key       String?
+  content_sha256    String?   @db.VarChar(64)
+  processing_status String    @default("pending") @db.VarChar(20)
+  attempt_count     Int       @default(0)
+  last_error        String?
+  next_retry_at     DateTime? @db.Timestamptz(6)
+  embedding         Unsupported("vector(128)")?
+  created_at      DateTime? @default(now()) @db.Timestamptz(6)
+  updated_at      DateTime? @default(now()) @db.Timestamptz(6)
+  users           users     @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+}
+
+model media_matches {
+  id             String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  media_asset_id String       @db.Uuid
+  media_face_id  String       @db.Uuid
+  user_id        String       @db.Uuid
+  similarity     Float
+  created_at     DateTime?    @default(now()) @db.Timestamptz(6)
+  media_assets   media_assets @relation(fields: [media_asset_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  media_faces    media_faces  @relation(fields: [media_face_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  users          users        @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@unique([media_face_id, user_id], map: "media_matches_face_user_key")
+  @@index([user_id, media_asset_id], map: "idx_media_matches_user_asset")
+  @@index([media_asset_id], map: "idx_media_matches_asset")
 }
 
 enum notification_type {

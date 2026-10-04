@@ -5,7 +5,7 @@ import styles from './events.module.scss';
 import { PaginatedTable } from '@/components/PaginatedTable';
 import { CurrentHappeningModal } from './CurrentHappeningModal';
 import { adminBearerAuthHeader } from '@/lib/admin-jwt-client';
-import { useRouter } from 'next/navigation';
+import { useRouteProgress } from '@/components/navigation/NavigationProvider';
 import Link from 'next/link';
 import {
   getEventsAction,
@@ -21,7 +21,7 @@ import {
 const PAGE_LIMIT = 10;
 
 export default function DashboardEventsPage() {
-  const router = useRouter();
+  const { pendingHref, navigate } = useRouteProgress();
   const [events, setEvents] = useState<EventListItem[]>([]);
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
@@ -119,11 +119,11 @@ export default function DashboardEventsPage() {
       alert('Event Admin can’t create events. They can only edit assigned events.');
       return;
     }
-    router.push('/dashboard/events/addEditEvent?mode=create');
+    navigate('/dashboard/events/addEditEvent?mode=create');
   }
 
   function openEditForm(event: EventListItem) {
-    router.push(`/dashboard/events/addEditEvent?mode=edit&eventId=${encodeURIComponent(event.id)}`);
+    navigate(`/dashboard/events/addEditEvent?mode=edit&eventId=${encodeURIComponent(event.id)}`);
   }
 
   function openCurrentHappening(event: EventListItem) {
@@ -222,6 +222,7 @@ export default function DashboardEventsPage() {
             onClick={openCreateForm}
             className={styles.newEventButton}
             disabled={!currentUser}
+            aria-busy={pendingHref === '/dashboard/events/addEditEvent?mode=create' || undefined}
           >
             + New event
           </button>
@@ -332,6 +333,11 @@ export default function DashboardEventsPage() {
                   type="button"
                   onClick={() => openEditForm(ev)}
                   className={styles.btnEdit}
+                  aria-busy={
+                    pendingHref ===
+                      `/dashboard/events/addEditEvent?mode=edit&eventId=${encodeURIComponent(ev.id)}` ||
+                    undefined
+                  }
                 >
                   Edit
                 </button>
@@ -348,6 +354,13 @@ export default function DashboardEventsPage() {
                   title="Manage day-wise media"
                 >
                   Media
+                </Link>
+                <Link
+                  href={`/dashboard/events/${ev.id}/people-media`}
+                  className={styles.btnEdit}
+                  title="Face processing status and matches"
+                >
+                  People
                 </Link>
                 {currentUser?.role_name === 'super_admin' && (
                   <button

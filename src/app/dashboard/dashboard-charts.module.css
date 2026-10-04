@@ -10,8 +10,8 @@
 }
 
 .statCard {
-  background: #1e293b;
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
   border-radius: 10px;
   padding: 1rem 1.125rem;
   display: flex;
@@ -22,14 +22,14 @@
 .statValue {
   font-size: 1.5rem;
   font-weight: 700;
-  color: #f8fafc;
+  color: #0f172a;
   line-height: 1.2;
   font-variant-numeric: tabular-nums;
 }
 
 .statLabel {
   font-size: 0.8125rem;
-  color: #94a3b8;
+  color: #64748b;
   font-weight: 500;
 }
 
@@ -40,8 +40,8 @@
 }
 
 .chartCard {
-  background: #1e293b;
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
   border-radius: 12px;
   padding: 1.125rem 1.25rem 1rem;
   min-height: 280px;
@@ -56,7 +56,7 @@
 .chartTitle {
   font-size: 0.9375rem;
   font-weight: 600;
-  color: #e2e8f0;
+  color: #0f172a;
   margin: 0 0 0.75rem;
 }
 
@@ -94,7 +94,7 @@
 
 .filterLabel {
   font-size: 0.8125rem;
-  color: #94a3b8;
+  color: #64748b;
   font-weight: 600;
 }
 
@@ -107,23 +107,23 @@
 .rangeBtn {
   padding: 0.5rem 0.75rem;
   border-radius: 0.5rem;
-  border: 1px solid rgba(148, 163, 184, 0.35);
-  background: rgba(2, 6, 23, 0.6);
-  color: #cbd5e1;
+  border: 1px solid #0f172a;
+  background: #ffffff;
+  color: #0f172a;
   font-size: 0.875rem;
   cursor: pointer;
   transition: background 0.2s, color 0.2s, border-color 0.2s;
 }
 
 .rangeBtn:hover {
-  background: rgba(255, 255, 255, 0.06);
+  background: rgba(15, 23, 42, 0.06);
   border-color: rgba(148, 163, 184, 0.65);
 }
 
 .rangeBtnActive {
-  border-color: rgba(59, 130, 246, 0.85);
-  background: rgba(59, 130, 246, 0.18);
-  color: #e2e8f0;
+  border-color: #0f172a;
+  background: #0f172a;
+  color: #ffffff;
 }
 
 .customRange {
@@ -141,16 +141,16 @@
 
 .dateLabelText {
   font-size: 0.8125rem;
-  color: #94a3b8;
+  color: #64748b;
   font-weight: 600;
 }
 
 .dateInput {
   padding: 0.5rem 0.65rem;
   border-radius: 0.5rem;
-  border: 1px solid #1f2937;
-  background-color: #020617;
-  color: #e5e7eb;
+  border: 1px solid #e2e8f0;
+  background-color: #ffffff;
+  color: #0f172a;
   font-size: 0.875rem;
 }
 
@@ -162,25 +162,68 @@
 .rangeApplied {
   padding: 0.5rem 0.75rem;
   border-radius: 0.5rem;
-  border: 1px solid rgba(148, 163, 184, 0.2);
-  background: rgba(2, 6, 23, 0.6);
-  color: #cbd5e1;
+  border: 1px solid #e2e8f0;
+  background: #ffffff;
+  color: #0f172a;
   font-size: 0.875rem;
 }
 
 .rangeAppliedLabel {
-  color: #94a3b8;
+  color: #64748b;
   font-weight: 600;
 }
 
 .muted {
-  color: #94a3b8;
+  color: #64748b;
   font-size: 0.875rem;
   margin: 0;
 }
 
 .error {
-  color: #fca5a5;
+  color: #b91c1c;
   font-size: 0.875rem;
   margin-top: 1rem;
+}
+
+.skeletonValue,
+.skeletonLabel,
+.skeletonChart {
+  display: block;
+  border-radius: 0.375rem;
+  background: linear-gradient(90deg, #e2e8f0 0%, #f8fafc 50%, #e2e8f0 100%);
+  background-size: 200% 100%;
+  animation: chartSkeleton 1.2s ease-in-out infinite;
+}
+
+.skeletonValue {
+  width: 3rem;
+  height: 1.5rem;
+}
+
+.skeletonLabel {
+  width: 70%;
+  height: 0.75rem;
+}
+
+.skeletonChart {
+  flex: 1;
+  min-height: 220px;
+}
+
+@keyframes chartSkeleton {
+  0% {
+    background-position: 100% 0;
+  }
+  100% {
+    background-position: -100% 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .skeletonValue,
+  .skeletonLabel,
+  .skeletonChart {
+    animation: none;
+    background: #e2e8f0;
+  }
 }

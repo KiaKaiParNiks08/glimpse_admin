@@ -74,11 +74,14 @@ export function PaginatedTable({
           <thead className={styles.headRow}>{header}</thead>
           <tbody>
             {loading && total === 0 ? (
-              <tr>
-                <td colSpan={colSpan} className={styles.emptyCell}>
-                  {loadingMessage}
-                </td>
-              </tr>
+              Array.from({ length: 6 }, (_, index) => (
+                <tr key={index}>
+                  <td colSpan={colSpan} className={styles.cell}>
+                    <span className={styles.skeletonBar} aria-hidden="true" />
+                    {index === 0 && <span className={styles.srOnly}>{loadingMessage}</span>}
+                  </td>
+                </tr>
+              ))
             ) : showEmpty ? (
               <tr>
                 <td colSpan={colSpan} className={styles.emptyCell}>

@@ -13,6 +13,7 @@ import {
   updateUserAction,
 } from '@/app/actions/admins';
 import { canAccessModule } from '@/lib/rbac';
+import { ContentSkeleton } from '@/components/navigation/ContentSkeleton';
 
 export type UserListItem = {
   id: string;
@@ -158,7 +159,7 @@ export default function DashboardUsersPage() {
   }, [accessChecked]);
 
   if (!accessChecked) {
-    return <p style={{ color: '#94a3b8' }}>Loading…</p>;
+    return <ContentSkeleton />;
   }
 
   function openCreateForm() {

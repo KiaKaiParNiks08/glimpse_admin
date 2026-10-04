@@ -13,6 +13,7 @@ import {
 } from '@/app/actions/app-themes';
 import { AppThemeFormModal } from './AppThemeFormModal';
 import styles from './app-themes.module.scss';
+import { ContentSkeleton } from '@/components/navigation/ContentSkeleton';
 
 const PAGE_LIMIT = 10;
 
@@ -145,7 +146,7 @@ export default function AppThemesPage() {
   if (!accessChecked) {
     return (
       <div className={styles.page}>
-        <p className={styles.loadingText}>Loading…</p>
+        <ContentSkeleton />
       </div>
     );
   }

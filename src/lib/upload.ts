@@ -76,7 +76,7 @@ export async function saveUploadedFile(
   kind: MediaKind,
   projectRoot: string,
   options?: { prefix?: string; storage?: 'auto' | 'disk' | 's3' }
-): Promise<{ relativeUrl: string; absolutePath: string }> {
+): Promise<{ relativeUrl: string; absolutePath: string; storageKey: string }> {
   const prefix = options?.prefix ?? 'uploads';
   const storage = options?.storage ?? 'auto';
   const mimeType = (file.type || '').split(';')[0].trim().toLowerCase();
@@ -91,7 +91,7 @@ export async function saveUploadedFile(
     const buffer = Buffer.from(await file.arrayBuffer());
     await putObjectFromBuffer(key, buffer, mimeType);
     const url = getStoredObjectUrl(key);
-    return { relativeUrl: url, absolutePath: '' };
+    return { relativeUrl: url, absolutePath: '', storageKey: key };
   }
 
   const now = new Date();
@@ -111,5 +111,5 @@ export async function saveUploadedFile(
   const buffer = Buffer.from(await file.arrayBuffer());
   await writeFile(filePath, buffer);
 
-  return { relativeUrl, absolutePath: filePath };
+  return { relativeUrl, absolutePath: filePath, storageKey: relativeUrl.replace(/^\//, '') };
 }

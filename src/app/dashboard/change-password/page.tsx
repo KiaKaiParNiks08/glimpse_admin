@@ -1,12 +1,12 @@
 'use client';
 
 import { useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouteProgress } from '@/components/navigation/NavigationProvider';
 import { changeMyPasswordAction } from '@/app/actions/profile';
 import styles from '../profile/profile.module.scss';
 
 export default function ChangePasswordPage() {
-  const router = useRouter();
+  const { pendingHref, navigate } = useRouteProgress();
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
@@ -51,7 +51,12 @@ export default function ChangePasswordPage() {
           <h1 className={styles.title}>Change Password</h1>
           <p className={styles.subtitle}>Set a new password for your account.</p>
         </div>
-        <button type="button" className={styles.secondaryBtn} onClick={() => router.push('/dashboard/profile')}>
+        <button
+          type="button"
+          className={styles.secondaryBtn}
+          onClick={() => navigate('/dashboard/profile')}
+          aria-busy={pendingHref === '/dashboard/profile' || undefined}
+        >
           Back to profile
         </button>
       </div>

@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { EventForm } from '@/components/EventForm';
+import { ContentSkeleton } from '@/components/navigation/ContentSkeleton';
 import { ImageUploadField } from '@/components/VenueForm/ImageUploadField';
 import type {
   CreateEventInput,
@@ -25,6 +26,8 @@ import {
   setEventAdminsAction,
   setEventHighlightsAction,
   setEventWatermarkAction,
+  setEventTeamAction,
+  getEventTeamAction,
   setPostEventReportSettingsAction,
 } from '@/app/actions/events';
 import type { PostEventReportSettings } from '@/components/EventForm/PostEventPdfUploadField';
@@ -51,14 +54,16 @@ import {
 import type { AppThemeOption, EventCategoryOption, VenueOption } from '@/app/actions/events';
 import { ExploreCategoryFormModal } from '@/app/dashboard/explore-categories/ExploreCategoryFormModal';
 import styles from './events.module.scss';
+import { emptyTeamContact, EventTeamFields, type TeamContactForm } from './EventTeamFields';
 
 const STEPS = [
   { id: 1, label: 'Basic details' },
   { id: 2, label: 'Days & sessions' },
   { id: 3, label: 'Gallery watermark' },
-  { id: 4, label: 'Explore mapping' },
-  { id: 5, label: 'Event highlights' },
-  { id: 6, label: 'Event admins' },
+  { id: 4, label: 'Planner & photographer' },
+  { id: 5, label: 'Explore mapping' },
+  { id: 6, label: 'Event highlights' },
+  { id: 7, label: 'Event admins' },
 ];
 
 const WATERMARK_SAMPLE_IMAGE = '/watermark-sample.svg';
@@ -219,6 +224,9 @@ export function CreateEventWizard({
   const [watermarkPosition, setWatermarkPosition] = useState<WatermarkPosition>(DEFAULT_WATERMARK_POSITION);
   const [watermarkOpacity, setWatermarkOpacity] = useState(DEFAULT_WATERMARK_OPACITY);
   const [watermarkSize, setWatermarkSize] = useState(DEFAULT_WATERMARK_SIZE);
+  const [planner, setPlanner] = useState<TeamContactForm>(emptyTeamContact);
+  const [photographer, setPhotographer] = useState<TeamContactForm>(emptyTeamContact);
+  const [teamLoadedFor, setTeamLoadedFor] = useState<string | null>(null);
 
   // Step 4: explore categories with items + selected item ids
   const [exploreCategories, setExploreCategories] = useState<ExploreCategoryWithItems[]>([]);
@@ -425,7 +433,7 @@ export function CreateEventWizard({
   }, [basicPayload, step, days.length, initialEventId]);
 
   useEffect(() => {
-    if (step === 4 && exploreCategories.length === 0) {
+    if (step === 5 && exploreCategories.length === 0) {
       getExploreCategoriesWithItemsAction().then((res) => {
         if (res.ok) setExploreCategories(res.data);
       });
@@ -433,7 +441,29 @@ export function CreateEventWizard({
   }, [step, exploreCategories.length]);
 
   useEffect(() => {
-    if (step === 5 && createdEventId && !highlightsLoaded) {
+    if (step === 4 && createdEventId && teamLoadedFor !== createdEventId) {
+      getEventTeamAction(createdEventId).then((res) => {
+        if (res.ok && res.data) {
+          setPlanner({
+            name: res.data.planner?.name ?? '',
+            phone: res.data.planner?.phone ?? '',
+            email: res.data.planner?.email ?? '',
+            image_url: res.data.planner?.image_url ?? '',
+          });
+          setPhotographer({
+            name: res.data.photographer?.name ?? '',
+            phone: res.data.photographer?.phone ?? '',
+            email: res.data.photographer?.email ?? '',
+            image_url: res.data.photographer?.image_url ?? '',
+          });
+        }
+        setTeamLoadedFor(createdEventId);
+      });
+    }
+  }, [step, createdEventId, teamLoadedFor]);
+
+  useEffect(() => {
+    if (step === 6 && createdEventId && !highlightsLoaded) {
       getEventHighlightsAction(createdEventId).then((res) => {
         if (res.ok) {
           setHighlights(
@@ -699,13 +729,25 @@ export function CreateEventWizard({
       .finally(() => setSubmitting(false));
   }
 
+  function handleTeamNext() {
+    setSubmitting(true);
+    setError(null);
+    setEventTeamAction(createdEventId!, { planner, photographer })
+      .then((result) => {
+        if (!result.ok) throw new Error(result.error);
+        setStep(5);
+      })
+      .catch((err) => setError(err instanceof Error ? err.message : 'Failed to save'))
+      .finally(() => setSubmitting(false));
+  }
+
   function handleExploreNext() {
     setSubmitting(true);
     setError(null);
     setEventExploreItemsAction(createdEventId!, Array.from(selectedItemIds))
       .then((result) => {
         if (!result.ok) throw new Error(result.error);
-        setStep(5);
+        setStep(6);
       })
       .catch((err) => setError(err instanceof Error ? err.message : 'Failed to save'))
       .finally(() => setSubmitting(false));
@@ -731,7 +773,7 @@ export function CreateEventWizard({
     setEventHighlightsAction(createdEventId!, trimmed)
       .then((result) => {
         if (!result.ok) throw new Error(result.error);
-        setStep(6);
+        setStep(7);
       })
       .catch((err) => setError(err instanceof Error ? err.message : 'Failed to save'))
       .finally(() => setSubmitting(false));
@@ -776,7 +818,7 @@ export function CreateEventWizard({
   }
 
   if (initialLoading) {
-    return <p className={styles.wizardLoading}>Loading event…</p>;
+    return <ContentSkeleton variant="form" />;
   }
 
   /** After the event exists (edit load or create step 1 saved), any step can be opened from the header. */
@@ -1414,13 +1456,44 @@ export function CreateEventWizard({
               disabled={submitting}
               className={styles.btnPrimary}
             >
-              {submitting ? 'Saving…' : 'Next: Explore mapping'}
+              {submitting ? 'Saving…' : 'Next: Planner & photographer'}
             </button>
           </div>
         </div>
       )}
 
       {step === 4 && (
+        <div className={styles.wizardStepWatermark}>
+          <p className={styles.wizardStepDesc}>
+            Optional. Add the event planner and the photographer shown in the mobile app. Leave a name blank to skip
+            that person.
+          </p>
+          <div className={styles.teamGrid}>
+            <EventTeamFields
+              title="Event planner"
+              description="The person planning this event."
+              value={planner}
+              onChange={setPlanner}
+            />
+            <EventTeamFields
+              title="Photographer"
+              description="The photographer covering this event."
+              value={photographer}
+              onChange={setPhotographer}
+            />
+          </div>
+          <div className={styles.wizardActions}>
+            <button type="button" onClick={() => setStep(3)} className={styles.btnSecondary}>
+              Back
+            </button>
+            <button type="button" onClick={handleTeamNext} disabled={submitting} className={styles.btnPrimary}>
+              {submitting ? 'Saving…' : 'Next: Explore mapping'}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {step === 5 && (
         <div className={styles.wizardStep3}>
           <p className={styles.wizardStepDesc}>
             Select explore items to link to this event. You can add a new category if needed.
@@ -1457,7 +1530,7 @@ export function CreateEventWizard({
             ))}
           </div>
           <div className={styles.wizardActions}>
-            <button type="button" onClick={() => setStep(3)} className={styles.btnSecondary}>
+            <button type="button" onClick={() => setStep(4)} className={styles.btnSecondary}>
               Back
             </button>
             <button
@@ -1472,7 +1545,7 @@ export function CreateEventWizard({
         </div>
       )}
 
-      {step === 5 && (
+      {step === 6 && (
         <div className={styles.wizardStep4}>
           <p className={styles.wizardStepDesc}>
             Add event highlights. All fields are required: title, description, and image upload. Order is used for display.
@@ -1575,7 +1648,7 @@ export function CreateEventWizard({
             + Add highlight
           </button>
           <div className={styles.wizardActions}>
-            <button type="button" onClick={() => setStep(4)} className={styles.btnSecondary}>
+            <button type="button" onClick={() => setStep(5)} className={styles.btnSecondary}>
               Back
             </button>
             <button
@@ -1590,7 +1663,7 @@ export function CreateEventWizard({
         </div>
       )}
 
-      {step === 6 && (
+      {step === 7 && (
         <div className={styles.wizardStep5}>
           <p className={styles.wizardStepDesc}>
             Assign event admins (role: <strong>event_admin</strong>) who can manage this event.
@@ -1617,7 +1690,7 @@ export function CreateEventWizard({
           )}
 
           <div className={styles.wizardActions}>
-            <button type="button" onClick={() => setStep(5)} className={styles.btnSecondary}>
+            <button type="button" onClick={() => setStep(6)} className={styles.btnSecondary}>
               Back
             </button>
             <button

@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { ImageUploadField } from '@/components/VenueForm/ImageUploadField';
 import { useSearchParams } from 'next/navigation';
 import { getMyProfileAction, updateMyProfileAction } from '@/app/actions/profile';
+import { ContentSkeleton } from '@/components/navigation/ContentSkeleton';
 import styles from './profile.module.scss';
 
 type ProfileForm = {
@@ -126,7 +127,7 @@ export default function ProfilePage() {
     }
   }
 
-  if (loading) return <p className={styles.loading}>Loading profile…</p>;
+  if (loading) return <ContentSkeleton variant="form" />;
 
   return (
     <div className={styles.pageWrap}>

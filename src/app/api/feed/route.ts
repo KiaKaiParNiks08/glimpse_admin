@@ -11,7 +11,9 @@ import {
   validateMediaFile,
 } from '@/lib/upload';
 import { validateDeclaredVideoDuration } from '@/lib/upload-rules';
+import { getUserFromAuthorizationHeader } from '@/lib/jwt';
 import { createPost, listPosts } from '@/server/posts';
+import { registerFeedPostMedia } from '@/server/people-media/register';
 
 /** Increase body size limit for multipart (images/videos). Default is 1MB. */
 export const maxDuration = 60;
@@ -41,7 +43,8 @@ export async function GET(request: Request) {
 /**
  * POST /api/feed – Create a feed post with optional image/video uploads.
  * Content-Type: multipart/form-data
- * Fields: user_id (required), caption (optional), media (multiple). Max 1 video OR max 6 images per post (no mixing). Status is always active.
+ * Fields: user_id (required), caption (optional), event_id (optional), media (multiple). Max 1 video OR max 6 images per post (no mixing). Status is always active.
+ * Face search is queued for the event on the user token, or for event_id when that field is sent. The post is still created if face registration is unavailable.
  * Files are saved under project uploads folder (uploads/YYYY/MM/).
  */
 export async function POST(request: NextRequest) {
@@ -49,11 +52,16 @@ export async function POST(request: NextRequest) {
     const formData = await request.formData();
     const user_id = formData.get('user_id');
     const caption = formData.get('caption');
+    const event_id = formData.get('event_id');
 
     const formFields = {
       user_id: user_id === null || user_id === undefined ? undefined : String(user_id),
       caption:
         caption === null || caption === undefined ? undefined : (caption as string).trim() || undefined,
+      event_id:
+        event_id === null || event_id === undefined || String(event_id).trim() === ''
+          ? undefined
+          : String(event_id).trim(),
     };
 
     const parsed = createFeedPostFormSchema.safeParse(formFields);
@@ -61,7 +69,12 @@ export async function POST(request: NextRequest) {
       return badRequest('Validation failed', parsed.error.flatten().fieldErrors);
     }
 
-    const mediaItems: Array<{ media_type: 'image' | 'video'; media_url: string; media_order: number }> = [];
+    const mediaItems: Array<{
+      media_type: 'image' | 'video';
+      media_url: string;
+      media_order: number;
+      storageKey: string;
+    }> = [];
     let order = 0;
 
     // Collect all media files: "media", "media[]", or "media[0]", "media[1]" (Swagger UI array)
@@ -116,11 +129,12 @@ export async function POST(request: NextRequest) {
     const projectRoot = process.cwd();
     for (const { file, kind } of validated) {
       order += 1;
-      const { relativeUrl } = await saveUploadedFile(file, kind, projectRoot, { prefix: 'feed' });
+      const saved = await saveUploadedFile(file, kind, projectRoot, { prefix: 'feed' });
       mediaItems.push({
         media_type: kind,
-        media_url: relativeUrl,
+        media_url: saved.relativeUrl,
         media_order: order,
+        storageKey: saved.storageKey,
       });
     }
 
@@ -130,8 +144,30 @@ export async function POST(request: NextRequest) {
         caption: parsed.data.caption,
         status: 'active',
       },
-      mediaItems
+      mediaItems.map((item) => ({
+        media_type: item.media_type,
+        media_url: item.media_url,
+        media_order: item.media_order,
+      }))
     );
+
+    const tokenUser = getUserFromAuthorizationHeader(request);
+    const eventId =
+      parsed.data.event_id ??
+      (tokenUser && tokenUser.id === parsed.data.user_id ? tokenUser.event_id : undefined);
+    if (eventId) {
+      const storageByOrder = new Map(mediaItems.map((item) => [item.media_order, item.storageKey]));
+      await registerFeedPostMedia({
+        eventId,
+        userId: parsed.data.user_id,
+        items: post.post_media.map((item) => ({
+          id: item.id,
+          media_type: item.media_type,
+          media_url: item.media_url,
+          storageKey: storageByOrder.get(item.media_order ?? 0) ?? null,
+        })),
+      });
+    }
 
     return ok(post, 201);
   } catch (e) {

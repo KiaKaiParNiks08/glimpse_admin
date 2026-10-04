@@ -97,6 +97,18 @@ export type GetObjectStreamResult = {
  * Fetch an object from S3 and return a stream + metadata.
  * Use this to proxy images to the browser so the client never sees S3 or AWS credentials.
  */
+export async function getObjectBuffer(key: string): Promise<{ buffer: Buffer; contentType: string } | null> {
+  const bucket = getBucket();
+  const client = getS3Client();
+  const response = await client.send(new GetObjectCommand({ Bucket: bucket, Key: key }));
+  if (!response.Body) return null;
+  const bytes = await response.Body.transformToByteArray();
+  return {
+    buffer: Buffer.from(bytes),
+    contentType: response.ContentType ?? 'application/octet-stream',
+  };
+}
+
 export async function getObjectStream(key: string): Promise<GetObjectStreamResult | null> {
   const bucket = getBucket();
   const client = getS3Client();

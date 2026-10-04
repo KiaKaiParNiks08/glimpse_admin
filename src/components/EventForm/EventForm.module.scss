@@ -11,7 +11,7 @@
 .sectionTitle {
   font-size: 0.875rem;
   font-weight: 600;
-  color: #e2e8f0;
+  color: #0f172a;
   margin-bottom: 0.5rem;
 }
 
@@ -30,7 +30,7 @@
   display: block;
   margin-bottom: 0.15rem;
   font-size: 0.8rem;
-  color: #cbd5e1;
+  color: #334155;
 }
 
 .required {
@@ -43,9 +43,9 @@
   width: 100%;
   padding: 0.45rem 0.65rem;
   border-radius: 0.5rem;
-  border: 1px solid #334155;
-  background-color: #0f172a;
-  color: #e2e8f0;
+  border: 1px solid #e2e8f0;
+  background-color: #ffffff;
+  color: #0f172a;
   font-size: 0.875rem;
   outline: none;
 }
@@ -61,7 +61,7 @@
 }
 
 .error {
-  color: #fca5a5;
+  color: #b91c1c;
   font-size: 0.875rem;
   margin-bottom: 0.25rem;
 }
@@ -71,15 +71,15 @@
   gap: 0.5rem;
   margin-top: 1rem;
   padding-top: 0.75rem;
-  border-top: 1px solid #334155;
+  border-top: 1px solid #e2e8f0;
 }
 
 .btnPrimary {
   padding: 0.5rem 1rem;
   border-radius: 0.5rem;
   border: none;
-  background: linear-gradient(to right, #38bdf8, #6366f1);
-  color: #0f172a;
+  background: #0f172a;
+  color: #ffffff;
   font-weight: 600;
   font-size: 0.875rem;
   cursor: pointer;
@@ -93,9 +93,9 @@
 .btnSecondary {
   padding: 0.5rem 1rem;
   border-radius: 0.5rem;
-  border: 1px solid #334155;
+  border: 1px solid #e2e8f0;
   background: transparent;
-  color: #e2e8f0;
+  color: #0f172a;
   font-size: 0.875rem;
   cursor: pointer;
 }
@@ -114,15 +114,15 @@
 .themeAddBtn {
   padding: 0.45rem 0.75rem;
   border-radius: 0.5rem;
-  border: 1px solid #475569;
-  background: #1e293b;
-  color: #e2e8f0;
+  border: 1px solid #0f172a;
+  background: #0f172a;
+  color: #ffffff;
   font-size: 0.8rem;
   cursor: pointer;
   white-space: nowrap;
 
   &:hover {
-    border-color: #64748b;
+    border-color: #0f172a;
   }
 }
 
@@ -136,7 +136,7 @@
   width: 1.5rem;
   height: 1.5rem;
   border-radius: 0.25rem;
-  border: 1px solid #334155;
+  border: 1px solid #e2e8f0;
 }
 
 .addModalOverlay {
@@ -161,8 +161,8 @@
   max-height: calc(100vh - 2rem);
   padding: 1.25rem;
   border-radius: 0.75rem;
-  border: 1px solid #334155;
-  background: #0f172a;
+  border: 1px solid #e2e8f0;
+  background: #ffffff;
   overflow-y: auto;
   margin: auto 0;
 }
@@ -171,13 +171,13 @@
   margin: 0 0 0.25rem;
   font-size: 1rem;
   font-weight: 600;
-  color: #e2e8f0;
+  color: #0f172a;
 }
 
 .addModalHint {
   margin: 0 0 0.75rem;
   font-size: 0.8rem;
-  color: #94a3b8;
+  color: #64748b;
 }
 
 .colorRow {
@@ -200,7 +200,7 @@
 
 .colorBlockLabel {
   font-size: 0.8rem;
-  color: #cbd5e1;
+  color: #334155;
   font-weight: 500;
 }
 
@@ -222,7 +222,7 @@
 
 .hexCodeLabel {
   font-size: 0.72rem;
-  color: #94a3b8;
+  color: #64748b;
   margin: 0;
 }
 
@@ -234,9 +234,9 @@
   letter-spacing: 0.02em;
   padding: 0.4rem 0.55rem;
   border-radius: 0.35rem;
-  border: 1px solid #334155;
-  background: #020617;
-  color: #e2e8f0;
+  border: 1px solid #e2e8f0;
+  background: #ffffff;
+  color: #0f172a;
   outline: none;
 
   &:focus {

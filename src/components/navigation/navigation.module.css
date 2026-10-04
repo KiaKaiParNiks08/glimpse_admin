@@ -1,0 +1,43 @@
+.bar {
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: 80;
+  height: 2px;
+  width: 100%;
+  transform-origin: left center;
+  transform: scaleX(0.08);
+  background: #f8fafc;
+  pointer-events: none;
+  animation: routeProgress 8s cubic-bezier(0.2, 0.8, 0.2, 1) forwards;
+}
+
+.barDone {
+  animation: none;
+  transform: scaleX(1);
+  opacity: 0;
+  transition: transform 0.12s ease-out, opacity 0.18s ease;
+}
+
+@keyframes routeProgress {
+  0% {
+    transform: scaleX(0.08);
+  }
+  20% {
+    transform: scaleX(0.45);
+  }
+  50% {
+    transform: scaleX(0.72);
+  }
+  100% {
+    transform: scaleX(0.9);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .bar,
+  .barDone {
+    animation: none;
+    transition: none;
+  }
+}

@@ -49,6 +49,8 @@ export const deletePostPathSchema = z.object({
 export const createFeedPostFormSchema = z.object({
   user_id: uuidSchema,
   caption: z.string().optional(),
+  /** Event used to queue this post for face search. Optional; the user token event is used when omitted. */
+  event_id: uuidSchema.optional(),
 });
 
 export type CreatePostInput = z.infer<typeof createPostSchema>;

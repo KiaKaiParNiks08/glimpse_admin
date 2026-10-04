@@ -381,6 +381,37 @@ with no or an invalid cookie → 200 login form.
 
 ---
 
+## 2026-10-03 — Light page theme
+
+Dashboard page content is white. Buttons and action text use the previous page background (`#0f172a`). Sidebar and header stay `#1e293b`.
+
+**Modified files**
+- `src/app/dashboard/dashboard.module.css` — content background white; sidebar and header unchanged
+- `src/app/dashboard/page.tsx`, `DashboardCharts.tsx`, `dashboard-charts.module.css` — dashboard page and charts
+- `src/components/PaginatedTable.module.scss`
+- `src/app/dashboard/events/events.module.scss`, `admins/admins.module.scss`, `venues/venues.module.scss`, `explore-categories/explore-categories.module.scss`, `app-themes/app-themes.module.scss`, `app-config/app-config.module.scss`, `profile/profile.module.scss`, `events/[event_id]/media/event-media.module.scss`
+- `src/components/EventForm/EventForm.module.scss`, `CoverImagesField.module.scss`, `VenueForm/VenueForm.module.scss`, `ExploreCategoryForm/ExploreCategoryForm.module.scss`
+
+## 2026-10-04 — Route transition feedback
+
+Clicked sidebar items use the existing active style immediately, a 2px bar runs at the top during the route change, and list/dashboard/form pages show skeleton blocks instead of “Loading…” while their data arrives. A second click on the same destination is ignored. Sidebar, header, and loaded page layouts are unchanged.
+
+**New files**
+- `src/components/navigation/NavigationProvider.tsx` — progress bar and `navigate()`
+- `src/components/navigation/navigation.module.css`
+- `src/components/navigation/ContentSkeleton.tsx`
+- `src/components/navigation/content-skeleton.module.css`
+- `src/app/dashboard/loading.tsx`
+
+**Modified files**
+- `src/app/layout.tsx`, `src/app/globals.css` — provider; progress cursor on busy controls
+- `src/app/dashboard/layout.tsx` — pending nav state; shell skeleton instead of a full-page loading line
+- `src/app/login/page.tsx`, `src/app/dashboard/events/page.tsx`, `events/addEditEvent/page.tsx`, `change-password/page.tsx` — one navigation per click
+- `src/components/PaginatedTable.tsx` and `.module.scss` — skeleton rows on first load
+- `src/app/dashboard/page.tsx`, `DashboardCharts.tsx`, `dashboard-charts.module.css`
+- `src/app/dashboard/profile/page.tsx`, `admins/page.tsx`, `app-config/page.tsx`, `app-themes/page.tsx`
+- `src/app/dashboard/events/CreateEventWizard.tsx`, `events/[event_id]/media/page.tsx`
+
 ## Local test data (safe to delete)
 
 Created on 2026-09-27/28 while testing; everything is named `phase-test…` (sessions on
@@ -396,13 +427,89 @@ DELETE FROM event_categories WHERE slug = 'phase-test-wedding';
 
 ---
 
+## 2026-10-04 — People in media
+
+Server-side face search for photographer gallery files and user-post media. Uploads only create a `pending` `media_assets` row. A worker detects faces, stores embeddings in pgvector, and matches them to consented user face references. Embeddings are not returned by APIs.
+
+**New files**
+- `prisma/migrations/20261004120000_people_in_media/migration.sql` — `media_assets`, `media_faces`, `user_face_references`, `media_matches`
+- `src/server/people-media/` — provider interface, local and HTTP providers, registration, matching, worker batch
+- `src/lib/face-worker-auth.ts` — worker secret check
+- `src/lib/validations/people-media.ts` — request schemas
+- `src/app/api/users/me/face-reference/route.ts` — consent and face-reference enrollment
+- `src/app/api/media/[id]/status/route.ts` — processing status
+- `src/app/api/media/[id]/match/route.ts` — requeue matching
+- `src/app/api/media/[id]/matches/route.ts` — match list without embeddings
+- `src/app/api/media/[id]/access/route.ts` — authorized media URL
+- `src/app/api/events/[event_id]/my-media/route.ts` — current user's matched media
+- `src/app/api/admin/events/[event_id]/people-media/route.ts` — admin status and retries
+- `src/app/api/internal/media/process/route.ts` — worker endpoint
+- `src/app/dashboard/events/[event_id]/people-media/page.tsx` — admin UI
+- `scripts/process-media-faces.mjs` — calls the worker until the queue is idle
+- `scripts/install-pgvector-windows.ps1` — copies the PostgreSQL 16 pgvector files (must be run as administrator)
+
+**Modified files**
+- `prisma/schema.prisma` — new models and relations on `users`, `events`, `event_day_media`, `post_media`
+- `src/server/event-day-media.ts` — existing panel and admin gallery saves also register a pending asset
+- `src/app/api/feed/route.ts` — existing post create also registers pending assets for the token event
+- `src/lib/validations/posts.ts` — optional `event_id` on feed create
+- `src/middleware.ts` — worker route uses `x-face-worker-secret` instead of a user JWT
+- `src/lib/upload.ts` — saved files also return `storageKey`
+- `src/lib/s3-presign.ts` — `getObjectBuffer` for the worker
+- `src/app/dashboard/events/page.tsx` — People link on each event
+- `package.json` — `faces:process` script
+- `.env.example` — `FACE_*` variables
+- `README.md` — server setup for pgvector, env, and the worker
+
+**Undo the DB part**
+```sql
+DROP TABLE IF EXISTS media_matches;
+DROP TABLE IF EXISTS media_faces;
+DROP TABLE IF EXISTS user_face_references;
+DROP TABLE IF EXISTS media_assets;
+DELETE FROM _prisma_migrations WHERE migration_name = '20261004120000_people_in_media';
+```
+
+No local test rows were inserted. `npm run prisma:deploy` was tried on 2026-10-04 and rolled back (`prisma migrate resolve --rolled-back 20261004120000_people_in_media`) because PostgreSQL 16 does not have the `vector` extension yet. No people-in-media tables were created. Install pgvector with an elevated `scripts/install-pgvector-windows.ps1`, restart PostgreSQL, then run `npm run prisma:deploy` again. `FACE_PROVIDER=local` does not recognize a person across different photos; production needs `FACE_PROVIDER=http` and a face service.
+
+---
+
+## 2026-10-04 — Event planner and photographer
+
+A wizard step after Gallery watermark saves one event planner and one photographer. Mobile reads them from `GET /api/events/team?event_id=`.
+
+**New files**
+- `prisma/migrations/20261004210000_event_team/migration.sql` — `event_team` table, one row per role
+- `src/server/event-team.ts` — load and save the two contacts
+- `src/app/api/events/team/route.ts` — mobile GET
+- `src/app/dashboard/events/EventTeamFields.tsx` — planner and photographer form
+
+**Modified files**
+- `prisma/schema.prisma` — `event_team` model
+- `src/lib/validations/events.ts` — team form schema
+- `src/app/actions/events.ts` — panel load and save
+- `src/app/dashboard/events/CreateEventWizard.tsx` — new step, later steps shifted by one
+- `src/app/dashboard/events/events.module.scss` — two-column form
+- `src/lib/openapi.ts` — documents the GET
+
+**Undo the DB part**
+```sql
+DROP TABLE IF EXISTS event_team;
+DELETE FROM _prisma_migrations WHERE migration_name = '20261004210000_event_team';
+```
+
+No test rows were inserted. Leave a name blank to store nothing for that person.
+
+---
+
 ## Known open items
 
 - `posts` has no `event_id` column: the feed shows posts from all events and post favorites can't be checked against the event.
 - `GET /api/feed` returns deleted posts unless `status=active` is passed (existing behaviour).
 - Security issues found during review, not fixed yet: legacy admin cookie forgeable with the default secret; any token can edit/delete users; OTP returned in `/api/auth` responses; venue/explore/upload server actions without auth; feed/like/favorites trust `user_id` from the request.
 - No admin UI for event categories (seeded by migration since 2026-10-02; add/rename others directly in `event_categories`).
-- Other environments still need `npm run prisma:deploy` for `20260927140000_add_user_favorites`, `20260929160000_session_media_and_watermark`, `20261001120000_happening_and_report_settings`, `20261002150000_seed_event_categories`, `20261002170000_watermark_size`, `20261002190000_event_cover_images` and `20261003000000_event_linkedin_url`. If an environment already applied `20260928180000_add_session_phase_tags`, run its undo SQL (2026-09-28 section) first.
+- Other environments still need `npm run prisma:deploy` for `20260927140000_add_user_favorites`, `20260929160000_session_media_and_watermark`, `20261001120000_happening_and_report_settings`, `20261002150000_seed_event_categories`, `20261002170000_watermark_size`, `20261002190000_event_cover_images`, `20261003000000_event_linkedin_url`, `20261004120000_people_in_media` and `20261004210000_event_team`. Install pgvector before the people-in-media migration, or `prisma migrate deploy` stops before `event_team`. If an environment already applied `20260928180000_add_session_phase_tags`, run its undo SQL (2026-09-28 section) first.
+- People in media: production face recognition still needs `FACE_PROVIDER=http` and `FACE_SERVICE_URL`. The local provider only matches identical files. A scheduled `npm run faces:process` (or cron calling `POST /api/internal/media/process`) must run outside the app request.
 - Before deploying: go through the production checklist in the 2026-10-03 "/login ⇄ /dashboard redirect loop" section (`ADMIN_JWT_SECRET`, `X-Forwarded-Proto`, post-deploy login test).
 - Swapping two session titles on the same day in one save (A↔B) hits the unique (day, title) constraint; rename in two saves.
 - Watermark is an overlay: the mobile app must draw it (see `watermark` in `GET /api/events/{event_id}`); downloaded original files have no watermark.

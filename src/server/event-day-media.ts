@@ -1,6 +1,7 @@
 import prisma from '@/server/prisma';
 import { deleteObjectByKey } from '@/lib/s3-presign';
 import { decryptToken } from '@/lib/upload-token';
+import { registerPhotographerGalleryItems } from '@/server/people-media/register';
 
 export type EventDayMediaCreateInput = {
   event_day_id: string;
@@ -58,6 +59,7 @@ export async function createEventDayMedia(items: EventDayMediaCreateInput[]) {
       })
     )
   );
+  await registerPhotographerGalleryItems(created);
   return created;
 }
 

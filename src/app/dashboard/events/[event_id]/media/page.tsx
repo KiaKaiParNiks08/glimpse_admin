@@ -16,6 +16,7 @@ import {
 } from '@/lib/upload-client';
 import { WATERMARK_POSITION_LABELS, type EventWatermark } from '@/lib/watermark';
 import { WatermarkOverlay } from '@/components/WatermarkOverlay';
+import { ContentSkeleton } from '@/components/navigation/ContentSkeleton';
 
 type DayMedia = {
   id: string;
@@ -316,7 +317,7 @@ export default function EventDayMediaPage({
   }
 
   if (loading) {
-    return <p style={{ color: '#94a3b8' }}>Loading…</p>;
+    return <ContentSkeleton variant="cards" />;
   }
 
   return (

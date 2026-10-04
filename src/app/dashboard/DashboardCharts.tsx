@@ -35,10 +35,10 @@ type DashboardStats = {
 const STATUS_COLORS = ['#3b82f6', '#8b5cf6', '#06b6d4', '#10b981', '#f59e0b', '#ef4444', '#64748b'];
 
 const chartTooltipStyle = {
-  backgroundColor: '#1e293b',
-  border: '1px solid rgba(255,255,255,0.1)',
+  backgroundColor: '#ffffff',
+  border: '1px solid #e2e8f0',
   borderRadius: 8,
-  color: '#e2e8f0',
+  color: '#0f172a',
 };
 
 function formatStatusLabel(status: string): string {
@@ -232,7 +232,24 @@ export function DashboardCharts() {
       </div>
 
       {loading ? (
-        <p className={styles.muted}>Loading charts…</p>
+        <>
+          <div className={styles.statRow} aria-busy="true" aria-live="polite">
+            {Array.from({ length: 5 }, (_, index) => (
+              <div key={index} className={styles.statCard}>
+                <span className={styles.skeletonValue} />
+                <span className={styles.skeletonLabel} />
+              </div>
+            ))}
+          </div>
+          <div className={styles.chartsGrid}>
+            <div className={styles.chartCard}>
+              <span className={styles.skeletonChart} />
+            </div>
+            <div className={styles.chartCard}>
+              <span className={styles.skeletonChart} />
+            </div>
+          </div>
+        </>
       ) : error ? (
         <p className={styles.error}>{error}</p>
       ) : stats ? (
@@ -281,18 +298,18 @@ export function DashboardCharts() {
                     <CartesianGrid stroke="rgba(148,163,184,0.15)" vertical={false} />
                     <XAxis
                       dataKey="month"
-                      tick={{ fill: '#94a3b8', fontSize: 12 }}
+                      tick={{ fill: '#64748b', fontSize: 12 }}
                       axisLine={{ stroke: 'rgba(148,163,184,0.3)' }}
                       tickLine={false}
                     />
                     <YAxis
                       allowDecimals={false}
-                      tick={{ fill: '#94a3b8', fontSize: 12 }}
+                      tick={{ fill: '#64748b', fontSize: 12 }}
                       axisLine={false}
                       tickLine={false}
                       width={36}
                     />
-                    <Tooltip contentStyle={chartTooltipStyle} labelStyle={{ color: '#94a3b8' }} />
+                    <Tooltip contentStyle={chartTooltipStyle} labelStyle={{ color: '#64748b' }} />
                     <Bar dataKey="count" name="Events" fill="#3b82f6" radius={[4, 4, 0, 0]} />
                   </BarChart>
                 </ResponsiveContainer>
@@ -323,8 +340,8 @@ export function DashboardCharts() {
                       </Pie>
                       <Tooltip contentStyle={chartTooltipStyle} />
                       <Legend
-                        wrapperStyle={{ fontSize: 12, color: '#94a3b8' }}
-                        formatter={(value) => <span style={{ color: '#cbd5e1' }}>{value}</span>}
+                        wrapperStyle={{ fontSize: 12, color: '#64748b' }}
+                        formatter={(value) => <span style={{ color: '#0f172a' }}>{value}</span>}
                       />
                     </PieChart>
                   </ResponsiveContainer>
@@ -362,7 +379,7 @@ export function DashboardCharts() {
                       <XAxis
                         type="number"
                         allowDecimals={false}
-                        tick={{ fill: '#94a3b8', fontSize: 12 }}
+                        tick={{ fill: '#64748b', fontSize: 12 }}
                         axisLine={{ stroke: 'rgba(148,163,184,0.3)' }}
                         tickLine={false}
                       />
@@ -370,14 +387,14 @@ export function DashboardCharts() {
                         type="category"
                         dataKey="title"
                         width={132}
-                        tick={{ fill: '#94a3b8', fontSize: 11 }}
+                        tick={{ fill: '#64748b', fontSize: 11 }}
                         tickFormatter={truncateEventTitle}
                         axisLine={false}
                         tickLine={false}
                       />
                       <Tooltip
                         contentStyle={chartTooltipStyle}
-                        labelStyle={{ color: '#94a3b8' }}
+                        labelStyle={{ color: '#64748b' }}
                         formatter={(value: number) => [value, 'Assigned admins']}
                       />
                       <Bar

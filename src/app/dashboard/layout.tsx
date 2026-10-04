@@ -3,6 +3,8 @@
 import { useEffect, useState, useRef } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
 import Link from 'next/link';
+import { useRouteProgress } from '@/components/navigation/NavigationProvider';
+import { ContentSkeleton } from '@/components/navigation/ContentSkeleton';
 import { canAccessModule, moduleFromPathname, MODULE_HREFS, MODULE_LABELS, type AdminModule } from '@/lib/rbac';
 import { setAdminJwtInSessionStorage } from '@/lib/admin-jwt-client';
 import { signOutToLogin } from '@/lib/admin-sign-out';
@@ -36,6 +38,8 @@ export default function DashboardLayout({
 }) {
   const router = useRouter();
   const pathname = usePathname();
+  const { pendingHref, navigate } = useRouteProgress();
+  const pendingPath = pendingHref?.split('?')[0] ?? null;
   const [user, setUser] = useState<{ id: string; full_name: string; email: string; role_name: string; avatar_url?: string | null } | null>(null);
   const [profileOpen, setProfileOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
@@ -133,8 +137,16 @@ export default function DashboardLayout({
   if (user === null) {
     return (
       <div className={styles.wrapper}>
-        <div className={styles.mainArea} style={{ justifyContent: 'center', alignItems: 'center' }}>
-          <p style={{ color: '#94a3b8' }}>Loading…</p>
+        <aside className={styles.sidebar}>
+          <div className={styles.sidebarBrand}>
+            <span>Glimpsapp Admin</span>
+          </div>
+        </aside>
+        <div className={styles.mainArea}>
+          <header className={styles.header} />
+          <div className={styles.content}>
+            <ContentSkeleton />
+          </div>
         </div>
       </div>
     );
@@ -163,19 +175,24 @@ export default function DashboardLayout({
           </button>
         </div>
         <nav className={styles.sidebarNav}>
-          {navItems.map((item) => (
+          {navItems.map((item) => {
+            const pending = pendingPath === item.href;
+            return (
             <Link
               key={item.href}
               href={item.href}
-              className={`${styles.navLink} ${pathname === item.href ? styles.navLinkActive : ''}`}
+              className={`${styles.navLink} ${pathname === item.href || pending ? styles.navLinkActive : ''}`}
               title={sidebarCollapsed ? item.label : undefined}
+              aria-busy={pending || undefined}
+              aria-current={pathname === item.href ? 'page' : undefined}
             >
               <svg className={styles.navIcon} viewBox="0 0 24 24" fill="currentColor" aria-hidden>
                 {renderNavIcon(item.module)}
               </svg>
               {!sidebarCollapsed && <span>{item.label}</span>}
             </Link>
-          ))}
+            );
+          })}
         </nav>
       </aside>
 
@@ -219,8 +236,9 @@ export default function DashboardLayout({
                   className={styles.profileBtn}
                   onClick={() => {
                     setProfileOpen(false);
-                    router.push('/dashboard/profile');
+                    navigate('/dashboard/profile');
                   }}
+                  aria-busy={pendingHref === '/dashboard/profile' || undefined}
                 >
                   <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                     <circle cx="12" cy="8" r="4" />
@@ -233,8 +251,9 @@ export default function DashboardLayout({
                   className={styles.profileBtn}
                   onClick={() => {
                     setProfileOpen(false);
-                    router.push('/dashboard/change-password');
+                    navigate('/dashboard/change-password');
                   }}
+                  aria-busy={pendingHref === '/dashboard/change-password' || undefined}
                 >
                   <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                     <rect x="3" y="11" width="18" height="10" rx="2" ry="2" />

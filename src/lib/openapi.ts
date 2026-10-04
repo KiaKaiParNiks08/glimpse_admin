@@ -1081,6 +1081,40 @@ export function getOpenApiSpec(serverUrl: string) {
           },
         },
       },
+      '/api/events/team': {
+        get: {
+          summary: 'Get event planner and photographer',
+          description:
+            'Returns the single event planner and photographer saved for an event. A side is null when it has not been filled in.',
+          tags: ['Events'],
+          parameters: [
+            { name: 'event_id', in: 'query', required: true, schema: { type: 'string', format: 'uuid' } },
+          ],
+          responses: {
+            '200': {
+              description: 'Planner and photographer',
+              content: {
+                'application/json': {
+                  schema: {
+                    type: 'object',
+                    properties: {
+                      data: {
+                        type: 'object',
+                        properties: {
+                          planner: { type: 'object', nullable: true },
+                          photographer: { type: 'object', nullable: true },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+            '404': { description: 'Event not found' },
+            '500': { description: 'Server error' },
+          },
+        },
+      },
       '/api/events/highlights': {
         get: {
           summary: 'List event highlights',

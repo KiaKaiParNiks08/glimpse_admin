@@ -1,6 +1,7 @@
 import type { NextRequest } from 'next/server';
 import { NextResponse } from 'next/server';
 import { isEventAdminAssigned } from '@/server/events';
+import { isFaceWorkerAuthorized } from '@/lib/face-worker-auth';
 import { getAdminFromAuthorizationHeader, getUserFromAuthorizationHeader } from '@/lib/jwt';
 
 function isUuidLike(val: string): boolean {
@@ -49,6 +50,13 @@ export async function middleware(request: NextRequest) {
   if (!isApi) return NextResponse.next();
 
   if (isPublicApiPath(pathname)) return NextResponse.next();
+
+  if (pathname === '/api/internal/media/process') {
+    if (!isFaceWorkerAuthorized(request)) {
+      return NextResponse.json({ message: 'Not authenticated', data: null }, { status: 401 });
+    }
+    return NextResponse.next();
+  }
 
   // Require Bearer JWT for all protected API routes.
   const adminUser = getAdminFromAuthorizationHeader(request);

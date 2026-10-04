@@ -2,11 +2,13 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { useRouteProgress } from '@/components/navigation/NavigationProvider';
 import styles from './login.module.css';
 import { ADMIN_SESSION_KEY } from '@/lib/admin-auth';
 
 export default function LoginPage() {
   const router = useRouter();
+  const { navigate } = useRouteProgress();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -32,6 +34,7 @@ export default function LoginPage() {
 
       if (!res.ok) {
         setError(data?.message ?? 'Login failed. Please try again.');
+        setLoading(false);
         return;
       }
 
@@ -40,11 +43,10 @@ export default function LoginPage() {
         sessionStorage.setItem(ADMIN_SESSION_KEY, token);
       }
 
-      router.push('/dashboard');
+      navigate('/dashboard');
       router.refresh();
     } catch {
       setError('Network error. Please try again.');
-    } finally {
       setLoading(false);
     }
   }
