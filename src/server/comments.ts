@@ -34,6 +34,11 @@ export type CommentResult = {
   };
 };
 
+/** A top-level comment plus every reply in its thread. */
+export type CommentWithReplies = CommentResult & {
+  replies: CommentResult[];
+};
+
 /**
  * Create a comment on a post and increment the post's comment_count.
  * Use a transaction so both succeed or both roll back.
@@ -74,21 +79,42 @@ export async function postExists(postId: string): Promise<boolean> {
 }
 
 /**
+ * Walk parent links until the reply sits under a top-level comment on this page.
+ * A reply to a reply stays in that same thread.
+ */
+function rootCommentId(
+  reply: CommentResult,
+  rootIds: Set<string>,
+  byId: Map<string, CommentResult>
+): string | null {
+  let parentId = reply.parent_comment_id;
+  const seen = new Set<string>([reply.id]);
+  while (parentId) {
+    if (rootIds.has(parentId)) return parentId;
+    if (seen.has(parentId)) return null;
+    seen.add(parentId);
+    parentId = byId.get(parentId)?.parent_comment_id ?? null;
+  }
+  return null;
+}
+
+/**
  * List comments for a post with pagination.
- * By default returns only top-level comments (parent_comment_id is null). Use parent_comment_id=all to include replies.
+ * Pages are top-level comments (newest first). Each comment includes `replies`
+ * for that thread (oldest first), including a reply to a reply.
  */
 export async function listComments(
   postId: string,
   query: ListCommentsQuery
-): Promise<{ comments: CommentResult[]; total: number }> {
-  const { page, limit, status, parent_comment_id } = query;
+): Promise<{ comments: CommentWithReplies[]; total: number }> {
+  const { page, limit, status } = query;
   const skip = (page - 1) * limit;
   const where = {
     post_id: postId,
+    parent_comment_id: null,
     ...(status && { status }),
-    ...(parent_comment_id === 'root' ? { parent_comment_id: null } : {}),
   };
-  const [comments, total] = await Promise.all([
+  const [comments, total, replyRows] = await Promise.all([
     prisma.comments.findMany({
       where,
       select: commentSelect,
@@ -97,8 +123,38 @@ export async function listComments(
       take: limit,
     }),
     prisma.comments.count({ where }),
+    prisma.comments.findMany({
+      where: {
+        post_id: postId,
+        parent_comment_id: { not: null },
+        ...(status && { status }),
+      },
+      select: commentSelect,
+      orderBy: { created_at: 'asc' },
+    }),
   ]);
-  return { comments: comments as CommentResult[], total };
+
+  const roots = comments as CommentResult[];
+  const replies = replyRows as CommentResult[];
+  const rootIds = new Set(roots.map((comment) => comment.id));
+  const byId = new Map(replies.map((reply) => [reply.id, reply]));
+  const grouped = new Map<string, CommentResult[]>();
+
+  for (const reply of replies) {
+    const rootId = rootCommentId(reply, rootIds, byId);
+    if (!rootId) continue;
+    const thread = grouped.get(rootId) ?? [];
+    thread.push(reply);
+    grouped.set(rootId, thread);
+  }
+
+  return {
+    comments: roots.map((comment) => ({
+      ...comment,
+      replies: grouped.get(comment.id) ?? [],
+    })),
+    total,
+  };
 }
 
 /**

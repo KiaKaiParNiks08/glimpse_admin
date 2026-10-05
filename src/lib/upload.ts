@@ -21,6 +21,7 @@ export { ALLOWED_IMAGE_TYPES, ALLOWED_VIDEO_TYPES, ALLOWED_MEDIA_TYPES };
 
 export {
   getMediaKind,
+  resolveUploadMime,
   validateMediaFile,
   MIN_IMAGE_SIZE_BYTES,
   MAX_IMAGE_SIZE_BYTES,
@@ -62,6 +63,22 @@ export interface SavedMedia {
   media_order: number;
 }
 
+/** The request ended before every byte of the file was available. */
+export class IncompleteUploadError extends Error {
+  constructor() {
+    super('The file did not finish uploading. Please try again.');
+    this.name = 'IncompleteUploadError';
+  }
+}
+
+async function readCompleteFile(file: File): Promise<Buffer> {
+  const buffer = Buffer.from(await file.arrayBuffer());
+  if (buffer.length === 0 || buffer.length !== file.size) {
+    throw new IncompleteUploadError();
+  }
+  return buffer;
+}
+
 function isS3Configured(): boolean {
   return Boolean(process.env.AWS_REGION && process.env.S3_BUCKET);
 }
@@ -75,11 +92,11 @@ export async function saveUploadedFile(
   file: File,
   kind: MediaKind,
   projectRoot: string,
-  options?: { prefix?: string; storage?: 'auto' | 'disk' | 's3' }
+  options?: { prefix?: string; storage?: 'auto' | 'disk' | 's3'; contentType?: string }
 ): Promise<{ relativeUrl: string; absolutePath: string; storageKey: string }> {
   const prefix = options?.prefix ?? 'uploads';
   const storage = options?.storage ?? 'auto';
-  const mimeType = (file.type || '').split(';')[0].trim().toLowerCase();
+  const mimeType = (options?.contentType || file.type || '').split(';')[0].trim().toLowerCase();
 
   const validationError = validateMediaFile({ type: mimeType, size: file.size }, kind);
   if (validationError) {
@@ -88,7 +105,7 @@ export async function saveUploadedFile(
 
   if ((storage === 's3' || storage === 'auto') && isS3Configured()) {
     const key = generateS3Key(prefix, mimeType);
-    const buffer = Buffer.from(await file.arrayBuffer());
+    const buffer = await readCompleteFile(file);
     await putObjectFromBuffer(key, buffer, mimeType);
     const url = getStoredObjectUrl(key);
     return { relativeUrl: url, absolutePath: '', storageKey: key };
@@ -108,7 +125,7 @@ export async function saveUploadedFile(
   const filePath = path.join(dir, basename);
   const relativeUrl = `/${path.join(UPLOADS_URL_PREFIX, yearMonth, basename).replace(/\\/g, '/')}`;
 
-  const buffer = Buffer.from(await file.arrayBuffer());
+  const buffer = await readCompleteFile(file);
   await writeFile(filePath, buffer);
 
   return { relativeUrl, absolutePath: filePath, storageKey: relativeUrl.replace(/^\//, '') };

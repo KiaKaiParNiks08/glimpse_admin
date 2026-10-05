@@ -23,6 +23,35 @@ export const MAX_VIDEO_DURATION_SECONDS = 120;
 
 export type RulesMediaKind = 'image' | 'video' | 'pdf';
 
+const EXTENSION_MIME: Record<string, string> = {
+  jpg: 'image/jpeg',
+  jpeg: 'image/jpeg',
+  png: 'image/png',
+  gif: 'image/gif',
+  webp: 'image/webp',
+  mp4: 'video/mp4',
+  webm: 'video/webm',
+  mov: 'video/quicktime',
+  pdf: 'application/pdf',
+};
+
+/** Filename extension when the client omits a type or sends application/octet-stream. */
+export function mimeFromFilename(filename: string): string | null {
+  const base = filename.trim().toLowerCase();
+  const dot = base.lastIndexOf('.');
+  if (dot < 0 || dot === base.length - 1) return null;
+  return EXTENSION_MIME[base.slice(dot + 1)] ?? null;
+}
+
+/**
+ * Declared MIME, or the filename when the phone sends an empty or generic type.
+ */
+export function resolveUploadMime(type: string, filename: string): string {
+  const mime = type.split(';')[0].trim().toLowerCase();
+  if (mime && mime !== 'application/octet-stream' && getMediaKind(mime)) return mime;
+  return mimeFromFilename(filename) ?? mime;
+}
+
 export function getMediaKind(mime: string): RulesMediaKind | null {
   const normalized = mime.split(';')[0].trim().toLowerCase();
   if (ALLOWED_IMAGE_TYPES.includes(normalized as (typeof ALLOWED_IMAGE_TYPES)[number])) return 'image';

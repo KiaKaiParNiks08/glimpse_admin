@@ -1,6 +1,7 @@
 import { Prisma } from '@prisma/client';
 import prisma from '@/server/prisma';
 import { isEventGuest } from '@/server/event-guests';
+import { scheduleFaceProcessing } from './schedule';
 import { sha256Hex, storageKeyFromMediaUrl } from './storage';
 
 export type MediaAssetSource = 'photographer' | 'user_post';
@@ -133,6 +134,7 @@ export async function registerPhotographerGalleryItems(items: GalleryRow[]): Pro
         uploadedBy: ownerById.get(item.id) ?? null,
       });
     }
+    scheduleFaceProcessing();
   } catch (error) {
     console.error('[people-media] gallery registration failed', error);
   }
@@ -169,6 +171,7 @@ export async function registerFeedPostMedia(input: {
         uploadedBy: input.userId,
       });
     }
+    scheduleFaceProcessing();
   } catch (error) {
     console.error('[people-media] feed registration failed', error);
   }

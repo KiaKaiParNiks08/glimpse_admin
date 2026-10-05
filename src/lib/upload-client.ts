@@ -6,6 +6,7 @@
 import { uploadFileServerAction } from '@/app/actions/upload';
 import {
   getMediaKind,
+  resolveUploadMime,
   validateMediaFile,
   validateProbedVideoDuration,
   IMAGE_AND_VIDEO_UPLOAD_LIMITS_NOTE,
@@ -76,7 +77,7 @@ export function probeVideoDurationSeconds(file: File): Promise<number | null> {
 }
 
 export type UploadPrecheckResult =
-  | { ok: true; videoDurationSec?: number }
+  | { ok: true; contentType?: string; videoDurationSec?: number }
   | { ok: false; error: string };
 
 export type UploadPrecheckOk = Extract<UploadPrecheckResult, { ok: true }>;
@@ -136,7 +137,7 @@ export async function validateMediaFilesForUpload(
  * Validate type, size, and (for video) duration before upload.
  */
 export async function precheckUploadFile(file: File): Promise<UploadPrecheckResult> {
-  const mimeType = (file.type || '').split(';')[0].trim().toLowerCase() || 'application/octet-stream';
+  const mimeType = resolveUploadMime(file.type, file.name);
   const kind = getMediaKind(mimeType);
   if (!kind) {
     return {
@@ -150,17 +151,17 @@ export async function precheckUploadFile(file: File): Promise<UploadPrecheckResu
   if (sizeErr) return { ok: false, error: sizeErr };
 
   if (kind === 'pdf') {
-    return { ok: true };
+    return { ok: true, contentType: mimeType };
   }
 
   if (kind === 'video') {
     const probed = await probeVideoDurationSeconds(file);
     const durErr = validateProbedVideoDuration(probed);
     if (durErr) return { ok: false, error: durErr };
-    return { ok: true, videoDurationSec: probed! };
+    return { ok: true, contentType: mimeType, videoDurationSec: probed! };
   }
 
-  return { ok: true };
+  return { ok: true, contentType: mimeType };
 }
 
 /**

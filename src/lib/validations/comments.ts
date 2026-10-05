@@ -18,7 +18,11 @@ export const createCommentBodySchema = z.object({
 /** Query params for listing post comments */
 export const listCommentsQuerySchema = paginationSchema.extend({
   status: commentStatusSchema.optional(),
-  parent_comment_id: z.enum(['root', 'all']).optional().default('root'),
+  /**
+   * Kept so older clients that still send root|all do not fail validation.
+   * Replies are always nested on each comment; this value does not change the list.
+   */
+  parent_comment_id: z.enum(['root', 'all']).optional(),
 });
 
 /** Path params for deleting a specific comment under a post */
@@ -32,7 +36,7 @@ export const deleteCommentBodySchema = z.object({
   user_id: uuidSchema,
 });
 
-/** root = only top-level comments (parent_comment_id is null), all = include replies */
+/** parent_comment_id is accepted and ignored; replies are nested on each comment. */
 export type ListCommentsQuery = z.infer<typeof listCommentsQuerySchema>;
 export type PostIdPath = z.infer<typeof postIdPathSchema>;
 export type CreateCommentBody = z.infer<typeof createCommentBodySchema>;

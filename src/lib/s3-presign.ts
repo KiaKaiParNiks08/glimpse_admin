@@ -34,6 +34,9 @@ function getS3Client(): S3Client {
   if (!region) throw new Error('AWS_REGION is required for S3 presign');
   return new S3Client({
     region,
+    // Browser uploads only send Content-Type. The default checksum would be signed into the URL and S3 would reject the PUT.
+    requestChecksumCalculation: 'WHEN_REQUIRED',
+    responseChecksumValidation: 'WHEN_REQUIRED',
     credentials:
       process.env.AWS_ACCESS_KEY_ID && process.env.AWS_SECRET_ACCESS_KEY
         ? {

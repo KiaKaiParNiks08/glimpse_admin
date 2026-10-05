@@ -7,6 +7,7 @@ import { getEventDaysByEventId } from '@/server/event-days';
 import { createPresignedUpload } from '@/lib/s3-presign';
 import {
   getMediaKind,
+  resolveUploadMime,
   validateDeclaredVideoDuration,
   validateMediaFile,
 } from '@/lib/upload-rules';
@@ -103,7 +104,7 @@ export async function presignEventDayMediaUploadAction(input: {
   const session = await findEventSession(input.eventId, input.eventSessionId);
   if (!session) return { ok: false, error: 'Session not found' };
 
-  const mimeType = input.contentType.split(';')[0].trim().toLowerCase();
+  const mimeType = resolveUploadMime(input.contentType, input.filename);
   const kind = getMediaKind(mimeType);
   if (!kind || kind === 'pdf') {
     return {
@@ -124,7 +125,7 @@ export async function presignEventDayMediaUploadAction(input: {
 
   try {
     const prefix = `events/${input.eventId}/sessions/${session.id}`;
-    const data = await createPresignedUpload(input.filename, input.contentType, prefix);
+    const data = await createPresignedUpload(input.filename, mimeType, prefix);
     return { ok: true, data };
   } catch (e) {
     const msg = e instanceof Error ? e.message : 'Presign failed';
@@ -158,18 +159,26 @@ export async function createEventDayMediaAction(input: {
   if (!Array.isArray(input.items) || input.items.length === 0) return { ok: false, error: 'No items provided' };
   if (input.items.length > 50) return { ok: false, error: 'Too many items (max 50)' };
 
-  const created = await createEventDayMedia(
-    input.items.map((it, i) => ({
-      event_day_id: session.event_day_id,
-      event_session_id: session.id,
-      media_key: it.media_key,
-      media_url: it.media_url,
-      media_type: it.media_type,
-      display_order: it.display_order ?? i,
-      uploaded_by: auth.admin.id,
-    }))
-  );
-  return { ok: true, data: created };
+  try {
+    const created = await createEventDayMedia(
+      input.items.map((it, i) => ({
+        event_day_id: session.event_day_id,
+        event_session_id: session.id,
+        media_key: it.media_key,
+        media_url: it.media_url,
+        media_type: it.media_type,
+        display_order: it.display_order ?? i,
+        uploaded_by: auth.admin.id,
+      }))
+    );
+    return { ok: true, data: created };
+  } catch (error) {
+    console.error(error);
+    return {
+      ok: false,
+      error: 'The files reached storage but could not be saved on this session. Try the upload again.',
+    };
+  }
 }
 
 export type DeleteEventDayMediaActionResult = { ok: true } | { ok: false; error: string };

@@ -881,7 +881,7 @@ export function getOpenApiSpec(serverUrl: string) {
         get: {
           summary: 'List post comments',
           description:
-            'Paginated list of comments for a post. By default returns only top-level comments (parent_comment_id=root). Use parent_comment_id=all to include replies.',
+            'Paginated top-level comments for a post, newest first. Each comment includes a replies array (oldest first) for that thread, including a reply to a reply. meta.total counts top-level comments only.',
           tags: ['Feed'],
           parameters: [
             { name: 'post_id', in: 'path', required: true, schema: { type: 'string', format: 'uuid' }, description: 'Post ID' },
@@ -891,8 +891,8 @@ export function getOpenApiSpec(serverUrl: string) {
             {
               name: 'parent_comment_id',
               in: 'query',
-              schema: { type: 'string', enum: ['root', 'all'], default: 'root' },
-              description: 'root = top-level only, all = include replies',
+              schema: { type: 'string', enum: ['root', 'all'] },
+              description: 'Accepted for older clients. Replies are always nested; this value does not change the list.',
             },
           ],
           responses: {
@@ -923,6 +923,30 @@ export function getOpenApiSpec(serverUrl: string) {
                                 avatar_url: { type: 'string', nullable: true },
                               },
                               description: 'Comment author',
+                            },
+                            replies: {
+                              type: 'array',
+                              description: 'Replies on this comment, oldest first. Same fields as a comment, without a nested replies array.',
+                              items: {
+                                type: 'object',
+                                properties: {
+                                  id: { type: 'string', format: 'uuid' },
+                                  post_id: { type: 'string', format: 'uuid' },
+                                  user_id: { type: 'string', format: 'uuid' },
+                                  parent_comment_id: { type: 'string', format: 'uuid', nullable: true },
+                                  comment_text: { type: 'string' },
+                                  status: { type: 'string', nullable: true },
+                                  created_at: { type: 'string', format: 'date-time', nullable: true },
+                                  updated_at: { type: 'string', format: 'date-time', nullable: true },
+                                  users: {
+                                    type: 'object',
+                                    properties: {
+                                      full_name: { type: 'string' },
+                                      avatar_url: { type: 'string', nullable: true },
+                                    },
+                                  },
+                                },
+                              },
                             },
                           },
                         },

@@ -10,7 +10,7 @@ import { createComment, listComments, postExists } from '@/server/comments';
 
 /**
  * GET /api/feed/[post_id]/comments – List comments for a post.
- * Query: page, limit, status (optional), parent_comment_id=root|all (default root = top-level only).
+ * Query: page, limit, status (optional). Each comment includes its replies.
  */
 export async function GET(
   request: Request,

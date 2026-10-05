@@ -60,13 +60,19 @@ Do this on every database (local, dev, and production) before using the feature:
 3. Set the variables in `.env.example` (`FACE_PROVIDER`, `FACE_EMBEDDING_DIM`, `FACE_MATCH_MIN_SIMILARITY`, `FACE_MAX_ATTEMPTS`, `FACE_WORKER_BATCH`, `FACE_WORKER_SECRET`). `FACE_EMBEDDING_DIM` must stay `128` until a new migration changes the column.
 4. Keep the existing object-storage variables set (`AWS_REGION`, `S3_BUCKET`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `UPLOAD_TOKEN_SECRET`). Production hosts such as Vercel cannot store uploads on local disk.
 5. Restart the app so it loads the new client and environment.
-6. Run the worker on a schedule, or after uploads, from a machine that can reach the app. The upload APIs do not call it.
+6. Processing starts by itself after a gallery upload, a feed post, or a face-reference enrollment. The response is sent first; face detection runs just after it. A daily Vercel cron retries anything that pass did not finish. `npm run faces:process` is only needed when you want to drain the queue from your own machine.
 
 ```bash
 npm run faces:process
 ```
 
-The script reads `FACE_WORKER_SECRET` and posts to `APP_BASE_URL` (default `http://localhost:3000`) at `POST /api/internal/media/process` with header `x-face-worker-secret`. Run it under pm2 or cron in production. Each call processes a small batch and retries failed jobs until `FACE_MAX_ATTEMPTS`.
+The script reads `FACE_WORKER_SECRET` and posts to `APP_BASE_URL` (default `http://localhost:3000`) at `POST /api/internal/media/process` with header `x-face-worker-secret`. Each call processes a small batch and retries failed jobs until `FACE_MAX_ATTEMPTS`.
+
+### Vercel
+
+`npm run build` runs `prisma migrate deploy` before the Next.js build, so a deploy applies pending migrations, including people-in-media. The hosted Postgres must allow `CREATE EXTENSION vector` (Prisma Postgres does). Set `DIRECT_URL` to the direct database host when `DATABASE_URL` is the pooled URL; migrations use `DIRECT_URL` when it is set.
+
+Set these project environment variables: `FACE_PROVIDER` (`local` is enough to test the pipeline; it only matches an identical file), `FACE_WORKER_SECRET`, and `CRON_SECRET`. Vercel Cron calls `GET /api/internal/media/process` once a day with `Authorization: Bearer <CRON_SECRET>`. You do not run `npm run faces:process` on Vercel.
 
 `FACE_PROVIDER=local` makes the pipeline runnable without a GPU. It builds a deterministic vector from the file bytes, so only the same file matches itself. It does not recognize a person across different photos, and it skips videos. For real recognition set `FACE_PROVIDER=http`, `FACE_SERVICE_URL`, and optionally `FACE_SERVICE_TOKEN`. The service receives the raw image or video bytes and must return JSON:
 

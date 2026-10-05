@@ -13,8 +13,12 @@ const nextConfig: NextConfig = {
   // },
   experimental: {
     serverActions: {
-      bodySizeLimit: '50mb',
+      // One post can be six 10MB images, or one 50MB video, plus the form fields.
+      bodySizeLimit: '70mb',
     },
+    // Middleware matches every /api request and otherwise keeps only the first 10MB.
+    // A larger video was cut off, and the feed response went out before the upload finished.
+    middlewareClientMaxBodySize: '70mb',
   },
 };
 

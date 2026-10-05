@@ -14,6 +14,7 @@ import {
   IMAGE_AND_VIDEO_UPLOAD_LIMITS_NOTE,
   precheckUploadFile,
 } from '@/lib/upload-client';
+import { getMediaKind } from '@/lib/upload-rules';
 import { WATERMARK_POSITION_LABELS, type EventWatermark } from '@/lib/watermark';
 import { WatermarkOverlay } from '@/components/WatermarkOverlay';
 import { ContentSkeleton } from '@/components/navigation/ContentSkeleton';
@@ -91,13 +92,6 @@ function buildGalleryTargets(days: EventDay[]): GalleryTarget[] {
     }
     return targets;
   });
-}
-
-function guessMediaTypeFromMime(mime: string): 'image' | 'video' | null {
-  if (!mime) return null;
-  if (mime.startsWith('image/')) return 'image';
-  if (mime.startsWith('video/')) return 'video';
-  return null;
 }
 
 export default function EventDayMediaPage({
@@ -223,54 +217,74 @@ export default function EventDayMediaPage({
 
     setUploading(true);
     setError(null);
+    const uploaded: Array<{ media_key: string; media_url: string; media_type: 'image' | 'video' }> = [];
+    const failures: string[] = [];
     try {
-      // 1) presign + PUT to S3
-      const uploaded = await Promise.all(
-        selectedFiles.map(async (file) => {
-          const kind = guessMediaTypeFromMime(file.type);
-          if (!kind) throw new Error(`Unsupported file type: ${file.type || '(unknown)'}`);
-
+      for (const file of selectedFiles) {
+        try {
           const pre = await precheckUploadFile(file);
-          if (!pre.ok) throw new Error(`${file.name}: ${pre.error}`);
+          if (!pre.ok) throw new Error(pre.error);
+          const contentType = pre.contentType || file.type;
+          const kind = getMediaKind(contentType);
+          if (kind !== 'image' && kind !== 'video') {
+            throw new Error('Only images and videos can be added to a session.');
+          }
 
           const presigned = await presignEventDayMediaUploadAction({
             eventId,
             eventSessionId: selectedSessionId,
             filename: file.name,
-            contentType: file.type,
+            contentType,
             fileSize: file.size,
             videoDurationSec: pre.videoDurationSec,
           });
           if (!presigned.ok) throw new Error(presigned.error);
 
           const { uploadUrl, fileUrl, key } = presigned.data;
-          if (!uploadUrl || !fileUrl || !key) throw new Error('Presign response missing uploadUrl/fileUrl/key');
+          if (!uploadUrl || !fileUrl || !key) throw new Error('Storage did not return an upload link.');
 
-          const putRes = await fetch(uploadUrl, {
-            method: 'PUT',
-            headers: { 'Content-Type': file.type },
-            body: file,
+          let putRes: Response;
+          try {
+            putRes = await fetch(uploadUrl, {
+              method: 'PUT',
+              headers: { 'Content-Type': contentType },
+              body: file,
+            });
+          } catch {
+            throw new Error('Could not reach storage. The bucket must allow PUT from this website.');
+          }
+          if (!putRes.ok) throw new Error(`Storage rejected the file (${putRes.status}).`);
+
+          uploaded.push({
+            media_key: String(key),
+            media_url: String(fileUrl),
+            media_type: kind,
           });
-          if (!putRes.ok) throw new Error(`S3 upload failed for ${file.name}`);
+        } catch (error) {
+          failures.push(`${file.name}: ${error instanceof Error ? error.message : 'Upload failed'}`);
+        }
+      }
 
-          return { media_key: String(key), media_url: String(fileUrl), media_type: kind as 'image' | 'video' };
-        })
-      );
+      let saved = false;
+      if (uploaded.length > 0) {
+        const createRes = await createEventDayMediaAction({
+          eventId,
+          eventSessionId: selectedSessionId,
+          items: uploaded.map((item, index) => ({
+            ...item,
+            display_order: dayMedia.length + index,
+          })),
+        });
+        if (!createRes.ok) failures.push(createRes.error);
+        else saved = true;
+      }
 
-      // 2) create DB rows via admin API
-      const createRes = await createEventDayMediaAction({
-        eventId,
-        eventSessionId: selectedSessionId,
-        items: uploaded.map((u, i) => ({
-          ...u,
-          display_order: dayMedia.length + i,
-        })),
-      });
-      if (!createRes.ok) throw new Error(createRes.error);
-
-      setSelectedFiles([]);
-      if (fileInputRef.current) fileInputRef.current.value = '';
+      if (saved) {
+        setSelectedFiles([]);
+        if (fileInputRef.current) fileInputRef.current.value = '';
+      }
       await load();
+      if (failures.length > 0) setError(failures.join(' '));
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Upload failed');
     } finally {

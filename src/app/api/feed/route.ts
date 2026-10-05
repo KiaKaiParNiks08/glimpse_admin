@@ -6,7 +6,9 @@ import {
 } from '@/lib/validations';
 import { ok, badRequest, serverError } from '@/lib/api-response';
 import {
+  IncompleteUploadError,
   getMediaKind,
+  resolveUploadMime,
   saveUploadedFile,
   validateMediaFile,
 } from '@/lib/upload';
@@ -15,7 +17,7 @@ import { getUserFromAuthorizationHeader } from '@/lib/jwt';
 import { createPost, listPosts } from '@/server/posts';
 import { registerFeedPostMedia } from '@/server/people-media/register';
 
-/** Increase body size limit for multipart (images/videos). Default is 1MB. */
+/** Allow a video upload to finish. Body size is set in next.config (middlewareClientMaxBodySize). */
 export const maxDuration = 60;
 
 /**
@@ -49,7 +51,13 @@ export async function GET(request: Request) {
  */
 export async function POST(request: NextRequest) {
   try {
-    const formData = await request.formData();
+    let formData: FormData;
+    try {
+      formData = await request.formData();
+    } catch (error) {
+      console.error(error);
+      return badRequest('The upload did not finish. Please send the file again.');
+    }
     const user_id = formData.get('user_id');
     const caption = formData.get('caption');
     const event_id = formData.get('event_id');
@@ -77,16 +85,16 @@ export async function POST(request: NextRequest) {
     }> = [];
     let order = 0;
 
-    // Collect all media files: "media", "media[]", or "media[0]", "media[1]" (Swagger UI array)
+    // Collect all media files: "media", "media[]", or "media[0]", "media[1]" (Swagger UI array).
+    // An empty part means the body was cut off. Do not create the post without that file.
     const files: File[] = [];
     for (const [key, value] of formData.entries()) {
-      if (
-        (key === 'media' || key === 'media[]' || key.startsWith('media[')) &&
-        value instanceof File &&
-        value.size > 0
-      ) {
-        files.push(value);
+      const isMediaField = key === 'media' || key === 'media[]' || key.startsWith('media[');
+      if (!isMediaField) continue;
+      if (!(value instanceof File) || value.size <= 0) {
+        return badRequest('The media file was missing or did not finish uploading. Please try again.');
       }
+      files.push(value);
     }
 
     // Validate type/size and collect kinds: max 1 video OR max 6 images (no mixing)
@@ -94,18 +102,19 @@ export async function POST(request: NextRequest) {
     const MAX_VIDEOS = 1;
     let imageCount = 0;
     let videoCount = 0;
-    const validated: { file: File; kind: 'image' | 'video' }[] = [];
+    const validated: { file: File; kind: 'image' | 'video'; mime: string }[] = [];
 
     const videoDurationField = formData.get('video_duration_sec');
 
     for (const file of files) {
-      const kind = getMediaKind(file.type);
+      const mime = resolveUploadMime(file.type, file.name);
+      const kind = getMediaKind(mime);
       if (!kind || kind === 'pdf') {
         return badRequest(
           `Invalid file type for "${file.name}". Allowed: images (JPEG, PNG, GIF, WebP) and videos (MP4, WebM, MOV).`
         );
       }
-      const validationError = validateMediaFile({ type: file.type, size: file.size }, kind);
+      const validationError = validateMediaFile({ type: mime, size: file.size }, kind);
       if (validationError) return badRequest(validationError);
       if (kind === 'video') {
         const durationError = validateDeclaredVideoDuration(videoDurationField);
@@ -113,7 +122,7 @@ export async function POST(request: NextRequest) {
       }
       if (kind === 'image') imageCount += 1;
       else videoCount += 1;
-      validated.push({ file, kind });
+      validated.push({ file, kind, mime });
     }
 
     if (videoCount > MAX_VIDEOS) {
@@ -127,9 +136,12 @@ export async function POST(request: NextRequest) {
     }
 
     const projectRoot = process.cwd();
-    for (const { file, kind } of validated) {
+    for (const { file, kind, mime } of validated) {
       order += 1;
-      const saved = await saveUploadedFile(file, kind, projectRoot, { prefix: 'feed' });
+      const saved = await saveUploadedFile(file, kind, projectRoot, {
+        prefix: 'feed',
+        contentType: mime,
+      });
       mediaItems.push({
         media_type: kind,
         media_url: saved.relativeUrl,
@@ -171,6 +183,9 @@ export async function POST(request: NextRequest) {
 
     return ok(post, 201);
   } catch (e) {
+    if (e instanceof IncompleteUploadError) {
+      return badRequest(e.message);
+    }
     console.error(e);
     return serverError('Unable to create post');
   }

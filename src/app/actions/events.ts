@@ -1,5 +1,6 @@
 'use server';
 
+import { Prisma } from '@prisma/client';
 import {
   listEventsQuerySchema,
   createEventSchema,
@@ -390,6 +391,19 @@ export async function createAppThemeAction(
   }
 }
 
+function eventUniqueMessage(error: unknown, action: 'create' | 'update'): string | null {
+  if (!(error instanceof Prisma.PrismaClientKnownRequestError) || error.code !== 'P2002') return null;
+  const target = error.meta?.target;
+  const fields = Array.isArray(target) ? target.map(String).join(' ') : String(target ?? '');
+  if (fields.includes('slug')) {
+    return 'This slug is already used by another event. Change the slug and save again.';
+  }
+  if (fields.includes('event_code')) {
+    return 'This event code is already used. Choose a different event code.';
+  }
+  return action === 'create' ? 'Unable to create event' : 'Unable to update event';
+}
+
 export async function createEventAction(
   body: CreateEventInput
 ): Promise<CreateEventResult> {
@@ -411,7 +425,7 @@ export async function createEventAction(
     return { ok: true, data: toPlainValue(event) as Awaited<ReturnType<typeof createEvent>> };
   } catch (e) {
     console.error(e);
-    return { ok: false, error: 'Unable to create event' };
+    return { ok: false, error: eventUniqueMessage(e, 'create') ?? 'Unable to create event' };
   }
 }
 
@@ -438,7 +452,7 @@ export async function updateEventAction(
     return { ok: true, data: toPlainValue(event) as Awaited<ReturnType<typeof updateEvent>> };
   } catch (e) {
     console.error(e);
-    return { ok: false, error: 'Unable to update event' };
+    return { ok: false, error: eventUniqueMessage(e, 'update') ?? 'Unable to update event' };
   }
 }
 

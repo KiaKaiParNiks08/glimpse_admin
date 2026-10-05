@@ -474,6 +474,15 @@ No local test rows were inserted. `npm run prisma:deploy` was tried on 2026-10-0
 
 ---
 
+## 2026-10-05 — Duplicate event slug
+
+Creating or updating an event whose slug or event code already exists now returns that reason to the form instead of a generic failure. The database unique constraint is unchanged.
+
+**Modified files**
+- `src/app/actions/events.ts` — map Prisma P2002 on `slug` and `event_code`
+
+---
+
 ## 2026-10-04 — My recognized media requires user_id
 
 `GET /api/events/:eventId/my-media` now requires query `user_id`, same as favorites. It must match the app-user token, and only that user's face matches are returned. Session gallery stays on `GET /api/events/day-media`.
@@ -513,6 +522,63 @@ No test rows were inserted. Leave a name blank to store nothing for that person.
 
 ---
 
+## 2026-10-05 — Comment replies on the feed comments list
+
+`GET /api/feed/{post_id}/comments` pages top-level comments and now includes each thread in `replies`. A reply to a reply stays on that same comment. `meta.total` counts top-level comments only.
+
+**Modified files**
+- `src/server/comments.ts` — nest replies under each comment
+- `src/lib/validations/comments.ts` — `parent_comment_id` query no longer hides replies
+- `src/app/api/feed/[post_id]/comments/route.ts` — route comment
+- `src/lib/openapi.ts` — documents the `replies` array
+
+A local check inserted one comment and two replies on post `c1f1b7de-9bce-4255-bca7-b4a183eea1dd`, confirmed `replies` on `GET /api/feed/{post_id}/comments`, then deleted those three rows and restored `posts.comment_count`. Nothing from that check remains.
+
+---
+
+## 2026-10-05 — Feed video upload finishes before the response
+
+`POST /api/feed` goes through middleware, which was keeping only the first 10MB of the request. A larger video was cut off, the post was saved without a complete file, and the response went out while the phone was still uploading. The limit is now 70MB (one 50MB video, or six 10MB images). An empty or cut-off file is rejected instead of creating the post. A `.mp4`, `.mov`, or `.webm` file is accepted when the phone sends no type or `application/octet-stream`.
+
+**Modified files**
+- `next.config.ts` — `middlewareClientMaxBodySize` and server-action body limit set to 70MB
+- `src/app/api/feed/route.ts` — wait for a complete file; reject an empty media part
+- `src/lib/upload.ts` — do not store a buffer that is shorter than the file
+- `src/lib/upload-rules.ts` — resolve video type from the filename when the MIME type is generic
+
+A local check posted a `.mp4` sent as `application/octet-stream` and a 12MB video. Both returned `201` with `post_media` only after the file was stored. Those two posts and their S3 objects were deleted afterward. Nothing from that check remains.
+
+---
+
+## 2026-10-05 — Face processing on Vercel, session media upload
+
+Vercel cannot keep `npm run faces:process` running. Each gallery upload, feed post, and face-reference enrollment now processes the queue after the response is sent. A daily cron retries leftovers. The production build runs `prisma migrate deploy` first.
+
+Session media (Events → Media) uploads one file at a time straight to storage, then saves the session row. A file that storage rejects is named in the error, and files that did upload are still saved on the session. Presigned uploads no longer require an S3 checksum the browser does not send. A `.mp4`, `.mov`, or `.webm` file is accepted when the browser sends no type.
+
+**New files**
+- `src/server/people-media/schedule.ts` — runs the face queue after the response
+- `src/app/dashboard/events/[event_id]/media/layout.tsx` — allows the upload action 60 seconds
+- `vercel.json` — daily cron `GET /api/internal/media/process`
+
+**Modified files**
+- `src/server/people-media/register.ts` — queue processing after gallery and feed registration
+- `src/server/people-media/face-reference.ts` — queue processing after enrollment
+- `src/app/api/internal/media/process/route.ts` — GET for Vercel Cron
+- `src/lib/face-worker-auth.ts` — accepts `CRON_SECRET`
+- `src/middleware.ts` — allows the cron request
+- `package.json` — build applies migrations
+- `prisma.config.ts` — migrations use `DIRECT_URL` when set
+- `src/lib/s3-presign.ts` — browser PUT is not signed with a checksum
+- `src/app/dashboard/events/[event_id]/media/page.tsx` — save each successful session file
+- `src/app/actions/event-day-media.ts` — resolve the file type; report a save failure
+- `src/lib/upload-client.ts` — accept a filename when the type is generic
+- `README.md`, `.env.example` — Vercel env and cron
+
+The hosted database still needs the `vector` extension or the people-in-media migration fails the deploy. `FACE_PROVIDER=local` only matches identical files.
+
+---
+
 ## Known open items
 
 - `posts` has no `event_id` column: the feed shows posts from all events and post favorites can't be checked against the event.
@@ -520,7 +586,7 @@ No test rows were inserted. Leave a name blank to store nothing for that person.
 - Security issues found during review, not fixed yet: legacy admin cookie forgeable with the default secret; any token can edit/delete users; OTP returned in `/api/auth` responses; venue/explore/upload server actions without auth; feed/like/favorites trust `user_id` from the request.
 - No admin UI for event categories (seeded by migration since 2026-10-02; add/rename others directly in `event_categories`).
 - Other environments still need `npm run prisma:deploy` for `20260927140000_add_user_favorites`, `20260929160000_session_media_and_watermark`, `20261001120000_happening_and_report_settings`, `20261002150000_seed_event_categories`, `20261002170000_watermark_size`, `20261002190000_event_cover_images`, `20261003000000_event_linkedin_url`, `20261004120000_people_in_media` and `20261004210000_event_team`. Install pgvector before the people-in-media migration, or `prisma migrate deploy` stops before `event_team`. If an environment already applied `20260928180000_add_session_phase_tags`, run its undo SQL (2026-09-28 section) first.
-- People in media: production face recognition still needs `FACE_PROVIDER=http` and `FACE_SERVICE_URL`. The local provider only matches identical files. A scheduled `npm run faces:process` (or cron calling `POST /api/internal/media/process`) must run outside the app request.
+- People in media: production face recognition still needs `FACE_PROVIDER=http` and `FACE_SERVICE_URL`. The local provider only matches identical files. Vercel runs one batch after each upload and a daily cron; `npm run faces:process` is only for draining the queue from your own machine.
 - Before deploying: go through the production checklist in the 2026-10-03 "/login ⇄ /dashboard redirect loop" section (`ADMIN_JWT_SECRET`, `X-Forwarded-Proto`, post-deploy login test).
 - Swapping two session titles on the same day in one save (A↔B) hits the unique (day, title) constraint; rename in two saves.
 - Watermark is an overlay: the mobile app must draw it (see `watermark` in `GET /api/events/{event_id}`); downloaded original files have no watermark.

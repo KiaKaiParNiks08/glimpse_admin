@@ -1,7 +1,7 @@
 import type { NextRequest } from 'next/server';
 import { NextResponse } from 'next/server';
 import { isEventAdminAssigned } from '@/server/events';
-import { isFaceWorkerAuthorized } from '@/lib/face-worker-auth';
+import { isFaceWorkerAuthorized, isVercelCronAuthorized } from '@/lib/face-worker-auth';
 import { getAdminFromAuthorizationHeader, getUserFromAuthorizationHeader } from '@/lib/jwt';
 
 function isUuidLike(val: string): boolean {
@@ -52,7 +52,7 @@ export async function middleware(request: NextRequest) {
   if (isPublicApiPath(pathname)) return NextResponse.next();
 
   if (pathname === '/api/internal/media/process') {
-    if (!isFaceWorkerAuthorized(request)) {
+    if (!isFaceWorkerAuthorized(request) && !isVercelCronAuthorized(request)) {
       return NextResponse.json({ message: 'Not authenticated', data: null }, { status: 401 });
     }
     return NextResponse.next();

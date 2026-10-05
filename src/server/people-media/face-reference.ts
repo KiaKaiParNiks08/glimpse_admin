@@ -5,6 +5,7 @@ import { deleteObjectByKey } from '@/lib/s3-presign';
 import { saveUploadedFile } from '@/lib/upload';
 import { FACE_CONSENT_VERSION } from './config';
 import { clearFaceEmbedding, deleteMatchesForUser } from './match';
+import { scheduleFaceProcessing } from './schedule';
 import { sha256Hex } from './storage';
 
 const referenceSelect = {
@@ -127,5 +128,6 @@ export async function enrollFaceReference(userId: string, file: File): Promise<F
   }
   const status = await getFaceReferenceStatus(userId);
   if (!status) throw new Error('Face reference was not saved');
+  scheduleFaceProcessing();
   return status;
 }
