@@ -17,7 +17,7 @@ export const postIdParamSchema = z.object({
 export const listPostsQuerySchema = z.object({
   user_id: uuidSchema.optional(),
   viewer_user_id: uuidSchema.optional(),
-  /** With viewer_user_id, adds is_favorite for the viewer's favorites in this event. */
+  /** Return only posts stored for this event. Posts with no event_id are never included. */
   event_id: uuidSchema.optional(),
   status: postStatusSchema.optional(),
   page: z.coerce.number().int().min(1).default(1),
@@ -49,7 +49,7 @@ export const deletePostPathSchema = z.object({
 export const createFeedPostFormSchema = z.object({
   user_id: uuidSchema,
   caption: z.string().optional(),
-  /** Event used to queue this post for face search. Optional; the user token event is used when omitted. */
+  /** Event this post belongs to. Omit to keep the post out of every event feed. */
   event_id: uuidSchema.optional(),
 });
 

@@ -8,13 +8,12 @@ import {
   deleteEventDayMediaAction,
   deleteEventDayMediaBulkAction,
   getEventDaysForMediaAction,
-  presignEventDayMediaUploadAction,
+  uploadSessionMediaFileAction,
 } from '@/app/actions/event-day-media';
 import {
   IMAGE_AND_VIDEO_UPLOAD_LIMITS_NOTE,
   precheckUploadFile,
 } from '@/lib/upload-client';
-import { getMediaKind } from '@/lib/upload-rules';
 import { WATERMARK_POSITION_LABELS, type EventWatermark } from '@/lib/watermark';
 import { WatermarkOverlay } from '@/components/WatermarkOverlay';
 import { ContentSkeleton } from '@/components/navigation/ContentSkeleton';
@@ -224,42 +223,18 @@ export default function EventDayMediaPage({
         try {
           const pre = await precheckUploadFile(file);
           if (!pre.ok) throw new Error(pre.error);
-          const contentType = pre.contentType || file.type;
-          const kind = getMediaKind(contentType);
-          if (kind !== 'image' && kind !== 'video') {
-            throw new Error('Only images and videos can be added to a session.');
+
+          const body = new FormData();
+          body.append('file', file);
+          body.append('event_id', eventId);
+          body.append('event_session_id', selectedSessionId);
+          if (pre.videoDurationSec != null) {
+            body.append('video_duration_sec', String(pre.videoDurationSec));
           }
+          const uploadedFile = await uploadSessionMediaFileAction(body);
+          if (!uploadedFile.ok) throw new Error(uploadedFile.error);
 
-          const presigned = await presignEventDayMediaUploadAction({
-            eventId,
-            eventSessionId: selectedSessionId,
-            filename: file.name,
-            contentType,
-            fileSize: file.size,
-            videoDurationSec: pre.videoDurationSec,
-          });
-          if (!presigned.ok) throw new Error(presigned.error);
-
-          const { uploadUrl, fileUrl, key } = presigned.data;
-          if (!uploadUrl || !fileUrl || !key) throw new Error('Storage did not return an upload link.');
-
-          let putRes: Response;
-          try {
-            putRes = await fetch(uploadUrl, {
-              method: 'PUT',
-              headers: { 'Content-Type': contentType },
-              body: file,
-            });
-          } catch {
-            throw new Error('Could not reach storage. The bucket must allow PUT from this website.');
-          }
-          if (!putRes.ok) throw new Error(`Storage rejected the file (${putRes.status}).`);
-
-          uploaded.push({
-            media_key: String(key),
-            media_url: String(fileUrl),
-            media_type: kind,
-          });
+          uploaded.push(uploadedFile.data);
         } catch (error) {
           failures.push(`${file.name}: ${error instanceof Error ? error.message : 'Upload failed'}`);
         }
@@ -390,7 +365,7 @@ export default function EventDayMediaPage({
         <div>
           <div style={{ color: '#e2e8f0', fontWeight: 600 }}>Upload media</div>
           <div className={styles.hint}>
-            Supported: images and videos. Upload goes directly to S3; DB stores `media_key`.{' '}
+            Supported: images and videos. Files are sent to the server, then saved on this session.{' '}
             {IMAGE_AND_VIDEO_UPLOAD_LIMITS_NOTE}
           </div>
           <div className={styles.hint}>

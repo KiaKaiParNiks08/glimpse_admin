@@ -600,7 +600,7 @@ export function getOpenApiSpec(serverUrl: string) {
         get: {
           summary: 'List feed posts',
           description:
-            'Paginated list of feed posts with optional filters by user_id and status. Includes post_media (images/videos).',
+            'Paginated feed posts. When event_id is set, only posts stored for that event are returned. Posts with no event_id are left out of every event feed.',
           tags: ['Feed'],
           parameters: [
             { name: 'user_id', in: 'query', schema: { type: 'string', format: 'uuid' }, description: 'Filter by post author' },
@@ -615,7 +615,7 @@ export function getOpenApiSpec(serverUrl: string) {
               in: 'query',
               schema: { type: 'string', format: 'uuid' },
               description:
-                'Together with viewer_user_id, each post includes is_favorite=true/false for the viewer\'s favorites in this event',
+                'Return only posts for this event. Also, with viewer_user_id, each post includes is_favorite for this event.',
             },
             { name: 'status', in: 'query', schema: { type: 'string', enum: ['active', 'deleted'] } },
             { name: 'page', in: 'query', schema: { type: 'integer', minimum: 1, default: 1 } },
@@ -637,6 +637,7 @@ export function getOpenApiSpec(serverUrl: string) {
                           properties: {
                             id: { type: 'string', format: 'uuid' },
                             user_id: { type: 'string', format: 'uuid' },
+                            event_id: { type: 'string', format: 'uuid', nullable: true },
                             caption: { type: 'string', nullable: true },
                             status: { type: 'string', nullable: true },
                             like_count: { type: 'integer', nullable: true },
@@ -711,6 +712,11 @@ export function getOpenApiSpec(serverUrl: string) {
                   required: ['user_id'],
                   properties: {
                     user_id: { type: 'string', format: 'uuid', description: 'Post author (required)' },
+                    event_id: {
+                      type: 'string',
+                      format: 'uuid',
+                      description: 'Event this post belongs to. Omit to keep it out of every event feed.',
+                    },
                     caption: { type: 'string', description: 'Post caption' },
                     video_duration_sec: {
                       type: 'number',

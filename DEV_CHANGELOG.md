@@ -579,9 +579,37 @@ The hosted database still needs the `vector` extension or the people-in-media mi
 
 ---
 
+## 2026-10-08 — Feed posts belong to one event
+
+`POST /api/feed` stores `event_id` (the form value, or the user token event when the author matches). `GET /api/feed?event_id=` returns only that event. A post with no event is not listed for any event. Face search for a post uses that same event, and `GET /api/events/{event_id}/my-media` already returns matches for that event only.
+
+Session media on the panel now uploads through the server, the same way current-happening does. The browser no longer PUTs the file to S3, which was failing on Vercel.
+
+**New files**
+- `prisma/migrations/20261008120000_posts_event_id/migration.sql` — nullable `posts.event_id`
+
+**Modified files**
+- `prisma/schema.prisma` — `posts.event_id`
+- `src/server/posts.ts` — save and filter by event
+- `src/app/api/feed/route.ts` — store the event before face registration
+- `src/lib/validations/posts.ts`, `src/lib/openapi.ts` — event filter documented
+- `src/app/actions/event-day-media.ts` — server upload for one session file
+- `src/app/dashboard/events/[event_id]/media/page.tsx` — uses that upload
+
+**Undo the DB part**
+```sql
+ALTER TABLE posts DROP CONSTRAINT IF EXISTS posts_event_id_fkey;
+DROP INDEX IF EXISTS idx_posts_event_id;
+ALTER TABLE posts DROP COLUMN IF EXISTS event_id;
+DELETE FROM _prisma_migrations WHERE migration_name = '20261008120000_posts_event_id';
+```
+
+Posts created before this column stay with `event_id` null, so they no longer appear in an event feed.
+
+---
+
 ## Known open items
 
-- `posts` has no `event_id` column: the feed shows posts from all events and post favorites can't be checked against the event.
 - `GET /api/feed` returns deleted posts unless `status=active` is passed (existing behaviour).
 - Security issues found during review, not fixed yet: legacy admin cookie forgeable with the default secret; any token can edit/delete users; OTP returned in `/api/auth` responses; venue/explore/upload server actions without auth; feed/like/favorites trust `user_id` from the request.
 - No admin UI for event categories (seeded by migration since 2026-10-02; add/rename others directly in `event_categories`).

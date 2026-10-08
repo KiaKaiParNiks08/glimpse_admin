@@ -5,6 +5,7 @@ import { getAdminSessionFromCookies } from '@/lib/admin-session';
 import { isEventAdminAssigned, getEventById } from '@/server/events';
 import { getEventDaysByEventId } from '@/server/event-days';
 import { createPresignedUpload } from '@/lib/s3-presign';
+import { IncompleteUploadError, saveUploadedFile } from '@/lib/upload';
 import {
   getMediaKind,
   resolveUploadMime,
@@ -130,6 +131,60 @@ export async function presignEventDayMediaUploadAction(input: {
   } catch (e) {
     const msg = e instanceof Error ? e.message : 'Presign failed';
     return { ok: false, error: msg };
+  }
+}
+
+export type UploadSessionMediaFileResult =
+  | { ok: true; data: { media_key: string; media_url: string; media_type: 'image' | 'video' } }
+  | { ok: false; error: string };
+
+/**
+ * Upload one session image or video through the server, the same path as current-happening.
+ * The browser does not PUT to S3. Vercel blocks that direct upload.
+ */
+export async function uploadSessionMediaFileAction(formData: FormData): Promise<UploadSessionMediaFileResult> {
+  const auth = await requireAdmin();
+  if (!auth.ok) return { ok: false, error: auth.error };
+
+  const eventId = String(formData.get('event_id') ?? '').trim();
+  const eventSessionId = String(formData.get('event_session_id') ?? '').trim();
+  const allowed = await canAccessEvent(eventId, auth.admin);
+  if (!allowed) return { ok: false, error: 'Event not found' };
+
+  const session = await findEventSession(eventId, eventSessionId);
+  if (!session) return { ok: false, error: 'Session not found' };
+
+  const file = formData.get('file');
+  if (!(file instanceof File) || file.size <= 0) {
+    return { ok: false, error: 'The media file was missing or did not finish uploading.' };
+  }
+
+  const mimeType = resolveUploadMime(file.type, file.name);
+  const kind = getMediaKind(mimeType);
+  if (kind !== 'image' && kind !== 'video') {
+    return { ok: false, error: 'Only images (JPEG, PNG, GIF, WebP) or videos (MP4, WebM, MOV) are allowed.' };
+  }
+
+  const sizeErr = validateMediaFile({ type: mimeType, size: file.size }, kind);
+  if (sizeErr) return { ok: false, error: sizeErr };
+  if (kind === 'video') {
+    const durErr = validateDeclaredVideoDuration(formData.get('video_duration_sec'));
+    if (durErr) return { ok: false, error: durErr };
+  }
+
+  try {
+    const saved = await saveUploadedFile(file, kind, process.cwd(), {
+      prefix: `events/${eventId}/sessions/${session.id}`,
+      contentType: mimeType,
+    });
+    return {
+      ok: true,
+      data: { media_key: saved.storageKey, media_url: saved.relativeUrl, media_type: kind },
+    };
+  } catch (error) {
+    if (error instanceof IncompleteUploadError) return { ok: false, error: error.message };
+    console.error(error);
+    return { ok: false, error: error instanceof Error ? error.message : 'Upload failed' };
   }
 }
 

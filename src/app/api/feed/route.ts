@@ -4,7 +4,7 @@ import {
   listPostsQuerySchema,
   parseQuery,
 } from '@/lib/validations';
-import { ok, badRequest, serverError } from '@/lib/api-response';
+import { ok, badRequest, notFound, serverError } from '@/lib/api-response';
 import {
   IncompleteUploadError,
   getMediaKind,
@@ -15,6 +15,7 @@ import {
 import { validateDeclaredVideoDuration } from '@/lib/upload-rules';
 import { getUserFromAuthorizationHeader } from '@/lib/jwt';
 import { createPost, listPosts } from '@/server/posts';
+import prisma from '@/server/prisma';
 import { registerFeedPostMedia } from '@/server/people-media/register';
 
 /** Allow a video upload to finish. Body size is set in next.config (middlewareClientMaxBodySize). */
@@ -46,7 +47,7 @@ export async function GET(request: Request) {
  * POST /api/feed – Create a feed post with optional image/video uploads.
  * Content-Type: multipart/form-data
  * Fields: user_id (required), caption (optional), event_id (optional), media (multiple). Max 1 video OR max 6 images per post (no mixing). Status is always active.
- * Face search is queued for the event on the user token, or for event_id when that field is sent. The post is still created if face registration is unavailable.
+ * event_id is stored on the post. GET /api/feed?event_id= returns only that event. A post with no event_id is not listed for any event.
  * Files are saved under project uploads folder (uploads/YYYY/MM/).
  */
 export async function POST(request: NextRequest) {
@@ -75,6 +76,15 @@ export async function POST(request: NextRequest) {
     const parsed = createFeedPostFormSchema.safeParse(formFields);
     if (!parsed.success) {
       return badRequest('Validation failed', parsed.error.flatten().fieldErrors);
+    }
+
+    const tokenUser = getUserFromAuthorizationHeader(request);
+    const eventId =
+      parsed.data.event_id ??
+      (tokenUser && tokenUser.id === parsed.data.user_id ? tokenUser.event_id : undefined);
+    if (eventId) {
+      const event = await prisma.events.findUnique({ where: { id: eventId }, select: { id: true } });
+      if (!event) return notFound('Event not found');
     }
 
     const mediaItems: Array<{
@@ -155,6 +165,7 @@ export async function POST(request: NextRequest) {
         user_id: parsed.data.user_id,
         caption: parsed.data.caption,
         status: 'active',
+        event_id: eventId ?? null,
       },
       mediaItems.map((item) => ({
         media_type: item.media_type,
@@ -163,10 +174,6 @@ export async function POST(request: NextRequest) {
       }))
     );
 
-    const tokenUser = getUserFromAuthorizationHeader(request);
-    const eventId =
-      parsed.data.event_id ??
-      (tokenUser && tokenUser.id === parsed.data.user_id ? tokenUser.event_id : undefined);
     if (eventId) {
       const storageByOrder = new Map(mediaItems.map((item) => [item.media_order, item.storageKey]));
       await registerFeedPostMedia({

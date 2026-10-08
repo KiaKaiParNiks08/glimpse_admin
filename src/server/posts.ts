@@ -6,6 +6,7 @@ import type { CreatePostInput, ListPostsQuery } from '@/lib/validations/posts';
 export const postSelect = {
   id: true,
   user_id: true,
+  event_id: true,
   caption: true,
   status: true,
   like_count: true,
@@ -32,6 +33,7 @@ export const postSelect = {
 export type PostWithMedia = {
   id: string;
   user_id: string;
+  event_id: string | null;
   caption: string | null;
   status: string | null;
   like_count: number;
@@ -68,12 +70,13 @@ export interface CreatePostMediaItem {
  * Create a feed post with optional media (images/videos).
  */
 export async function createPost(
-  input: CreatePostInput,
+  input: CreatePostInput & { event_id?: string | null },
   media: CreatePostMediaItem[] = []
 ): Promise<PostWithMedia> {
   const post = await prisma.posts.create({
     data: {
       user_id: input.user_id,
+      event_id: input.event_id ?? null,
       caption: input.caption ?? null,
       status: input.status ?? 'active',
       post_media:
@@ -106,6 +109,8 @@ export async function listPosts(query: ListPostsQuery): Promise<{
   const where = {
     ...(user_id && { user_id }),
     ...(status && { status }),
+    // A post with no event_id is not part of any event feed.
+    ...(event_id && { event_id }),
   };
 
   const select = {
