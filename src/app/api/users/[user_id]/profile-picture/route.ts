@@ -2,14 +2,15 @@ import { NextRequest } from 'next/server';
 import { parseParams, userIdPathSchema } from '@/lib/validations';
 import { badRequest, notFound, ok, serverError } from '@/lib/api-response';
 import { getMediaKind, saveUploadedFile, validateMediaFile } from '@/lib/upload';
+import { enrollFaceReference } from '@/server/people-media/face-reference';
 import { updateUser } from '@/server/users';
 
-/** Increase body size allowance for profile image uploads. */
-export const maxDuration = 30;
+/** Profile upload also enrolls the face reference and runs matching. */
+export const maxDuration = 60;
 
 /**
  * POST /api/users/[user_id]/profile-picture
- * Uploads and updates only the user's profile picture (avatar_url).
+ * Uploads the profile picture and uses that same photo as the face reference.
  * Body: multipart/form-data with field "file".
  */
 export async function POST(
@@ -44,11 +45,19 @@ export async function POST(
     const user = await updateUser(path.user_id, { avatar_url: relativeUrl });
     if (!user) return notFound('User not found');
 
+    let face_reference = null;
+    try {
+      face_reference = await enrollFaceReference(user.id, file);
+    } catch (error) {
+      console.error('[profile-picture] face reference was not enrolled', error);
+    }
+
     return ok({
       message: 'Profile picture updated',
       data: {
         user_id: user.id,
         avatar_url: user.avatar_url,
+        face_reference,
       },
     });
   } catch (e) {

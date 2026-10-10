@@ -15,8 +15,10 @@ export async function GET(request: Request) {
     if (err) return err;
 
     const rows = await getCurrentHappeningByEventId(query.event_id);
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    const data = rows.map(({ happening_photos, ...row }) => row);
+    const data = rows.map((row) => ({
+      ...row,
+      photo_count: row.happening_photos.length,
+    }));
     return ok({ data });
   } catch (e) {
     console.error(e);

@@ -692,6 +692,35 @@ export function getOpenApiSpec(serverUrl: string) {
                       },
                     },
                   },
+                  example: {
+                    message: 'Success',
+                    data: [
+                      {
+                        id: 'c1f1b7de-9bce-4255-bca7-b4a183eea1dd',
+                        user_id: '8b270387-dbff-4cfa-9801-ebd30252350f',
+                        event_id: '181656dd-af20-4303-9b4b-a7c6eaf4517b',
+                        caption: 'From another guest',
+                        status: 'active',
+                        like_count: 0,
+                        comment_count: 0,
+                        liked_by_viewer: false,
+                        is_favorite: false,
+                        created_at: '2026-10-10T11:00:00.000Z',
+                        updated_at: '2026-10-10T11:00:00.000Z',
+                        users: { full_name: 'Rohan', avatar_url: null },
+                        post_media: [
+                          {
+                            id: 'f1f2f3f4-1111-4222-8333-444455556666',
+                            media_type: 'image',
+                            media_url: '/api/upload/signed?t=feed-photo',
+                            thumbnail_url: null,
+                            media_order: 1,
+                          },
+                        ],
+                      },
+                    ],
+                    meta: { total: 1, page: 1, limit: 20, totalPages: 1 },
+                  },
                 },
               },
             },
@@ -1178,7 +1207,7 @@ export function getOpenApiSpec(serverUrl: string) {
         get: {
           summary: 'List current happening',
           description:
-            'Returns current happening rows for the given event_id. Note: photo details are intentionally excluded; use /api/events/current-happening/photos for images.',
+            'Returns current happening rows for the given event_id, including happening_photos and photo_count. The same photos are also at GET /api/events/current-happening/photos?happening_id=',
           tags: ['Events'],
           parameters: [
             { name: 'event_id', in: 'query', required: true, schema: { type: 'string', format: 'uuid' } },
@@ -1204,10 +1233,51 @@ export function getOpenApiSpec(serverUrl: string) {
                             happening_date: { type: 'string', format: 'date' },
                             is_active: { type: 'boolean', nullable: true },
                             display_order: { type: 'integer', nullable: true },
+                            photo_count: { type: 'integer', description: 'Number of photos. The app can open the gallery when this is greater than 0.' },
+                            happening_photos: {
+                              type: 'array',
+                              items: {
+                                type: 'object',
+                                properties: {
+                                  id: { type: 'string', format: 'uuid' },
+                                  happening_id: { type: 'string', format: 'uuid' },
+                                  image_url: { type: 'string' },
+                                  media_type: { type: 'string', enum: ['image', 'video'] },
+                                  alt_text: { type: 'string', nullable: true },
+                                  sort_order: { type: 'integer', nullable: true },
+                                },
+                              },
+                            },
                           },
                         },
                       },
                     },
+                  },
+                  example: {
+                    message: 'Success',
+                    data: [
+                      {
+                        id: 'h1h2h3h4-1111-4222-8333-444455556666',
+                        event_id: '181656dd-af20-4303-9b4b-a7c6eaf4517b',
+                        title: 'Sangeet rehearsal',
+                        description: 'On the lawn',
+                        bg_image_url: '/api/upload/signed?t=happening-bg',
+                        happening_date: '2026-11-13T00:00:00.000Z',
+                        is_active: true,
+                        display_order: 0,
+                        photo_count: 1,
+                        happening_photos: [
+                          {
+                            id: 'p1p2p3p4-1111-4222-8333-444455556666',
+                            happening_id: 'h1h2h3h4-1111-4222-8333-444455556666',
+                            image_url: '/api/upload/signed?t=happening-photo',
+                            media_type: 'image',
+                            alt_text: null,
+                            sort_order: 0,
+                          },
+                        ],
+                      },
+                    ],
                   },
                 },
               },
@@ -1255,6 +1325,19 @@ export function getOpenApiSpec(serverUrl: string) {
                         },
                       },
                     },
+                  },
+                  example: {
+                    message: 'Success',
+                    data: [
+                      {
+                        id: 'p1p2p3p4-1111-4222-8333-444455556666',
+                        happening_id: 'h1h2h3h4-1111-4222-8333-444455556666',
+                        image_url: '/api/upload/signed?t=happening-photo',
+                        media_type: 'image',
+                        alt_text: null,
+                        sort_order: 0,
+                      },
+                    ],
                   },
                 },
               },
@@ -1314,10 +1397,87 @@ export function getOpenApiSpec(serverUrl: string) {
                       },
                     },
                   },
+                  example: {
+                    message: 'Success',
+                    data: [
+                      {
+                        id: 'm1m2m3m4-1111-4222-8333-444455556666',
+                        event_day_id: 'd1d2d3d4-1111-4222-8333-444455556666',
+                        event_session_id: 's1s2s3s4-1111-4222-8333-444455556666',
+                        media_url: '/api/upload/signed?t=session-photo',
+                        media_type: 'image',
+                        display_order: 0,
+                        created_at: '2026-10-10T10:00:00.000Z',
+                        is_favorite: false,
+                      },
+                    ],
+                  },
                 },
               },
             },
             '400': { description: 'Invalid query params (event_session_id or event_day_id is required)' },
+            '500': { description: 'Server error' },
+          },
+        },
+      },
+      '/api/events/{event_id}/my-media': {
+        get: {
+          summary: 'Photos and posts where this user was recognized',
+          description:
+            'Local test: enroll PUT /api/users/me/face-reference with consent=true, then upload a session photo or create a feed post for the same event_id. Matching runs during that upload. This list is only that event. A post made by another guest is included when this user\'s face matches. With FACE_PROVIDER=local, only an identical file matches.',
+          tags: ['Events'],
+          security: [{ BearerAuth: [] }],
+          parameters: [
+            { name: 'event_id', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } },
+            { name: 'user_id', in: 'query', required: true, schema: { type: 'string', format: 'uuid' }, description: 'Must equal the app-user token id' },
+            { name: 'page', in: 'query', schema: { type: 'integer', minimum: 1, default: 1 } },
+            { name: 'limit', in: 'query', schema: { type: 'integer', minimum: 1, maximum: 50, default: 20 } },
+          ],
+          responses: {
+            '200': {
+              description: 'Matched media for this user in this event',
+              content: {
+                'application/json': {
+                  schema: {
+                    type: 'object',
+                    properties: {
+                      message: { type: 'string' },
+                      data: { type: 'array', items: { type: 'object' } },
+                      meta: { type: 'object' },
+                    },
+                  },
+                  example: {
+                    message: 'Success',
+                    data: [
+                      {
+                        media_asset_id: 'a1a2a3a4-1111-4222-8333-444455556666',
+                        source: 'photographer',
+                        media_type: 'image',
+                        media_url: '/api/upload/signed?t=session-photo',
+                        created_at: '2026-10-10T10:00:00.000Z',
+                        event_day_media_id: 'm1m2m3m4-1111-4222-8333-444455556666',
+                        post_id: null,
+                        caption: null,
+                        similarity: 1,
+                      },
+                      {
+                        media_asset_id: 'b1b2b3b4-1111-4222-8333-444455556666',
+                        source: 'user_post',
+                        media_type: 'image',
+                        media_url: '/api/upload/signed?t=feed-photo',
+                        created_at: '2026-10-10T11:00:00.000Z',
+                        event_day_media_id: null,
+                        post_id: 'c1f1b7de-9bce-4255-bca7-b4a183eea1dd',
+                        caption: 'From another guest',
+                        similarity: 1,
+                      },
+                    ],
+                    meta: { total: 2, page: 1, limit: 20, totalPages: 1 },
+                  },
+                },
+              },
+            },
+            '403': { description: 'user_id does not match the token, or the user is not a guest of this event' },
             '500': { description: 'Server error' },
           },
         },

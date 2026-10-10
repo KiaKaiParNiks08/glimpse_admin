@@ -116,10 +116,10 @@ export async function GET(
     };
 
     const happeningItems = isVisibleInPhase(happeningFlags, current)
-      ? (await getCurrentHappeningByEventId(event.id)).map(
-          // eslint-disable-next-line @typescript-eslint/no-unused-vars -- photos: GET /api/events/current-happening/photos
-          ({ happening_photos, ...item }) => item
-        )
+      ? (await getCurrentHappeningByEventId(event.id)).map((item) => ({
+          ...item,
+          photo_count: item.happening_photos.length,
+        }))
       : [];
     const current_happening =
       happeningItems.length > 0

@@ -1,6 +1,5 @@
 import { Prisma } from '@prisma/client';
 import prisma from '@/server/prisma';
-import { isEventGuest } from '@/server/event-guests';
 import { scheduleFaceProcessing } from './schedule';
 import { sha256Hex, storageKeyFromMediaUrl } from './storage';
 
@@ -134,7 +133,7 @@ export async function registerPhotographerGalleryItems(items: GalleryRow[]): Pro
         uploadedBy: ownerById.get(item.id) ?? null,
       });
     }
-    scheduleFaceProcessing();
+    await scheduleFaceProcessing();
   } catch (error) {
     console.error('[people-media] gallery registration failed', error);
   }
@@ -155,7 +154,6 @@ export async function registerFeedPostMedia(input: {
 }): Promise<void> {
   if (input.items.length === 0) return;
   try {
-    if (!(await isEventGuest(input.eventId, input.userId))) return;
     for (const item of input.items) {
       if (item.media_type !== 'image' && item.media_type !== 'video') continue;
       const storageKey = item.storageKey ?? storageKeyFromMediaUrl(item.media_url);
@@ -171,7 +169,7 @@ export async function registerFeedPostMedia(input: {
         uploadedBy: input.userId,
       });
     }
-    scheduleFaceProcessing();
+    await scheduleFaceProcessing();
   } catch (error) {
     console.error('[people-media] feed registration failed', error);
   }

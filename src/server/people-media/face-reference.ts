@@ -128,6 +128,6 @@ export async function enrollFaceReference(userId: string, file: File): Promise<F
   }
   const status = await getFaceReferenceStatus(userId);
   if (!status) throw new Error('Face reference was not saved');
-  scheduleFaceProcessing();
+  await scheduleFaceProcessing();
   return status;
 }

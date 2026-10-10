@@ -608,6 +608,35 @@ Posts created before this column stay with `event_id` null, so they no longer ap
 
 ---
 
+## 2026-10-10 — Happening photos on the list, face match during upload
+
+`GET /api/events/current-happening` and the event dashboard were omitting `happening_photos`, so the app had no photos to open. Those arrays are included again, with `photo_count`. `GET /api/events/current-happening/photos?happening_id=` is unchanged.
+
+Face matching now runs inside the upload request. A free Vercel project does not need `npm run faces:process` or a cron. A feed post is indexed for its event even when another guest created it. `GET /api/events/{event_id}/my-media?user_id=` still returns only that event's matches for that user.
+
+**Modified files**
+- `src/app/api/events/current-happening/route.ts` — include photos
+- `src/app/api/events/[event_id]/route.ts` — include photos on the dashboard
+- `src/server/people-media/schedule.ts` — process before the response returns
+- `src/server/people-media/register.ts` — index every event post, then match
+- `src/server/people-media/face-reference.ts` — wait for the same processing
+- `src/lib/openapi.ts` — sample responses for feed, session media, happening, and recognized media
+
+`FACE_PROVIDER=local` still matches only an identical file. A real match across two different photos needs `FACE_PROVIDER=http`.
+
+---
+
+## 2026-10-10 — Profile picture enrolls the face reference
+
+`POST /api/users/{user_id}/profile-picture` now stores that photo as the face reference and runs matching in the same request. The mobile app does not call `PUT /api/users/me/face-reference`.
+
+**Modified files**
+- `src/app/api/users/[user_id]/profile-picture/route.ts` — enroll after the avatar is saved
+
+If the face tables are missing, the avatar is still saved and `face_reference` is null.
+
+---
+
 ## Known open items
 
 - `GET /api/feed` returns deleted posts unless `status=active` is passed (existing behaviour).
