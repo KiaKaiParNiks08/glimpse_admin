@@ -637,6 +637,22 @@ If the face tables are missing, the avatar is still saved and `face_reference` i
 
 ---
 
+## 2026-10-10 — Profile photo must be the same person
+
+The first `POST /api/users/{user_id}/profile-picture` still saves the avatar and enrolls that face. A later photo is compared with Amazon Rekognition before anything is replaced. A different person gets a 400 and the old picture stays. If Rekognition is not configured, the picture is still updated so existing profile uploads keep working.
+
+**New files**
+- `src/server/people-media/profile-verify.ts` — CompareFaces against the enrolled photo
+
+**Modified files**
+- `src/app/api/users/[user_id]/profile-picture/route.ts` — check before saving
+- `package.json` — `@aws-sdk/client-rekognition`
+- `.env.example` — `PROFILE_FACE_MIN_SIMILARITY`
+
+The IAM user needs `rekognition:CompareFaces`. People-in-media gallery matching still uses the 128-number embedding pipeline, not Rekognition.
+
+---
+
 ## Known open items
 
 - `GET /api/feed` returns deleted posts unless `status=active` is passed (existing behaviour).

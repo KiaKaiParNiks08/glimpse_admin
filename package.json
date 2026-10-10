@@ -15,6 +15,7 @@
     "faces:process": "node scripts/process-media-faces.mjs"
   },
   "dependencies": {
+    "@aws-sdk/client-rekognition": "^3.1009.0",
     "@aws-sdk/client-s3": "^3.1009.0",
     "@aws-sdk/s3-request-presigner": "^3.1009.0",
     "@prisma/adapter-pg": "^7.4.2",

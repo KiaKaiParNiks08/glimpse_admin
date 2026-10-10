@@ -3,6 +3,7 @@ import { parseParams, userIdPathSchema } from '@/lib/validations';
 import { badRequest, notFound, ok, serverError } from '@/lib/api-response';
 import { getMediaKind, saveUploadedFile, validateMediaFile } from '@/lib/upload';
 import { enrollFaceReference } from '@/server/people-media/face-reference';
+import { verifyProfileFace } from '@/server/people-media/profile-verify';
 import { updateUser } from '@/server/users';
 
 /** Profile upload also enrolls the face reference and runs matching. */
@@ -38,6 +39,9 @@ export async function POST(
     if (validationError) {
       return badRequest(validationError);
     }
+
+    const faceCheck = await verifyProfileFace(path.user_id, Buffer.from(await file.arrayBuffer()));
+    if (!faceCheck.ok) return badRequest(faceCheck.message);
 
     const projectRoot = process.cwd();
     const { relativeUrl } = await saveUploadedFile(file, 'image', projectRoot, { prefix: 'profile-pictures' });
