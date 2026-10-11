@@ -16,7 +16,7 @@ export async function matchFaceToEventGuests(input: {
   mediaFaceId: string;
   embedding: number[];
 }): Promise<void> {
-  const vector = toVectorLiteral(input.embedding);
+  const vectorSql = Prisma.raw(`'${toVectorLiteral(input.embedding)}'::vector`);
   const threshold = faceMatchMinSimilarity();
   await prisma.$executeRaw`
     INSERT INTO media_matches (id, media_asset_id, media_face_id, user_id, similarity)
@@ -24,13 +24,13 @@ export async function matchFaceToEventGuests(input: {
            ${input.mediaAssetId}::uuid,
            ${input.mediaFaceId}::uuid,
            ufr.user_id,
-           1 - (ufr.embedding <=> ${vector}::vector)
+           1 - (ufr.embedding <=> ${vectorSql})
     FROM user_face_references ufr
     JOIN event_guests eg ON eg.user_id = ufr.user_id AND eg.event_id = ${input.eventId}::uuid
     WHERE ufr.consent = true
       AND ufr.revoked_at IS NULL
       AND ufr.embedding IS NOT NULL
-      AND 1 - (ufr.embedding <=> ${vector}::vector) >= ${threshold}
+      AND 1 - (ufr.embedding <=> ${vectorSql}) >= ${threshold}
     ON CONFLICT (media_face_id, user_id)
     DO UPDATE SET similarity = EXCLUDED.similarity
   `;
@@ -38,7 +38,7 @@ export async function matchFaceToEventGuests(input: {
 
 /** Match one consented user against faces already stored for events they belong to. */
 export async function matchUserToGuestMedia(userId: string, embedding: number[]): Promise<void> {
-  const vector = toVectorLiteral(embedding);
+  const vectorSql = Prisma.raw(`'${toVectorLiteral(embedding)}'::vector`);
   const threshold = faceMatchMinSimilarity();
   await prisma.$executeRaw`
     INSERT INTO media_matches (id, media_asset_id, media_face_id, user_id, similarity)
@@ -46,11 +46,11 @@ export async function matchUserToGuestMedia(userId: string, embedding: number[])
            mf.media_asset_id,
            mf.id,
            ${userId}::uuid,
-           1 - (mf.embedding <=> ${vector}::vector)
+           1 - (mf.embedding <=> ${vectorSql})
     FROM media_faces mf
     JOIN media_assets ma ON ma.id = mf.media_asset_id
     JOIN event_guests eg ON eg.event_id = ma.event_id AND eg.user_id = ${userId}::uuid
-    WHERE 1 - (mf.embedding <=> ${vector}::vector) >= ${threshold}
+    WHERE 1 - (mf.embedding <=> ${vectorSql}) >= ${threshold}
     ON CONFLICT (media_face_id, user_id)
     DO UPDATE SET similarity = EXCLUDED.similarity
   `;

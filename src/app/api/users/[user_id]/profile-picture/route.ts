@@ -1,8 +1,8 @@
 import { NextRequest } from 'next/server';
 import { parseParams, userIdPathSchema } from '@/lib/validations';
 import { badRequest, notFound, ok, serverError } from '@/lib/api-response';
-import { getMediaKind, saveUploadedFile, validateMediaFile } from '@/lib/upload';
-import { enrollFaceReference } from '@/server/people-media/face-reference';
+import { getMediaKind, resolveUploadMime, saveUploadedBuffer, validateMediaFile } from '@/lib/upload';
+import { enrollStoredFaceReference } from '@/server/people-media/face-reference';
 import { verifyProfileFace } from '@/server/people-media/profile-verify';
 import { updateUser } from '@/server/users';
 
@@ -40,18 +40,25 @@ export async function POST(
       return badRequest(validationError);
     }
 
-    const faceCheck = await verifyProfileFace(path.user_id, Buffer.from(await file.arrayBuffer()));
+    const bytes = Buffer.from(await file.arrayBuffer());
+    if (bytes.length === 0) return badRequest('The image did not finish uploading. Please try again.');
+
+    const faceCheck = await verifyProfileFace(path.user_id, bytes);
     if (!faceCheck.ok) return badRequest(faceCheck.message);
 
-    const projectRoot = process.cwd();
-    const { relativeUrl } = await saveUploadedFile(file, 'image', projectRoot, { prefix: 'profile-pictures' });
+    const mime = resolveUploadMime(file.type, file.name);
+    const saved = await saveUploadedBuffer(bytes, 'image', process.cwd(), {
+      prefix: 'profile-pictures',
+      contentType: mime || file.type,
+      fileName: file.name,
+    });
 
-    const user = await updateUser(path.user_id, { avatar_url: relativeUrl });
+    const user = await updateUser(path.user_id, { avatar_url: saved.relativeUrl });
     if (!user) return notFound('User not found');
 
     let face_reference = null;
     try {
-      face_reference = await enrollFaceReference(user.id, file);
+      face_reference = await enrollStoredFaceReference(user.id, saved.storageKey);
     } catch (error) {
       console.error('[profile-picture] face reference was not enrolled', error);
     }

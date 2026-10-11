@@ -724,6 +724,23 @@ There was no edit-post API. `PATCH /api/feed/{post_id}` updates only the caption
 
 ---
 
+## 2026-10-11 — Vercel my-media match fixes
+
+Profile enroll was failing silently on Vercel: the File was read for Rekognition, then again to save the avatar, then again to enroll. The second/third read is empty on the platform, so no face reference was stored. Matching also skipped users who were not in `event_guests`, and Rekognition CompareFaces was sent a Node Buffer.
+
+**Modified files**
+- `src/app/api/users/[user_id]/profile-picture/route.ts` — read the image once; enroll from that stored key
+- `src/lib/upload.ts` — `saveUploadedBuffer`
+- `src/server/people-media/face-reference.ts` — `enrollStoredFaceReference`
+- `src/server/people-media/rekognition.ts` — Uint8Array bytes; match post authors as well as guests
+- `src/server/people-media/process-batch.ts` / `match.ts` — raw vector SQL; Rekognition still runs if vector match fails
+- `src/app/api/feed/route.ts` — `ensureEventGuest` when a post is created
+- `src/server/people-media/queries.ts` — my-media no longer 403s when the user is not in `event_guests`
+
+After deploy: upload the profile picture once, then create one new post in that event.
+
+---
+
 ## Known open items
 
 - Security issues found during review, not fixed yet: legacy admin cookie forgeable with the default secret; any token can edit/delete users; OTP returned in `/api/auth` responses; venue/explore/upload server actions without auth; feed/like/favorites trust `user_id` from the request.

@@ -16,6 +16,7 @@ import { validateDeclaredVideoDuration } from '@/lib/upload-rules';
 import { getUserFromAuthorizationHeader } from '@/lib/jwt';
 import { createPost, listPosts } from '@/server/posts';
 import prisma from '@/server/prisma';
+import { ensureEventGuest } from '@/server/event-guests';
 import { registerFeedPostMedia } from '@/server/people-media/register';
 
 /** Allow a video upload to finish. Body size is set in next.config (middlewareClientMaxBodySize). */
@@ -90,6 +91,7 @@ export async function POST(request: NextRequest) {
     if (eventId) {
       const event = await prisma.events.findUnique({ where: { id: eventId }, select: { id: true } });
       if (!event) return notFound('Event not found');
+      await ensureEventGuest({ event_id: eventId, user_id: parsed.data.user_id });
     }
 
     const mediaItems: Array<{

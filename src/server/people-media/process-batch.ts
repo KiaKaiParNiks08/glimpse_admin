@@ -1,3 +1,4 @@
+import { Prisma } from '@prisma/client';
 import prisma from '@/server/prisma';
 import { assertEmbeddingConfig, faceMaxAttempts, faceProviderKind, faceWorkerBatchSize } from './config';
 import { getFaceProvider } from './face-provider';
@@ -146,7 +147,7 @@ async function processMedia(id: string): Promise<void> {
 
   for (let index = 0; index < faces.length; index += 1) {
     const face = faces[index];
-    const vector = toVectorLiteral(face.embedding);
+    const vectorSql = Prisma.raw(`'${toVectorLiteral(face.embedding)}'::vector`);
     const inserted = await prisma.$queryRaw<{ id: string }[]>`
       INSERT INTO media_faces (id, media_asset_id, face_index, confidence, box, embedding)
       VALUES (
@@ -155,18 +156,22 @@ async function processMedia(id: string): Promise<void> {
         ${index},
         ${face.confidence},
         ${JSON.stringify(face.box)}::jsonb,
-        ${vector}::vector
+        ${vectorSql}
       )
       RETURNING id
     `;
     const faceId = inserted[0]?.id;
     if (!faceId) continue;
-    await matchFaceToEventGuests({
-      eventId: asset.event_id,
-      mediaAssetId: asset.id,
-      mediaFaceId: faceId,
-      embedding: face.embedding,
-    });
+    try {
+      await matchFaceToEventGuests({
+        eventId: asset.event_id,
+        mediaAssetId: asset.id,
+        mediaFaceId: faceId,
+        embedding: face.embedding,
+      });
+    } catch (error) {
+      console.error('[people-media] vector match skipped', error);
+    }
     if (index === 0 && faceProviderKind() === 'local') {
       await matchMediaWithRekognition({
         eventId: asset.event_id,
@@ -216,10 +221,10 @@ async function processReference(id: string): Promise<void> {
     throw new PermanentFaceError('No face detected in the reference photo');
   }
 
-  const vector = toVectorLiteral(best.embedding);
+  const vectorSql = Prisma.raw(`'${toVectorLiteral(best.embedding)}'::vector`);
   const updated = await prisma.$executeRaw`
     UPDATE user_face_references
-    SET embedding = ${vector}::vector,
+    SET embedding = ${vectorSql},
         processing_status = 'ready',
         last_error = NULL,
         next_retry_at = NULL,
@@ -230,7 +235,11 @@ async function processReference(id: string): Promise<void> {
   `;
   if (updated > 0) {
     await deleteMatchesForUser(row.user_id);
-    await matchUserToGuestMedia(row.user_id, best.embedding);
+    try {
+      await matchUserToGuestMedia(row.user_id, best.embedding);
+    } catch (error) {
+      console.error('[people-media] vector user match skipped', error);
+    }
     if (faceProviderKind() === 'local') {
       await matchUserWithRekognition({
         userId: row.user_id,

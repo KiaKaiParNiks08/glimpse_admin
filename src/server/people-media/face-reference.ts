@@ -90,7 +90,14 @@ export async function revokeFaceReference(userId: string): Promise<FaceReference
 
 export async function enrollFaceReference(userId: string, file: File): Promise<FaceReferenceStatus> {
   const saved = await saveUploadedFile(file, 'image', process.cwd(), { prefix: `face-references/${userId}` });
-  const storageKey = saved.storageKey;
+  return enrollStoredFaceReference(userId, saved.storageKey);
+}
+
+/** Enroll using a file that is already in S3 (the profile picture). Avoids a second File read on Vercel. */
+export async function enrollStoredFaceReference(
+  userId: string,
+  storageKey: string
+): Promise<FaceReferenceStatus> {
   if (!storageKey) throw new Error('Face reference file was not stored');
 
   const previous = await prisma.user_face_references.findUnique({

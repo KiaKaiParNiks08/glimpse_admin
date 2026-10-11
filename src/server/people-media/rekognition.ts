@@ -49,8 +49,8 @@ export async function compareFacePhotos(
   try {
     const result = await client.send(
       new CompareFacesCommand({
-        SourceImage: { Bytes: sourceBytes },
-        TargetImage: { Bytes: targetBytes },
+        SourceImage: { Bytes: new Uint8Array(sourceBytes) },
+        TargetImage: { Bytes: new Uint8Array(targetBytes) },
         SimilarityThreshold: minSimilarity,
       })
     );
@@ -98,10 +98,23 @@ export async function matchMediaWithRekognition(input: {
   const guests = await prisma.$queryRaw<{ user_id: string; storage_key: string }[]>`
     SELECT ufr.user_id, ufr.storage_key
     FROM user_face_references ufr
-    JOIN event_guests eg ON eg.user_id = ufr.user_id AND eg.event_id = ${input.eventId}::uuid
     WHERE ufr.consent = true
       AND ufr.revoked_at IS NULL
       AND ufr.storage_key IS NOT NULL
+      AND (
+        EXISTS (
+          SELECT 1 FROM event_guests eg
+          WHERE eg.user_id = ufr.user_id AND eg.event_id = ${input.eventId}::uuid
+        )
+        OR EXISTS (
+          SELECT 1 FROM posts p
+          WHERE p.user_id = ufr.user_id AND p.event_id = ${input.eventId}::uuid
+        )
+        OR EXISTS (
+          SELECT 1 FROM media_assets ma
+          WHERE ma.uploaded_by = ufr.user_id AND ma.event_id = ${input.eventId}::uuid
+        )
+      )
     LIMIT 25
   `;
   const minSimilarity = rekognitionMediaMinSimilarity();
@@ -139,9 +152,19 @@ export async function matchUserWithRekognition(input: {
            ma.storage_key
     FROM media_faces mf
     JOIN media_assets ma ON ma.id = mf.media_asset_id
-    JOIN event_guests eg ON eg.event_id = ma.event_id AND eg.user_id = ${input.userId}::uuid
     WHERE ma.processing_status = 'ready'
       AND mf.face_index = 0
+      AND (
+        EXISTS (
+          SELECT 1 FROM event_guests eg
+          WHERE eg.event_id = ma.event_id AND eg.user_id = ${input.userId}::uuid
+        )
+        OR EXISTS (
+          SELECT 1 FROM posts p
+          WHERE p.event_id = ma.event_id AND p.user_id = ${input.userId}::uuid
+        )
+        OR ma.uploaded_by = ${input.userId}::uuid
+      )
     ORDER BY ma.created_at DESC
     LIMIT 25
   `;

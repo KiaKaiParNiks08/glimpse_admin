@@ -9,9 +9,6 @@ export async function adminCanManageEvent(admin: AdminSessionUser, eventId: stri
 }
 
 export async function listMyMedia(input: { userId: string; eventId: string; page: number; limit: number }) {
-  const guest = await isEventGuest(input.eventId, input.userId);
-  if (!guest) return null;
-
   const offset = (input.page - 1) * input.limit;
   const [countRows, items] = await Promise.all([
     prisma.$queryRaw<{ total: number }[]>`

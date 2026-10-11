@@ -88,24 +88,21 @@ function isS3Configured(): boolean {
  * Uses subdir by date (YYYY/MM) and a unique filename.
  * Returns relative URL path (e.g. /uploads/2025/03/uuid.jpg) for use in API responses.
  */
-export async function saveUploadedFile(
-  file: File,
+export async function saveUploadedBuffer(
+  buffer: Buffer,
   kind: MediaKind,
   projectRoot: string,
-  options?: { prefix?: string; storage?: 'auto' | 'disk' | 's3'; contentType?: string }
+  options: { prefix?: string; storage?: 'auto' | 'disk' | 's3'; contentType: string; fileName?: string }
 ): Promise<{ relativeUrl: string; absolutePath: string; storageKey: string }> {
-  const prefix = options?.prefix ?? 'uploads';
-  const storage = options?.storage ?? 'auto';
-  const mimeType = (options?.contentType || file.type || '').split(';')[0].trim().toLowerCase();
-
-  const validationError = validateMediaFile({ type: mimeType, size: file.size }, kind);
-  if (validationError) {
-    throw new Error(validationError);
-  }
+  const prefix = options.prefix ?? 'uploads';
+  const storage = options.storage ?? 'auto';
+  const mimeType = (options.contentType || '').split(';')[0].trim().toLowerCase();
+  const validationError = validateMediaFile({ type: mimeType, size: buffer.length }, kind);
+  if (validationError) throw new Error(validationError);
+  if (buffer.length === 0) throw new IncompleteUploadError();
 
   if ((storage === 's3' || storage === 'auto') && isS3Configured()) {
     const key = generateS3Key(prefix, mimeType);
-    const buffer = await readCompleteFile(file);
     await putObjectFromBuffer(key, buffer, mimeType);
     const url = getStoredObjectUrl(key);
     return { relativeUrl: url, absolutePath: '', storageKey: key };
@@ -119,14 +116,25 @@ export async function saveUploadedFile(
   const diskSubdir = path.join(UPLOADS_DISK_DIR, yearMonth);
   const dir = path.join(projectRoot, diskSubdir);
   await mkdir(dir, { recursive: true });
-
-  const ext = getExtensionFromMime(mimeType) || getExtensionFromFilename(file.name);
+  const ext = getExtensionFromMime(mimeType) || getExtensionFromFilename(options.fileName ?? '');
   const basename = `${randomUUID()}${ext}`;
   const filePath = path.join(dir, basename);
   const relativeUrl = `/${path.join(UPLOADS_URL_PREFIX, yearMonth, basename).replace(/\\/g, '/')}`;
-
-  const buffer = await readCompleteFile(file);
   await writeFile(filePath, buffer);
-
   return { relativeUrl, absolutePath: filePath, storageKey: relativeUrl.replace(/^\//, '') };
+}
+
+export async function saveUploadedFile(
+  file: File,
+  kind: MediaKind,
+  projectRoot: string,
+  options?: { prefix?: string; storage?: 'auto' | 'disk' | 's3'; contentType?: string }
+): Promise<{ relativeUrl: string; absolutePath: string; storageKey: string }> {
+  const buffer = await readCompleteFile(file);
+  return saveUploadedBuffer(buffer, kind, projectRoot, {
+    prefix: options?.prefix,
+    storage: options?.storage,
+    contentType: options?.contentType || file.type,
+    fileName: file.name,
+  });
 }
