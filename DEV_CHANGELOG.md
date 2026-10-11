@@ -653,12 +653,67 @@ The IAM user needs `rekognition:CompareFaces`. People-in-media gallery matching 
 
 ---
 
+## 2026-10-10 — People-in-media env keys
+
+Local `.env` now has the face-search keys used on Vercel (`FACE_*`, `CRON_SECRET`, `PROFILE_FACE_MIN_SIMILARITY`). `.env` stays gitignored, so a git push does not copy secrets to the host. Paste the same keys in the Vercel project environment. `.env.example` lists every key without the live secrets.
+
+**Modified files**
+- `.env` — face-search keys for local and to copy onto Vercel
+- `.env.example` — same keys as placeholders
+
+---
+
+## 2026-10-11 — Feed post height
+
+Mobile sends the tallest image/video height when creating a feed post. That single value is stored on `posts` and returned by `GET /api/feed` so the client can size the view before media loads. Old posts stay `height: null`. Other feed fields are unchanged.
+
+**New files**
+- `prisma/migrations/20261011120000_posts_height/migration.sql` — `posts.height`
+
+**Modified files**
+- `prisma/schema.prisma` — `posts.height`
+- `src/lib/validations/posts.ts` — optional `height` on create
+- `src/server/posts.ts` — store and select `height`
+- `src/app/api/feed/route.ts` — read `height` from multipart
+- `src/lib/openapi.ts` — document `height` on POST and GET `/api/feed`
+
+**Undo the DB part**
+```sql
+ALTER TABLE "posts" DROP COLUMN IF EXISTS "height";
+DELETE FROM _prisma_migrations WHERE migration_name = '20261011120000_posts_height';
+```
+
+---
+
+## 2026-10-11 — Feed delete is event-scoped and stays hidden
+
+`DELETE /api/feed/{post_id}` accepts `user_id` and `event_id` from the query, JSON body, or app-user JWT so Flutter can delete without a body. The post must belong to that event. Soft-delete returns 200 `{ id, status: "deleted" }` instead of 204. `GET /api/feed` now defaults to `status=active`, so a deleted post no longer appears in that event feed.
+
+**Modified files**
+- `src/app/api/feed/[post_id]/route.ts` — query/body/JWT delete, 200 response
+- `src/lib/validations/posts.ts` — optional `event_id` on delete
+- `src/server/posts.ts` — match `event_id`; list active posts by default
+- `src/lib/openapi.ts` — delete and feed list docs
+
+---
+
+## 2026-10-11 — Edit feed post caption
+
+There was no edit-post API. `PATCH /api/feed/{post_id}` updates only the caption. Media, height, and event stay as created. Only the owner can edit; `event_id` must match when sent. Deleted posts cannot be edited.
+
+**Modified files**
+- `src/lib/validations/posts.ts` — `updateFeedPostBodySchema`
+- `src/server/posts.ts` — `updatePostCaption`
+- `src/app/api/feed/[post_id]/route.ts` — PATCH
+- `src/lib/openapi.ts` — PATCH `/api/feed/{post_id}`
+
+---
+
 ## Known open items
 
-- `GET /api/feed` returns deleted posts unless `status=active` is passed (existing behaviour).
 - Security issues found during review, not fixed yet: legacy admin cookie forgeable with the default secret; any token can edit/delete users; OTP returned in `/api/auth` responses; venue/explore/upload server actions without auth; feed/like/favorites trust `user_id` from the request.
 - No admin UI for event categories (seeded by migration since 2026-10-02; add/rename others directly in `event_categories`).
-- Other environments still need `npm run prisma:deploy` for `20260927140000_add_user_favorites`, `20260929160000_session_media_and_watermark`, `20261001120000_happening_and_report_settings`, `20261002150000_seed_event_categories`, `20261002170000_watermark_size`, `20261002190000_event_cover_images`, `20261003000000_event_linkedin_url`, `20261004120000_people_in_media` and `20261004210000_event_team`. Install pgvector before the people-in-media migration, or `prisma migrate deploy` stops before `event_team`. If an environment already applied `20260928180000_add_session_phase_tags`, run its undo SQL (2026-09-28 section) first.
+- Other environments still need `npm run prisma:deploy` for `20260927140000_add_user_favorites`, `20260929160000_session_media_and_watermark`, `20261001120000_happening_and_report_settings`, `20261002150000_seed_event_categories`, `20261002170000_watermark_size`, `20261002190000_event_cover_images`, `20261003000000_event_linkedin_url`, `20261004120000_people_in_media`, `20261004210000_event_team` and `20261011120000_posts_height`. Install pgvector before the people-in-media migration, or `prisma migrate deploy` stops before `event_team`. If an environment already applied `20260928180000_add_session_phase_tags`, run its undo SQL (2026-09-28 section) first.
 - People in media: production face recognition still needs `FACE_PROVIDER=http` and `FACE_SERVICE_URL`. The local provider only matches identical files. Vercel runs one batch after each upload and a daily cron; `npm run faces:process` is only for draining the queue from your own machine.
 - Before deploying: go through the production checklist in the 2026-10-03 "/login ⇄ /dashboard redirect loop" section (`ADMIN_JWT_SECRET`, `X-Forwarded-Proto`, post-deploy login test).
 - Swapping two session titles on the same day in one save (A↔B) hits the unique (day, title) constraint; rename in two saves.

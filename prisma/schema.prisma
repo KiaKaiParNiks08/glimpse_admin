@@ -475,6 +475,8 @@ model posts {
   /// Event this post belongs to. Null posts are omitted from every event feed.
   event_id       String?          @db.Uuid
   caption        String?
+  /// Largest media height (pixels) for this post. One value for one or many files.
+  height         Int?
   status         post_status?     @default(active)
   like_count     Int?             @default(0)
   comment_count  Int?             @default(0)

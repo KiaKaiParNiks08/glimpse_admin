@@ -8,6 +8,7 @@ export const postSelect = {
   user_id: true,
   event_id: true,
   caption: true,
+  height: true,
   status: true,
   like_count: true,
   comment_count: true,
@@ -35,6 +36,7 @@ export type PostWithMedia = {
   user_id: string;
   event_id: string | null;
   caption: string | null;
+  height: number | null;
   status: string | null;
   like_count: number;
   comment_count: number;
@@ -70,7 +72,7 @@ export interface CreatePostMediaItem {
  * Create a feed post with optional media (images/videos).
  */
 export async function createPost(
-  input: CreatePostInput & { event_id?: string | null },
+  input: CreatePostInput & { event_id?: string | null; height?: number | null },
   media: CreatePostMediaItem[] = []
 ): Promise<PostWithMedia> {
   const post = await prisma.posts.create({
@@ -78,6 +80,7 @@ export async function createPost(
       user_id: input.user_id,
       event_id: input.event_id ?? null,
       caption: input.caption ?? null,
+      height: input.height ?? null,
       status: input.status ?? 'active',
       post_media:
         media.length > 0
@@ -108,7 +111,7 @@ export async function listPosts(query: ListPostsQuery): Promise<{
   const skip = (page - 1) * limit;
   const where = {
     ...(user_id && { user_id }),
-    ...(status && { status }),
+    status: status ?? 'active',
     // A post with no event_id is not part of any event feed.
     ...(event_id && { event_id }),
   };
@@ -162,14 +165,16 @@ export async function listPosts(query: ListPostsQuery): Promise<{
  */
 export async function deletePostOwnedByUser(
   postId: string,
-  userId: string
+  userId: string,
+  eventId?: string | null
 ): Promise<'not_found' | 'forbidden' | 'already_deleted' | 'deleted'> {
   const existing = await prisma.posts.findUnique({
     where: { id: postId },
-    select: { id: true, user_id: true, status: true },
+    select: { id: true, user_id: true, status: true, event_id: true },
   });
 
   if (!existing) return 'not_found';
+  if (eventId && existing.event_id !== eventId) return 'not_found';
   if (existing.user_id !== userId) return 'forbidden';
   if (existing.status === 'deleted') return 'already_deleted';
 
@@ -178,6 +183,34 @@ export async function deletePostOwnedByUser(
     data: { status: 'deleted' },
   });
   return 'deleted';
+}
+
+/**
+ * Update only the caption. Media, height, and event stay as created.
+ */
+export async function updatePostCaption(input: {
+  postId: string;
+  userId: string;
+  eventId?: string | null;
+  caption: string;
+}): Promise<'not_found' | 'forbidden' | { post: PostWithMedia }> {
+  const existing = await prisma.posts.findUnique({
+    where: { id: input.postId },
+    select: { id: true, user_id: true, status: true, event_id: true },
+  });
+
+  if (!existing) return 'not_found';
+  if (input.eventId && existing.event_id !== input.eventId) return 'not_found';
+  if (existing.user_id !== input.userId) return 'forbidden';
+  if (existing.status === 'deleted') return 'not_found';
+
+  const caption = input.caption.trim() || null;
+  const post = await prisma.posts.update({
+    where: { id: input.postId },
+    data: { caption, updated_at: new Date() },
+    select: postSelect,
+  });
+  return { post: toPostWithMedia(post as Parameters<typeof toPostWithMedia>[0]) };
 }
 
 const postLikeSelect = {

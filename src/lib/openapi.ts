@@ -600,7 +600,7 @@ export function getOpenApiSpec(serverUrl: string) {
         get: {
           summary: 'List feed posts',
           description:
-            'Paginated feed posts. When event_id is set, only posts stored for that event are returned. Posts with no event_id are left out of every event feed.',
+            'Paginated feed posts. Deleted posts are omitted unless status=deleted is passed. When event_id is set, only posts stored for that event are returned. Posts with no event_id are left out of every event feed.',
           tags: ['Feed'],
           parameters: [
             { name: 'user_id', in: 'query', schema: { type: 'string', format: 'uuid' }, description: 'Filter by post author' },
@@ -617,7 +617,12 @@ export function getOpenApiSpec(serverUrl: string) {
               description:
                 'Return only posts for this event. Also, with viewer_user_id, each post includes is_favorite for this event.',
             },
-            { name: 'status', in: 'query', schema: { type: 'string', enum: ['active', 'deleted'] } },
+            {
+              name: 'status',
+              in: 'query',
+              schema: { type: 'string', enum: ['active', 'deleted'] },
+              description: 'Defaults to active. Deleted posts are hidden unless this is deleted.',
+            },
             { name: 'page', in: 'query', schema: { type: 'integer', minimum: 1, default: 1 } },
             { name: 'limit', in: 'query', schema: { type: 'integer', minimum: 1, maximum: 100, default: 20 } },
           ],
@@ -639,6 +644,12 @@ export function getOpenApiSpec(serverUrl: string) {
                             user_id: { type: 'string', format: 'uuid' },
                             event_id: { type: 'string', format: 'uuid', nullable: true },
                             caption: { type: 'string', nullable: true },
+                            height: {
+                              type: 'integer',
+                              nullable: true,
+                              description:
+                                'Tallest media height in pixels for this post. One value whether the post has one file or many.',
+                            },
                             status: { type: 'string', nullable: true },
                             like_count: { type: 'integer', nullable: true },
                             comment_count: { type: 'integer', nullable: true },
@@ -700,6 +711,7 @@ export function getOpenApiSpec(serverUrl: string) {
                         user_id: '8b270387-dbff-4cfa-9801-ebd30252350f',
                         event_id: '181656dd-af20-4303-9b4b-a7c6eaf4517b',
                         caption: 'From another guest',
+                        height: 1920,
                         status: 'active',
                         like_count: 0,
                         comment_count: 0,
@@ -730,7 +742,7 @@ export function getOpenApiSpec(serverUrl: string) {
         post: {
           summary: 'Create feed post (with optional image/video upload)',
           description:
-            'Creates a feed post. Use multipart/form-data. Media: either max 1 video OR max 6 images (no mixing). Files are uploaded to S3 and returned as a stored URL (CloudFront public URL if configured, otherwise /api/upload/signed?t=...). Allowed: images (JPEG, PNG, GIF, WebP), videos (MP4, WebM, MOV). Size limits: images max 10MB, videos max 50MB; videos max 120 seconds (provide `video_duration_sec` from client-side metadata). Empty files rejected.',
+            'Creates a feed post. Use multipart/form-data. Media: either max 1 video OR max 6 images (no mixing). Send `height` as the tallest media height in pixels (one value for the post). Files are uploaded to S3 and returned as a stored URL (CloudFront public URL if configured, otherwise /api/upload/signed?t=...). Allowed: images (JPEG, PNG, GIF, WebP), videos (MP4, WebM, MOV). Size limits: images max 10MB, videos max 50MB; videos max 120 seconds (provide `video_duration_sec` from client-side metadata). Empty files rejected.',
           tags: ['Feed'],
           requestBody: {
             required: true,
@@ -747,6 +759,13 @@ export function getOpenApiSpec(serverUrl: string) {
                       description: 'Event this post belongs to. Omit to keep it out of every event feed.',
                     },
                     caption: { type: 'string', description: 'Post caption' },
+                    height: {
+                      type: 'integer',
+                      minimum: 1,
+                      maximum: 20000,
+                      description:
+                        'Tallest image or video height in pixels. One value for the post, even when several files are uploaded. Returned by GET /api/feed so the client can size the view before media loads.',
+                    },
                     video_duration_sec: {
                       type: 'number',
                       format: 'float',
@@ -780,6 +799,7 @@ export function getOpenApiSpec(serverUrl: string) {
                       id: { type: 'string', format: 'uuid' },
                       user_id: { type: 'string', format: 'uuid' },
                       caption: { type: 'string', nullable: true },
+                      height: { type: 'integer', nullable: true },
                       status: { type: 'string', nullable: true },
                       like_count: { type: 'integer', nullable: true },
                       comment_count: { type: 'integer', nullable: true },
@@ -882,12 +902,15 @@ export function getOpenApiSpec(serverUrl: string) {
             '500': { description: 'Server error' },
           },
         },
-        delete: {
-          summary: 'Delete feed post (self-owned)',
-          description: 'Soft-deletes a feed post. Only the post owner (user_id) can delete it.',
+        patch: {
+          summary: 'Edit feed post caption (self-owned)',
+          description:
+            'Updates only the text/caption of a post. Images, video, height, and event cannot change. Only the owner can edit. user_id and event_id may be in the body, query, or the app-user JWT. A deleted post cannot be edited.',
           tags: ['Feed'],
           parameters: [
             { name: 'post_id', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } },
+            { name: 'user_id', in: 'query', schema: { type: 'string', format: 'uuid' } },
+            { name: 'event_id', in: 'query', schema: { type: 'string', format: 'uuid' } },
           ],
           requestBody: {
             required: true,
@@ -895,18 +918,89 @@ export function getOpenApiSpec(serverUrl: string) {
               'application/json': {
                 schema: {
                   type: 'object',
-                  required: ['user_id'],
+                  required: ['caption'],
+                  properties: {
+                    caption: { type: 'string', maxLength: 5000, description: 'New post text. Empty string clears the caption.' },
+                    user_id: { type: 'string', format: 'uuid' },
+                    event_id: { type: 'string', format: 'uuid' },
+                  },
+                },
+                example: {
+                  caption: 'Updated caption',
+                  user_id: '8b270387-dbff-4cfa-9801-ebd30252350f',
+                  event_id: '181656dd-af20-4303-9b4b-a7c6eaf4517b',
+                },
+              },
+            },
+          },
+          responses: {
+            '200': {
+              description: 'Post with the new caption',
+              content: {
+                'application/json': {
+                  schema: {
+                    type: 'object',
+                    properties: {
+                      message: { type: 'string', example: 'Post updated' },
+                      data: { type: 'object' },
+                    },
+                  },
+                },
+              },
+            },
+            '403': { description: 'Forbidden (not the post owner)' },
+            '404': { description: 'Post not found in this event' },
+            '400': { description: 'Validation failed' },
+            '500': { description: 'Server error' },
+          },
+        },
+        delete: {
+          summary: 'Delete feed post (self-owned, one event)',
+          description:
+            'Soft-deletes that post in its event. Only the owner can delete it. user_id and event_id may be query params, a JSON body, or taken from the app-user JWT. If event_id is sent, the post must belong to that event. A later GET /api/feed does not return the post.',
+          tags: ['Feed'],
+          parameters: [
+            { name: 'post_id', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } },
+            { name: 'user_id', in: 'query', schema: { type: 'string', format: 'uuid' }, description: 'Post owner. Optional when the JWT is the same user.' },
+            { name: 'event_id', in: 'query', schema: { type: 'string', format: 'uuid' }, description: 'Event this post belongs to. Optional when the JWT has event_id.' },
+          ],
+          requestBody: {
+            required: false,
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
                   properties: {
                     user_id: { type: 'string', format: 'uuid', description: 'Post owner user id' },
+                    event_id: { type: 'string', format: 'uuid', description: 'Event this post belongs to' },
                   },
                 },
               },
             },
           },
           responses: {
-            '204': { description: 'Post deleted (no content)' },
+            '200': {
+              description: 'Post deleted',
+              content: {
+                'application/json': {
+                  schema: {
+                    type: 'object',
+                    properties: {
+                      message: { type: 'string', example: 'Post deleted' },
+                      data: {
+                        type: 'object',
+                        properties: {
+                          id: { type: 'string', format: 'uuid' },
+                          status: { type: 'string', example: 'deleted' },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
             '403': { description: 'Forbidden (not the post owner)' },
-            '404': { description: 'Post not found' },
+            '404': { description: 'Post not found in this event' },
             '400': { description: 'Validation failed' },
             '500': { description: 'Server error' },
           },

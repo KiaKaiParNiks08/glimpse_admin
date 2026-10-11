@@ -46,7 +46,7 @@ export async function GET(request: Request) {
 /**
  * POST /api/feed – Create a feed post with optional image/video uploads.
  * Content-Type: multipart/form-data
- * Fields: user_id (required), caption (optional), event_id (optional), media (multiple). Max 1 video OR max 6 images per post (no mixing). Status is always active.
+ * Fields: user_id (required), caption (optional), event_id (optional), height (optional), media (multiple). Max 1 video OR max 6 images per post (no mixing). Status is always active.
  * event_id is stored on the post. GET /api/feed?event_id= returns only that event. A post with no event_id is not listed for any event.
  * Files are saved under project uploads folder (uploads/YYYY/MM/).
  */
@@ -62,6 +62,7 @@ export async function POST(request: NextRequest) {
     const user_id = formData.get('user_id');
     const caption = formData.get('caption');
     const event_id = formData.get('event_id');
+    const height = formData.get('height');
 
     const formFields = {
       user_id: user_id === null || user_id === undefined ? undefined : String(user_id),
@@ -71,6 +72,10 @@ export async function POST(request: NextRequest) {
         event_id === null || event_id === undefined || String(event_id).trim() === ''
           ? undefined
           : String(event_id).trim(),
+      height:
+        height === null || height === undefined || String(height).trim() === ''
+          ? undefined
+          : String(height).trim(),
     };
 
     const parsed = createFeedPostFormSchema.safeParse(formFields);
@@ -166,6 +171,7 @@ export async function POST(request: NextRequest) {
         caption: parsed.data.caption,
         status: 'active',
         event_id: eventId ?? null,
+        height: parsed.data.height ?? null,
       },
       mediaItems.map((item) => ({
         media_type: item.media_type,
