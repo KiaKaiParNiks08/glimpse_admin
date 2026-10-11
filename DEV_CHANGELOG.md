@@ -709,12 +709,27 @@ There was no edit-post API. `PATCH /api/feed/{post_id}` updates only the caption
 
 ---
 
+## 2026-10-11 — My-media matches different photos on Vercel
+
+`FACE_PROVIDER=local` only hashed file bytes, so a profile photo and a different feed photo of the same person never appeared in `GET /api/events/{event_id}/my-media`. When AWS keys are set, matching now also uses Amazon Rekognition CompareFaces (same API as the profile lock, threshold 80). After deploy, re-upload the profile picture or create the post again so the compare runs.
+
+**New files**
+- `src/server/people-media/rekognition.ts` — CompareFaces helper and guest/media matching
+
+**Modified files**
+- `src/server/people-media/process-batch.ts` — Rekognition match after local embeddings
+- `src/server/people-media/profile-verify.ts` — shared CompareFaces helper
+- `.env.example` / `.env` — `FACE_REKOGNITION_MIN_SIMILARITY`
+- `README.md` / `src/lib/openapi.ts` — my-media matching note
+
+---
+
 ## Known open items
 
 - Security issues found during review, not fixed yet: legacy admin cookie forgeable with the default secret; any token can edit/delete users; OTP returned in `/api/auth` responses; venue/explore/upload server actions without auth; feed/like/favorites trust `user_id` from the request.
 - No admin UI for event categories (seeded by migration since 2026-10-02; add/rename others directly in `event_categories`).
 - Other environments still need `npm run prisma:deploy` for `20260927140000_add_user_favorites`, `20260929160000_session_media_and_watermark`, `20261001120000_happening_and_report_settings`, `20261002150000_seed_event_categories`, `20261002170000_watermark_size`, `20261002190000_event_cover_images`, `20261003000000_event_linkedin_url`, `20261004120000_people_in_media`, `20261004210000_event_team` and `20261011120000_posts_height`. Install pgvector before the people-in-media migration, or `prisma migrate deploy` stops before `event_team`. If an environment already applied `20260928180000_add_session_phase_tags`, run its undo SQL (2026-09-28 section) first.
-- People in media: production face recognition still needs `FACE_PROVIDER=http` and `FACE_SERVICE_URL`. The local provider only matches identical files. Vercel runs one batch after each upload and a daily cron; `npm run faces:process` is only for draining the queue from your own machine.
+- People in media: `FACE_PROVIDER=local` plus Rekognition CompareFaces is what Vercel uses to match different photos. InsightFace (`FACE_PROVIDER=http`) is still the higher-accuracy option when a face service exists. The people-in-media migration needs `CREATE EXTENSION vector` on the hosted Postgres. Vercel runs one batch after each upload and a daily cron.
 - Before deploying: go through the production checklist in the 2026-10-03 "/login ⇄ /dashboard redirect loop" section (`ADMIN_JWT_SECRET`, `X-Forwarded-Proto`, post-deploy login test).
 - Swapping two session titles on the same day in one save (A↔B) hits the unique (day, title) constraint; rename in two saves.
 - Watermark is an overlay: the mobile app must draw it (see `watermark` in `GET /api/events/{event_id}`); downloaded original files have no watermark.

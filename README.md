@@ -74,7 +74,7 @@ The script reads `FACE_WORKER_SECRET` and posts to `APP_BASE_URL` (default `http
 
 Set these project environment variables: `FACE_PROVIDER` (`local` is enough to test the pipeline; it only matches an identical file), `FACE_WORKER_SECRET`, and `CRON_SECRET`. Vercel Cron calls `GET /api/internal/media/process` once a day with `Authorization: Bearer <CRON_SECRET>`. You do not run `npm run faces:process` on Vercel.
 
-`FACE_PROVIDER=local` makes the pipeline runnable without a GPU. It builds a deterministic vector from the file bytes, so only the same file matches itself. It does not recognize a person across different photos, and it skips videos. For real recognition set `FACE_PROVIDER=http`, `FACE_SERVICE_URL`, and optionally `FACE_SERVICE_TOKEN`. The service receives the raw image or video bytes and must return JSON:
+`FACE_PROVIDER=local` still hashes file bytes for the embedding column. On Vercel, when AWS keys are set, people-in-media matching also uses Amazon Rekognition CompareFaces so a profile photo can match a different post or session photo of the same person. Videos are still skipped. For InsightFace embeddings set `FACE_PROVIDER=http`, `FACE_SERVICE_URL`, and optionally `FACE_SERVICE_TOKEN`. That service receives the raw image or video bytes and must return JSON:
 
 ```json
 { "faces": [{ "confidence": 0.9, "box": { "x": 0, "y": 0, "width": 1, "height": 1 }, "embedding": [0.1] }] }

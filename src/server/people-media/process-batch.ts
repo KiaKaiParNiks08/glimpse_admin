@@ -1,7 +1,8 @@
 import prisma from '@/server/prisma';
-import { assertEmbeddingConfig, faceMaxAttempts, faceWorkerBatchSize } from './config';
+import { assertEmbeddingConfig, faceMaxAttempts, faceProviderKind, faceWorkerBatchSize } from './config';
 import { getFaceProvider } from './face-provider';
 import { clearFaceEmbedding, deleteMatchesForUser, matchFaceToEventGuests, matchUserToGuestMedia, toVectorLiteral } from './match';
+import { matchMediaWithRekognition, matchUserWithRekognition } from './rekognition';
 import { readStoredMedia } from './storage';
 import type { DetectedFace } from './types';
 
@@ -166,6 +167,14 @@ async function processMedia(id: string): Promise<void> {
       mediaFaceId: faceId,
       embedding: face.embedding,
     });
+    if (index === 0 && faceProviderKind() === 'local') {
+      await matchMediaWithRekognition({
+        eventId: asset.event_id,
+        mediaAssetId: asset.id,
+        mediaFaceId: faceId,
+        mediaBytes: stored.bytes,
+      });
+    }
   }
 
   await prisma.media_assets.update({
@@ -222,6 +231,12 @@ async function processReference(id: string): Promise<void> {
   if (updated > 0) {
     await deleteMatchesForUser(row.user_id);
     await matchUserToGuestMedia(row.user_id, best.embedding);
+    if (faceProviderKind() === 'local') {
+      await matchUserWithRekognition({
+        userId: row.user_id,
+        referenceBytes: stored.bytes,
+      });
+    }
   }
 }
 

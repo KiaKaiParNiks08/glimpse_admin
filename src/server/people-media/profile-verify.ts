@@ -1,26 +1,10 @@
-import { CompareFacesCommand, RekognitionClient } from '@aws-sdk/client-rekognition';
 import prisma from '@/server/prisma';
+import {
+  compareFacePhotos,
+  rekognitionClient,
+  rekognitionProfileMinSimilarity,
+} from './rekognition';
 import { readStoredMedia } from './storage';
-
-const REKOGNITION_MAX_BYTES = 5 * 1024 * 1024;
-
-function minSimilarity(): number {
-  const n = Number(process.env.PROFILE_FACE_MIN_SIMILARITY ?? '95');
-  if (!Number.isFinite(n) || n < 80 || n > 100) return 95;
-  return n;
-}
-
-function rekognitionClient(): RekognitionClient | null {
-  const region = process.env.AWS_REGION?.trim();
-  if (!region || !process.env.AWS_ACCESS_KEY_ID || !process.env.AWS_SECRET_ACCESS_KEY) return null;
-  return new RekognitionClient({
-    region,
-    credentials: {
-      accessKeyId: process.env.AWS_ACCESS_KEY_ID,
-      secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
-    },
-  });
-}
 
 export type ProfileFaceCheck =
   | { ok: true; first: boolean }
@@ -49,13 +33,7 @@ export async function verifyProfileFace(userId: string, nextBytes: Buffer): Prom
   }
   const storageKey = rows[0]?.storage_key;
   if (!storageKey) return { ok: true, first: true };
-
-  const client = rekognitionClient();
-  if (!client) return { ok: true, first: false };
-
-  if (nextBytes.length > REKOGNITION_MAX_BYTES) {
-    return { ok: false, message: 'Use a profile photo under 5 MB so the face can be checked.' };
-  }
+  if (!rekognitionClient()) return { ok: true, first: false };
 
   let stored: Buffer;
   try {
@@ -64,34 +42,24 @@ export async function verifyProfileFace(userId: string, nextBytes: Buffer): Prom
     console.error('[profile-face] stored reference could not be read', error);
     return { ok: true, first: false };
   }
-  if (stored.length > REKOGNITION_MAX_BYTES) return { ok: true, first: false };
 
-  try {
-    const result = await client.send(
-      new CompareFacesCommand({
-        SourceImage: { Bytes: stored },
-        TargetImage: { Bytes: nextBytes },
-        SimilarityThreshold: minSimilarity(),
-      })
-    );
-    const similarity = result.FaceMatches?.[0]?.Similarity ?? 0;
-    if (!result.FaceMatches?.length || similarity < minSimilarity()) {
-      return {
-        ok: false,
-        message:
-          'This photo is a different person from the profile picture first uploaded for this mobile number. The picture was not changed.',
-      };
-    }
-    return { ok: true, first: false };
-  } catch (error) {
-    const name = error instanceof Error ? error.name : '';
-    if (name === 'InvalidParameterException') {
-      return {
-        ok: false,
-        message: 'A clear face is required. This photo was not used as the profile picture.',
-      };
-    }
-    console.error('[profile-face] compare failed', error);
-    return { ok: true, first: false };
+  const compared = await compareFacePhotos(stored, nextBytes, rekognitionProfileMinSimilarity());
+  if (compared.ok) return { ok: true, first: false };
+  if (compared.reason === 'too_large') {
+    return { ok: false, message: 'Use a profile photo under 5 MB so the face can be checked.' };
   }
+  if (compared.reason === 'no_face') {
+    return {
+      ok: false,
+      message: 'A clear face is required. This photo was not used as the profile picture.',
+    };
+  }
+  if (compared.reason === 'below_threshold') {
+    return {
+      ok: false,
+      message:
+        'This photo is a different person from the profile picture first uploaded for this mobile number. The picture was not changed.',
+    };
+  }
+  return { ok: true, first: false };
 }
