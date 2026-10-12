@@ -69,14 +69,14 @@ export async function POST(
       };
     }
 
-    return ok({
-      message: 'Profile picture updated',
-      data: {
+    return ok(
+      {
         user_id: user.id,
         avatar_url: user.avatar_url,
         face_reference,
       },
-    });
+      'Profile picture updated'
+    );
   } catch (e) {
     console.error(e);
     return serverError('Unable to upload profile picture');

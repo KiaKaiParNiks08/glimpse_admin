@@ -756,6 +756,16 @@ IAM: the AWS user must allow `rekognition:CompareFaces`. After deploy, upload th
 
 ---
 
+## 2026-10-12 — Profile enroll status after processing
+
+`enrollStoredFaceReference` was returning `processing_status: pending` because it read status before matching ran. It now processes first, then returns `ready` / `failed`. Profile-picture success payload is `{ user_id, avatar_url, face_reference }` (not nested).
+
+**Modified files**
+- `src/server/people-media/face-reference.ts`
+- `src/app/api/users/[user_id]/profile-picture/route.ts`
+
+---
+
 ## Known open items
 
 - Security issues found during review, not fixed yet: legacy admin cookie forgeable with the default secret; any token can edit/delete users; OTP returned in `/api/auth` responses; venue/explore/upload server actions without auth; feed/like/favorites trust `user_id` from the request.

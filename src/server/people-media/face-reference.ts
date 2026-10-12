@@ -135,8 +135,8 @@ export async function enrollStoredFaceReference(
   if (previous?.storage_key && previous.storage_key !== storageKey) {
     await deleteStoredReference(previous.storage_key);
   }
+  await scheduleFaceProcessing();
   const status = await getFaceReferenceStatus(userId);
   if (!status) throw new Error('Face reference was not saved');
-  await scheduleFaceProcessing();
   return status;
 }
