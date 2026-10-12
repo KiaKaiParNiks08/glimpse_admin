@@ -61,7 +61,12 @@ export async function compareFacePhotos(
     return { ok: true, similarity };
   } catch (error) {
     const name = error instanceof Error ? error.name : '';
+    const message = error instanceof Error ? error.message : '';
     if (name === 'InvalidParameterException') return { ok: false, reason: 'no_face' };
+    if (name === 'AccessDeniedException' || /not authorized|AccessDenied/i.test(message)) {
+      console.error('[people-media] IAM user needs rekognition:CompareFaces', error);
+      return { ok: false, reason: 'error' };
+    }
     console.error('[people-media] Rekognition compare failed', error);
     return { ok: false, reason: 'error' };
   }

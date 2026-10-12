@@ -741,12 +741,27 @@ After deploy: upload the profile picture once, then create one new post in that 
 
 ---
 
+## 2026-10-12 — Create people-in-media tables on Vercel if missing
+
+My-media stayed empty because enroll/register failed when the pgvector migration had not created tables, and that error was hidden. The app now creates the people-in-media tables on first profile or post upload (vector if the extension exists, otherwise jsonb). Rekognition CompareFaces always runs when AWS keys are set. Profile-picture returns `face_reference.last_error` if enroll fails.
+
+**New files**
+- `src/server/people-media/ensure-schema.ts`
+
+**Modified files**
+- `src/server/people-media/face-reference.ts` / `register.ts` / `process-batch.ts` / `queries.ts` / `rekognition.ts`
+- `src/app/api/users/[user_id]/profile-picture/route.ts` — surface enroll errors
+
+IAM: the AWS user must allow `rekognition:CompareFaces`. After deploy, upload the profile picture, then create one new post. Check `face_reference.processing_status` in the profile-picture response; it must be `ready`, not `failed`.
+
+---
+
 ## Known open items
 
 - Security issues found during review, not fixed yet: legacy admin cookie forgeable with the default secret; any token can edit/delete users; OTP returned in `/api/auth` responses; venue/explore/upload server actions without auth; feed/like/favorites trust `user_id` from the request.
 - No admin UI for event categories (seeded by migration since 2026-10-02; add/rename others directly in `event_categories`).
 - Other environments still need `npm run prisma:deploy` for `20260927140000_add_user_favorites`, `20260929160000_session_media_and_watermark`, `20261001120000_happening_and_report_settings`, `20261002150000_seed_event_categories`, `20261002170000_watermark_size`, `20261002190000_event_cover_images`, `20261003000000_event_linkedin_url`, `20261004120000_people_in_media`, `20261004210000_event_team` and `20261011120000_posts_height`. Install pgvector before the people-in-media migration, or `prisma migrate deploy` stops before `event_team`. If an environment already applied `20260928180000_add_session_phase_tags`, run its undo SQL (2026-09-28 section) first.
-- People in media: `FACE_PROVIDER=local` plus Rekognition CompareFaces is what Vercel uses to match different photos. InsightFace (`FACE_PROVIDER=http`) is still the higher-accuracy option when a face service exists. The people-in-media migration needs `CREATE EXTENSION vector` on the hosted Postgres. Vercel runs one batch after each upload and a daily cron.
+- People in media: tables are created on first upload if the pgvector migration never ran. Matching uses Rekognition CompareFaces. The AWS IAM user needs `rekognition:CompareFaces`. Profile photos should be JPEG or PNG (Rekognition rejects WebP).
 - Before deploying: go through the production checklist in the 2026-10-03 "/login ⇄ /dashboard redirect loop" section (`ADMIN_JWT_SECRET`, `X-Forwarded-Proto`, post-deploy login test).
 - Swapping two session titles on the same day in one save (A↔B) hits the unique (day, title) constraint; rename in two saves.
 - Watermark is an overlay: the mobile app must draw it (see `watermark` in `GET /api/events/{event_id}`); downloaded original files have no watermark.

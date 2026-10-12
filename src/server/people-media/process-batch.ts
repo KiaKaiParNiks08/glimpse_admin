@@ -1,9 +1,10 @@
 import { Prisma } from '@prisma/client';
 import prisma from '@/server/prisma';
-import { assertEmbeddingConfig, faceMaxAttempts, faceProviderKind, faceWorkerBatchSize } from './config';
+import { assertEmbeddingConfig, faceMaxAttempts, faceWorkerBatchSize } from './config';
+import { ensurePeopleMediaSchema } from './ensure-schema';
 import { getFaceProvider } from './face-provider';
 import { clearFaceEmbedding, deleteMatchesForUser, matchFaceToEventGuests, matchUserToGuestMedia, toVectorLiteral } from './match';
-import { matchMediaWithRekognition, matchUserWithRekognition } from './rekognition';
+import { matchMediaWithRekognition, matchUserWithRekognition, rekognitionClient } from './rekognition';
 import { readStoredMedia } from './storage';
 import type { DetectedFace } from './types';
 
@@ -18,6 +19,45 @@ function errorText(error: unknown): string {
 
 function topFaces(faces: DetectedFace[]): DetectedFace[] {
   return [...faces].sort((a, b) => b.confidence - a.confidence).slice(0, MAX_FACES);
+}
+
+async function insertMediaFace(
+  assetId: string,
+  index: number,
+  face: DetectedFace
+): Promise<string | null> {
+  const box = JSON.stringify(face.box);
+  try {
+    const vectorSql = Prisma.raw(`'${toVectorLiteral(face.embedding)}'::vector`);
+    const inserted = await prisma.$queryRaw<{ id: string }[]>`
+      INSERT INTO media_faces (id, media_asset_id, face_index, confidence, box, embedding)
+      VALUES (
+        gen_random_uuid(),
+        ${assetId}::uuid,
+        ${index},
+        ${face.confidence},
+        ${box}::jsonb,
+        ${vectorSql}
+      )
+      RETURNING id
+    `;
+    return inserted[0]?.id ?? null;
+  } catch (error) {
+    console.error('[people-media] vector face insert failed, trying jsonb', error);
+    const inserted = await prisma.$queryRaw<{ id: string }[]>`
+      INSERT INTO media_faces (id, media_asset_id, face_index, confidence, box, embedding)
+      VALUES (
+        gen_random_uuid(),
+        ${assetId}::uuid,
+        ${index},
+        ${face.confidence},
+        ${box}::jsonb,
+        ${JSON.stringify(face.embedding)}::jsonb
+      )
+      RETURNING id
+    `;
+    return inserted[0]?.id ?? null;
+  }
 }
 
 async function reclaimStuckJobs(): Promise<void> {
@@ -147,20 +187,7 @@ async function processMedia(id: string): Promise<void> {
 
   for (let index = 0; index < faces.length; index += 1) {
     const face = faces[index];
-    const vectorSql = Prisma.raw(`'${toVectorLiteral(face.embedding)}'::vector`);
-    const inserted = await prisma.$queryRaw<{ id: string }[]>`
-      INSERT INTO media_faces (id, media_asset_id, face_index, confidence, box, embedding)
-      VALUES (
-        gen_random_uuid(),
-        ${asset.id}::uuid,
-        ${index},
-        ${face.confidence},
-        ${JSON.stringify(face.box)}::jsonb,
-        ${vectorSql}
-      )
-      RETURNING id
-    `;
-    const faceId = inserted[0]?.id;
+    const faceId = await insertMediaFace(asset.id, index, face);
     if (!faceId) continue;
     try {
       await matchFaceToEventGuests({
@@ -172,13 +199,18 @@ async function processMedia(id: string): Promise<void> {
     } catch (error) {
       console.error('[people-media] vector match skipped', error);
     }
-    if (index === 0 && faceProviderKind() === 'local') {
-      await matchMediaWithRekognition({
+    if (index === 0) {
+      const matched = await matchMediaWithRekognition({
         eventId: asset.event_id,
         mediaAssetId: asset.id,
         mediaFaceId: faceId,
         mediaBytes: stored.bytes,
       });
+      if (!rekognitionClient()) {
+        console.error('[people-media] Rekognition is not configured; my-media will stay empty');
+      } else if (matched === 0) {
+        console.error('[people-media] Rekognition found no match for media', asset.id);
+      }
     }
   }
 
@@ -221,18 +253,33 @@ async function processReference(id: string): Promise<void> {
     throw new PermanentFaceError('No face detected in the reference photo');
   }
 
-  const vectorSql = Prisma.raw(`'${toVectorLiteral(best.embedding)}'::vector`);
-  const updated = await prisma.$executeRaw`
-    UPDATE user_face_references
-    SET embedding = ${vectorSql},
-        processing_status = 'ready',
-        last_error = NULL,
-        next_retry_at = NULL,
-        updated_at = now()
-    WHERE id = ${id}::uuid
-      AND consent = true
-      AND revoked_at IS NULL
-  `;
+  let updated = 0;
+  try {
+    const vectorSql = Prisma.raw(`'${toVectorLiteral(best.embedding)}'::vector`);
+    updated = await prisma.$executeRaw`
+      UPDATE user_face_references
+      SET embedding = ${vectorSql},
+          processing_status = 'ready',
+          last_error = NULL,
+          next_retry_at = NULL,
+          updated_at = now()
+      WHERE id = ${id}::uuid
+        AND consent = true
+        AND revoked_at IS NULL
+    `;
+  } catch (error) {
+    console.error('[people-media] embedding store failed, marking ready without vector', error);
+    updated = await prisma.$executeRaw`
+      UPDATE user_face_references
+      SET processing_status = 'ready',
+          last_error = NULL,
+          next_retry_at = NULL,
+          updated_at = now()
+      WHERE id = ${id}::uuid
+        AND consent = true
+        AND revoked_at IS NULL
+    `;
+  }
   if (updated > 0) {
     await deleteMatchesForUser(row.user_id);
     try {
@@ -240,11 +287,14 @@ async function processReference(id: string): Promise<void> {
     } catch (error) {
       console.error('[people-media] vector user match skipped', error);
     }
-    if (faceProviderKind() === 'local') {
-      await matchUserWithRekognition({
-        userId: row.user_id,
-        referenceBytes: stored.bytes,
-      });
+    const matched = await matchUserWithRekognition({
+      userId: row.user_id,
+      referenceBytes: stored.bytes,
+    });
+    if (!rekognitionClient()) {
+      console.error('[people-media] Rekognition is not configured; my-media will stay empty');
+    } else if (matched === 0) {
+      console.error('[people-media] Rekognition found no existing media for user', row.user_id);
     }
   }
 }
@@ -257,6 +307,7 @@ export type ProcessBatchResult = {
 };
 
 export async function processFaceQueue(): Promise<ProcessBatchResult> {
+  await ensurePeopleMediaSchema();
   assertEmbeddingConfig();
   const batch = faceWorkerBatchSize();
   const maxAttempts = faceMaxAttempts();

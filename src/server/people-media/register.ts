@@ -1,5 +1,6 @@
 import { Prisma } from '@prisma/client';
 import prisma from '@/server/prisma';
+import { ensurePeopleMediaSchema } from './ensure-schema';
 import { scheduleFaceProcessing } from './schedule';
 import { sha256Hex, storageKeyFromMediaUrl } from './storage';
 
@@ -61,6 +62,7 @@ async function findExisting(input: RegisterMediaInput) {
 }
 
 export async function registerMediaAsset(input: RegisterMediaInput): Promise<RegisteredMediaAsset> {
+  await ensurePeopleMediaSchema();
   const existing = await findExisting(input);
   if (existing) {
     return { id: existing.id, processing_status: existing.processing_status, created: false };

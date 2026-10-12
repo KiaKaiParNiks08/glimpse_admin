@@ -4,6 +4,7 @@ import prisma from '@/server/prisma';
 import { deleteObjectByKey } from '@/lib/s3-presign';
 import { saveUploadedFile } from '@/lib/upload';
 import { FACE_CONSENT_VERSION } from './config';
+import { ensurePeopleMediaSchema } from './ensure-schema';
 import { clearFaceEmbedding, deleteMatchesForUser } from './match';
 import { scheduleFaceProcessing } from './schedule';
 import { sha256Hex } from './storage';
@@ -99,6 +100,7 @@ export async function enrollStoredFaceReference(
   storageKey: string
 ): Promise<FaceReferenceStatus> {
   if (!storageKey) throw new Error('Face reference file was not stored');
+  await ensurePeopleMediaSchema();
 
   const previous = await prisma.user_face_references.findUnique({
     where: { user_id: userId },

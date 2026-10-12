@@ -61,6 +61,12 @@ export async function POST(
       face_reference = await enrollStoredFaceReference(user.id, saved.storageKey);
     } catch (error) {
       console.error('[profile-picture] face reference was not enrolled', error);
+      face_reference = {
+        consent: false,
+        processing_status: 'failed',
+        last_error: error instanceof Error ? error.message : 'Face reference was not enrolled',
+        has_embedding: false,
+      };
     }
 
     return ok({

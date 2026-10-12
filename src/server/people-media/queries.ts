@@ -1,6 +1,7 @@
 import prisma from '@/server/prisma';
 import { isEventAdminAssigned } from '@/server/events';
 import { isEventGuest } from '@/server/event-guests';
+import { ensurePeopleMediaSchema } from './ensure-schema';
 import type { AdminSessionUser } from '@/lib/admin-session';
 
 export async function adminCanManageEvent(admin: AdminSessionUser, eventId: string): Promise<boolean> {
@@ -9,6 +10,7 @@ export async function adminCanManageEvent(admin: AdminSessionUser, eventId: stri
 }
 
 export async function listMyMedia(input: { userId: string; eventId: string; page: number; limit: number }) {
+  await ensurePeopleMediaSchema();
   const offset = (input.page - 1) * input.limit;
   const [countRows, items] = await Promise.all([
     prisma.$queryRaw<{ total: number }[]>`
