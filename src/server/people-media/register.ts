@@ -176,3 +176,91 @@ export async function registerFeedPostMedia(input: {
     console.error('[people-media] feed registration failed', error);
   }
 }
+
+/** Register feed and gallery images that were uploaded before people-in-media existed. */
+export async function backfillEventMedia(eventId: string): Promise<number> {
+  await ensurePeopleMediaSchema();
+  let created = 0;
+
+  const posts = await prisma.$queryRaw<
+    { id: string; media_type: string; media_url: string; user_id: string }[]
+  >`
+    SELECT pm.id, pm.media_type::text AS media_type, pm.media_url, p.user_id
+    FROM post_media pm
+    JOIN posts p ON p.id = pm.post_id
+    LEFT JOIN media_assets ma ON ma.post_media_id = pm.id
+    WHERE p.event_id = ${eventId}::uuid
+      AND p.status = 'active'
+      AND pm.media_type = 'image'
+      AND ma.id IS NULL
+  `;
+  for (const item of posts) {
+    const storageKey = storageKeyFromMediaUrl(item.media_url);
+    if (!storageKey) {
+      console.error('[people-media] backfill skipped post_media with no storage key', item.id);
+      continue;
+    }
+    const result = await registerMediaAsset({
+      eventId,
+      source: 'user_post',
+      mediaType: 'image',
+      storageKey,
+      mediaUrl: item.media_url,
+      idempotencyKey: `post-media:${item.id}`,
+      postMediaId: item.id,
+      uploadedBy: item.user_id,
+    });
+    if (result.created) created += 1;
+  }
+
+  const gallery = await prisma.$queryRaw<
+    {
+      id: string;
+      media_type: string;
+      media_url: string;
+      media_key: string | null;
+      uploaded_by: string | null;
+    }[]
+  >`
+    SELECT edm.id, edm.media_type, edm.media_url, edm.media_key, edm.uploaded_by
+    FROM event_day_media edm
+    JOIN event_days ed ON ed.id = edm.event_day_id
+    LEFT JOIN media_assets ma ON ma.event_day_media_id = edm.id
+    WHERE ed.event_id = ${eventId}::uuid
+      AND edm.media_type = 'image'
+      AND ma.id IS NULL
+  `;
+  for (const item of gallery) {
+    const storageKey = storageKeyFromMediaUrl(item.media_url, item.media_key);
+    if (!storageKey) {
+      console.error('[people-media] backfill skipped gallery item with no storage key', item.id);
+      continue;
+    }
+    const result = await registerMediaAsset({
+      eventId,
+      source: 'photographer',
+      mediaType: 'image',
+      storageKey,
+      mediaUrl: item.media_url,
+      idempotencyKey: `day-media:${item.id}`,
+      eventDayMediaId: item.id,
+      uploadedBy: item.uploaded_by,
+    });
+    if (result.created) created += 1;
+  }
+
+  return created;
+}
+
+export async function backfillUserEventMedia(userId: string): Promise<number> {
+  const events = await prisma.$queryRaw<{ event_id: string }[]>`
+    SELECT event_id FROM event_guests WHERE user_id = ${userId}::uuid
+    UNION
+    SELECT event_id FROM posts WHERE user_id = ${userId}::uuid AND event_id IS NOT NULL
+  `;
+  let created = 0;
+  for (const row of events) {
+    created += await backfillEventMedia(row.event_id);
+  }
+  return created;
+}

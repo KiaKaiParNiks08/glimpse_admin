@@ -1,5 +1,8 @@
 import { CompareFacesCommand, RekognitionClient } from '@aws-sdk/client-rekognition';
+import { Prisma } from '@prisma/client';
 import prisma from '@/server/prisma';
+import { FACE_EMBEDDING_DIM } from './config';
+import { toVectorLiteral } from './match';
 import { readStoredMedia } from './storage';
 
 const REKOGNITION_MAX_BYTES = 5 * 1024 * 1024;
@@ -69,6 +72,64 @@ export async function compareFacePhotos(
     }
     console.error('[people-media] Rekognition compare failed', error);
     return { ok: false, reason: 'error' };
+  }
+}
+
+const PLACEHOLDER_BOX = JSON.stringify({ x: 0, y: 0, width: 1, height: 1 });
+
+function placeholderEmbedding(): number[] {
+  const values = new Array<number>(FACE_EMBEDDING_DIM).fill(0);
+  values[0] = 1;
+  return values;
+}
+
+/** Rekognition matches need a media_faces row even when local embeddings never inserted one. */
+export async function ensureMediaFace(mediaAssetId: string): Promise<string | null> {
+  const existing = await prisma.$queryRaw<{ id: string }[]>`
+    SELECT id FROM media_faces
+    WHERE media_asset_id = ${mediaAssetId}::uuid AND face_index = 0
+    LIMIT 1
+  `;
+  if (existing[0]?.id) return existing[0].id;
+
+  try {
+    const vectorSql = Prisma.raw(`'${toVectorLiteral(placeholderEmbedding())}'::vector`);
+    const inserted = await prisma.$queryRaw<{ id: string }[]>`
+      INSERT INTO media_faces (id, media_asset_id, face_index, confidence, box, embedding)
+      VALUES (
+        gen_random_uuid(),
+        ${mediaAssetId}::uuid,
+        0,
+        1,
+        ${PLACEHOLDER_BOX}::jsonb,
+        ${vectorSql}
+      )
+      ON CONFLICT (media_asset_id, face_index) DO UPDATE SET confidence = media_faces.confidence
+      RETURNING id
+    `;
+    if (inserted[0]?.id) return inserted[0].id;
+  } catch (error) {
+    console.error('[people-media] vector placeholder face failed, trying jsonb', error);
+  }
+
+  try {
+    const inserted = await prisma.$queryRaw<{ id: string }[]>`
+      INSERT INTO media_faces (id, media_asset_id, face_index, confidence, box, embedding)
+      VALUES (
+        gen_random_uuid(),
+        ${mediaAssetId}::uuid,
+        0,
+        1,
+        ${PLACEHOLDER_BOX}::jsonb,
+        ${JSON.stringify(placeholderEmbedding())}::jsonb
+      )
+      ON CONFLICT (media_asset_id, face_index) DO UPDATE SET confidence = media_faces.confidence
+      RETURNING id
+    `;
+    return inserted[0]?.id ?? null;
+  } catch (error) {
+    console.error('[people-media] placeholder face insert failed', mediaAssetId, error);
+    return null;
   }
 }
 
@@ -145,20 +206,19 @@ export async function matchMediaWithRekognition(input: {
   return matched;
 }
 
-/** Compare one enrolled profile to ready event photos for that guest. */
+/** Compare one enrolled profile to event photos. Does not require media_faces to already exist. */
 export async function matchUserWithRekognition(input: {
   userId: string;
   referenceBytes: Buffer;
+  eventId?: string;
 }): Promise<number> {
   if (!rekognitionClient()) return 0;
-  const rows = await prisma.$queryRaw<{ media_asset_id: string; media_face_id: string; storage_key: string }[]>`
-    SELECT ma.id AS media_asset_id,
-           mf.id AS media_face_id,
-           ma.storage_key
-    FROM media_faces mf
-    JOIN media_assets ma ON ma.id = mf.media_asset_id
-    WHERE ma.processing_status = 'ready'
-      AND mf.face_index = 0
+  const eventId = input.eventId ?? null;
+  const rows = await prisma.$queryRaw<{ media_asset_id: string; storage_key: string }[]>`
+    SELECT ma.id AS media_asset_id, ma.storage_key
+    FROM media_assets ma
+    WHERE ma.media_type = 'image'
+      AND (${eventId}::uuid IS NULL OR ma.event_id = ${eventId}::uuid)
       AND (
         EXISTS (
           SELECT 1 FROM event_guests eg
@@ -171,11 +231,13 @@ export async function matchUserWithRekognition(input: {
         OR ma.uploaded_by = ${input.userId}::uuid
       )
     ORDER BY ma.created_at DESC
-    LIMIT 25
+    LIMIT 50
   `;
   const minSimilarity = rekognitionMediaMinSimilarity();
   let matched = 0;
   for (const row of rows) {
+    const mediaFaceId = await ensureMediaFace(row.media_asset_id);
+    if (!mediaFaceId) continue;
     let target: Buffer;
     try {
       target = (await readStoredMedia(row.storage_key)).bytes;
@@ -187,11 +249,32 @@ export async function matchUserWithRekognition(input: {
     if (!compared.ok) continue;
     await upsertMatch({
       mediaAssetId: row.media_asset_id,
-      mediaFaceId: row.media_face_id,
+      mediaFaceId,
       userId: input.userId,
       similarity: compared.similarity / 100,
     });
     matched += 1;
   }
   return matched;
+}
+
+/** Compare an already-ready profile to this event's photos. Used when GET my-media is empty. */
+export async function rematchUserEventMedia(userId: string, eventId: string): Promise<number> {
+  if (!rekognitionClient()) {
+    console.error('[people-media] Rekognition is not configured; my-media will stay empty');
+    return 0;
+  }
+  const rows = await prisma.$queryRaw<{ storage_key: string }[]>`
+    SELECT storage_key
+    FROM user_face_references
+    WHERE user_id = ${userId}::uuid
+      AND consent = true
+      AND revoked_at IS NULL
+      AND storage_key IS NOT NULL
+    LIMIT 1
+  `;
+  const key = rows[0]?.storage_key;
+  if (!key) return 0;
+  const stored = await readStoredMedia(key);
+  return matchUserWithRekognition({ userId, referenceBytes: stored.bytes, eventId });
 }

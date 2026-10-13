@@ -766,6 +766,21 @@ IAM: the AWS user must allow `rekognition:CompareFaces`. After deploy, upload th
 
 ---
 
+## 2026-10-13 — My-media empty after a ready profile
+
+Profile enroll can be `ready` with an embedding while `GET /api/events/{event_id}/my-media` still returns `[]`. This event had two feed images that were never copied into `media_assets` / `media_faces`, so Rekognition had nothing to compare. Matching also required an existing `media_faces` row.
+
+**Modified files**
+- `src/server/people-media/register.ts` — backfill existing feed/gallery images into `media_assets`
+- `src/server/people-media/rekognition.ts` — compare profile to event images even without `media_faces`; rematch helper for GET my-media
+- `src/server/people-media/process-batch.ts` — process event photos before the new profile; Rekognition still runs if face insert fails
+- `src/server/people-media/face-reference.ts` — backfill the user's events before matching
+- `src/app/api/events/[event_id]/my-media/route.ts` — if the list is empty, backfill, process, rematch, then list again
+
+After deploy: open my-media again. No need to re-upload the profile picture.
+
+---
+
 ## 2026-10-13 — My-media GET no longer hangs on Vercel
 
 `GET /api/events/{event_id}/my-media` was calling `ensurePeopleMediaSchema()`, which ran `CREATE EXTENSION vector` and could wait on a DB lock until Flutter’s 60s receive timeout. Listing now only SELECTs matches. If the tables are missing it returns an empty list. Schema create no longer uses `CREATE EXTENSION`.

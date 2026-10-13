@@ -4,7 +4,12 @@ import { assertEmbeddingConfig, faceMaxAttempts, faceWorkerBatchSize } from './c
 import { ensurePeopleMediaSchema } from './ensure-schema';
 import { getFaceProvider } from './face-provider';
 import { clearFaceEmbedding, deleteMatchesForUser, matchFaceToEventGuests, matchUserToGuestMedia, toVectorLiteral } from './match';
-import { matchMediaWithRekognition, matchUserWithRekognition, rekognitionClient } from './rekognition';
+import {
+  ensureMediaFace,
+  matchMediaWithRekognition,
+  matchUserWithRekognition,
+  rekognitionClient,
+} from './rekognition';
 import { readStoredMedia } from './storage';
 import type { DetectedFace } from './types';
 
@@ -185,10 +190,12 @@ async function processMedia(id: string): Promise<void> {
 
   await prisma.media_faces.deleteMany({ where: { media_asset_id: asset.id } });
 
+  let primaryFaceId: string | null = null;
   for (let index = 0; index < faces.length; index += 1) {
     const face = faces[index];
     const faceId = await insertMediaFace(asset.id, index, face);
     if (!faceId) continue;
+    if (index === 0) primaryFaceId = faceId;
     try {
       await matchFaceToEventGuests({
         eventId: asset.event_id,
@@ -199,11 +206,15 @@ async function processMedia(id: string): Promise<void> {
     } catch (error) {
       console.error('[people-media] vector match skipped', error);
     }
-    if (index === 0) {
+  }
+
+  if (asset.media_type === 'image') {
+    primaryFaceId = primaryFaceId ?? (await ensureMediaFace(asset.id));
+    if (primaryFaceId) {
       const matched = await matchMediaWithRekognition({
         eventId: asset.event_id,
         mediaAssetId: asset.id,
-        mediaFaceId: faceId,
+        mediaFaceId: primaryFaceId,
         mediaBytes: stored.bytes,
       });
       if (!rekognitionClient()) {
@@ -320,16 +331,6 @@ export async function processFaceQueue(): Promise<ProcessBatchResult> {
     references_failed: 0,
   };
 
-  const referenceIds = await claimReferenceIds(batch, maxAttempts);
-  for (const id of referenceIds) {
-    try {
-      await processReference(id);
-    } catch (error) {
-      result.references_failed += 1;
-      await failReference(id, errorText(error), error instanceof PermanentFaceError);
-    }
-  }
-
   const mediaIds = await claimMediaIds(batch, maxAttempts);
   for (const id of mediaIds) {
     try {
@@ -338,6 +339,16 @@ export async function processFaceQueue(): Promise<ProcessBatchResult> {
     } catch (error) {
       result.media_failed += 1;
       await failMedia(id, errorText(error));
+    }
+  }
+
+  const referenceIds = await claimReferenceIds(batch, maxAttempts);
+  for (const id of referenceIds) {
+    try {
+      await processReference(id);
+    } catch (error) {
+      result.references_failed += 1;
+      await failReference(id, errorText(error), error instanceof PermanentFaceError);
     }
   }
 

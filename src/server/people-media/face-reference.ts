@@ -6,6 +6,7 @@ import { saveUploadedFile } from '@/lib/upload';
 import { FACE_CONSENT_VERSION } from './config';
 import { ensurePeopleMediaSchema } from './ensure-schema';
 import { clearFaceEmbedding, deleteMatchesForUser } from './match';
+import { backfillUserEventMedia } from './register';
 import { scheduleFaceProcessing } from './schedule';
 import { sha256Hex } from './storage';
 
@@ -134,6 +135,11 @@ export async function enrollStoredFaceReference(
   `;
   if (previous?.storage_key && previous.storage_key !== storageKey) {
     await deleteStoredReference(previous.storage_key);
+  }
+  try {
+    await backfillUserEventMedia(userId);
+  } catch (error) {
+    console.error('[people-media] event media backfill failed', error);
   }
   await scheduleFaceProcessing();
   const status = await getFaceReferenceStatus(userId);

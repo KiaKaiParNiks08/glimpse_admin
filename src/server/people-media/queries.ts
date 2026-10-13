@@ -30,7 +30,6 @@ export async function listMyMedia(input: { userId: string; eventId: string; page
       JOIN media_assets ma ON ma.id = mm.media_asset_id
       WHERE mm.user_id = ${input.userId}::uuid
         AND ma.event_id = ${input.eventId}::uuid
-        AND ma.processing_status = 'ready'
     `,
     prisma.$queryRaw<
       {
@@ -60,7 +59,6 @@ export async function listMyMedia(input: { userId: string; eventId: string; page
       LEFT JOIN posts p ON p.id = pm.post_id
       WHERE mm.user_id = ${input.userId}::uuid
         AND ma.event_id = ${input.eventId}::uuid
-        AND ma.processing_status = 'ready'
       GROUP BY ma.id, ma.source, ma.media_type, ma.media_url, ma.created_at, ma.event_day_media_id, pm.post_id, p.caption
       ORDER BY ma.created_at DESC
       LIMIT ${input.limit} OFFSET ${offset}
