@@ -8,14 +8,17 @@ let ensured = false;
  */
 export async function ensurePeopleMediaSchema(): Promise<void> {
   if (ensured) return;
+  const existing = await prisma.$queryRaw<{ name: string | null }[]>`
+    SELECT to_regclass('public.media_matches')::text AS name
+  `;
+  if (existing[0]?.name) {
+    ensured = true;
+    return;
+  }
   await prisma.$executeRawUnsafe(`
     DO $ensure$
     BEGIN
-      BEGIN
-        CREATE EXTENSION IF NOT EXISTS vector;
-      EXCEPTION WHEN OTHERS THEN
-        NULL;
-      END;
+      -- Do not CREATE EXTENSION vector here. On hosted Postgres that lock can hang a GET for minutes.
 
       CREATE TABLE IF NOT EXISTS media_assets (
         id UUID PRIMARY KEY DEFAULT gen_random_uuid(),

@@ -1,7 +1,6 @@
 import prisma from '@/server/prisma';
 import { isEventAdminAssigned } from '@/server/events';
 import { isEventGuest } from '@/server/event-guests';
-import { ensurePeopleMediaSchema } from './ensure-schema';
 import type { AdminSessionUser } from '@/lib/admin-session';
 
 export async function adminCanManageEvent(admin: AdminSessionUser, eventId: string): Promise<boolean> {
@@ -10,9 +9,21 @@ export async function adminCanManageEvent(admin: AdminSessionUser, eventId: stri
 }
 
 export async function listMyMedia(input: { userId: string; eventId: string; page: number; limit: number }) {
-  await ensurePeopleMediaSchema();
   const offset = (input.page - 1) * input.limit;
-  const [countRows, items] = await Promise.all([
+  let countRows: { total: number }[] = [];
+  let items: {
+    media_asset_id: string;
+    source: string;
+    media_type: string;
+    media_url: string;
+    created_at: Date | null;
+    event_day_media_id: string | null;
+    post_id: string | null;
+    caption: string | null;
+    similarity: number;
+  }[] = [];
+  try {
+    const [countResult, itemRows] = await Promise.all([
     prisma.$queryRaw<{ total: number }[]>`
       SELECT COUNT(DISTINCT ma.id)::int AS total
       FROM media_matches mm
@@ -55,6 +66,12 @@ export async function listMyMedia(input: { userId: string; eventId: string; page
       LIMIT ${input.limit} OFFSET ${offset}
     `,
   ]);
+    countRows = countResult;
+    items = itemRows;
+  } catch (error) {
+    console.error('[people-media] listMyMedia query failed', error);
+    return { items: [], total: 0 };
+  }
 
   const total = countRows[0]?.total ?? 0;
   return {

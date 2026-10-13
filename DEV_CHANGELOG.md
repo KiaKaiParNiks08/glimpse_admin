@@ -766,6 +766,16 @@ IAM: the AWS user must allow `rekognition:CompareFaces`. After deploy, upload th
 
 ---
 
+## 2026-10-13 — My-media GET no longer hangs on Vercel
+
+`GET /api/events/{event_id}/my-media` was calling `ensurePeopleMediaSchema()`, which ran `CREATE EXTENSION vector` and could wait on a DB lock until Flutter’s 60s receive timeout. Listing now only SELECTs matches. If the tables are missing it returns an empty list. Schema create no longer uses `CREATE EXTENSION`.
+
+**Modified files**
+- `src/server/people-media/queries.ts` — no schema bootstrap on GET
+- `src/server/people-media/ensure-schema.ts` — skip if `media_matches` exists; never `CREATE EXTENSION`
+
+---
+
 ## Known open items
 
 - Security issues found during review, not fixed yet: legacy admin cookie forgeable with the default secret; any token can edit/delete users; OTP returned in `/api/auth` responses; venue/explore/upload server actions without auth; feed/like/favorites trust `user_id` from the request.
