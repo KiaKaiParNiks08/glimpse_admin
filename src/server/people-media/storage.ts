@@ -34,19 +34,20 @@ export function storageKeyFromMediaUrl(url: string | null | undefined, mediaKey?
     const key = decodeURIComponent(raw.slice(publicBase.length + 1).split('?')[0] ?? '');
     if (key && !key.includes('..') && !key.startsWith('/')) return key;
   }
-  if (raw.startsWith('http://') || raw.startsWith('https://')) return null;
-  if (raw.startsWith('/uploads/') || raw.startsWith('uploads/')) return raw.replace(/^\//, '');
-  try {
-    if (raw.startsWith('/api/upload/signed')) {
-      const parsed = new URL(raw, 'http://local');
+  const signedAt = raw.indexOf('/api/upload/signed');
+  if (signedAt >= 0) {
+    try {
+      const parsed = new URL(raw.slice(signedAt), 'http://local');
       const token = parsed.searchParams.get('t');
       const keyParam = parsed.searchParams.get('key');
       if (token) return decryptToken(token);
       if (keyParam) return decodeURIComponent(keyParam);
+    } catch {
+      return null;
     }
-  } catch {
-    return null;
   }
+  if (raw.startsWith('http://') || raw.startsWith('https://')) return null;
+  if (raw.startsWith('/uploads/') || raw.startsWith('uploads/')) return raw.replace(/^\//, '');
   return null;
 }
 

@@ -153,6 +153,14 @@ async function upsertMatch(input: {
   `;
 }
 
+export async function recordUploaderMatch(
+  mediaAssetId: string,
+  mediaFaceId: string,
+  userId: string
+): Promise<void> {
+  await upsertMatch({ mediaAssetId, mediaFaceId, userId, similarity: 1 });
+}
+
 /** Compare one event photo to consented guest profile photos. Used when FACE_PROVIDER=local. */
 export async function matchMediaWithRekognition(input: {
   eventId: string;

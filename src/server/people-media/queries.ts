@@ -8,42 +8,40 @@ export async function adminCanManageEvent(admin: AdminSessionUser, eventId: stri
   return isEventAdminAssigned(eventId, admin.id);
 }
 
+type MyMediaRow = {
+  media_asset_id: string;
+  source: string;
+  media_type: string;
+  media_url: string;
+  created_at: Date | null;
+  event_day_media_id: string | null;
+  post_id: string | null;
+  caption: string | null;
+  similarity: number;
+};
+
+function mergeMyMedia(rows: MyMediaRow[]): MyMediaRow[] {
+  const byUrl = new Map<string, MyMediaRow>();
+  for (const row of rows) {
+    const key = row.media_url || row.media_asset_id;
+    const existing = byUrl.get(key);
+    if (!existing || (row.similarity ?? 0) > (existing.similarity ?? 0)) {
+      byUrl.set(key, row);
+    }
+  }
+  return [...byUrl.values()].sort((a, b) => {
+    const aTime = a.created_at ? new Date(a.created_at).getTime() : 0;
+    const bTime = b.created_at ? new Date(b.created_at).getTime() : 0;
+    return bTime - aTime;
+  });
+}
+
 export async function listMyMedia(input: { userId: string; eventId: string; page: number; limit: number }) {
   const offset = (input.page - 1) * input.limit;
-  let countRows: { total: number }[] = [];
-  let items: {
-    media_asset_id: string;
-    source: string;
-    media_type: string;
-    media_url: string;
-    created_at: Date | null;
-    event_day_media_id: string | null;
-    post_id: string | null;
-    caption: string | null;
-    similarity: number;
-  }[] = [];
+  const rows: MyMediaRow[] = [];
+
   try {
-    const [countResult, itemRows] = await Promise.all([
-    prisma.$queryRaw<{ total: number }[]>`
-      SELECT COUNT(DISTINCT ma.id)::int AS total
-      FROM media_matches mm
-      JOIN media_assets ma ON ma.id = mm.media_asset_id
-      WHERE mm.user_id = ${input.userId}::uuid
-        AND ma.event_id = ${input.eventId}::uuid
-    `,
-    prisma.$queryRaw<
-      {
-        media_asset_id: string;
-        source: string;
-        media_type: string;
-        media_url: string;
-        created_at: Date | null;
-        event_day_media_id: string | null;
-        post_id: string | null;
-        caption: string | null;
-        similarity: number;
-      }[]
-    >`
+    const matched = await prisma.$queryRaw<MyMediaRow[]>`
       SELECT ma.id AS media_asset_id,
              ma.source,
              ma.media_type::text AS media_type,
@@ -60,30 +58,39 @@ export async function listMyMedia(input: { userId: string; eventId: string; page
       WHERE mm.user_id = ${input.userId}::uuid
         AND ma.event_id = ${input.eventId}::uuid
       GROUP BY ma.id, ma.source, ma.media_type, ma.media_url, ma.created_at, ma.event_day_media_id, pm.post_id, p.caption
-      ORDER BY ma.created_at DESC
-      LIMIT ${input.limit} OFFSET ${offset}
-    `,
-  ]);
-    countRows = countResult;
-    items = itemRows;
+    `;
+    rows.push(...matched);
   } catch (error) {
-    console.error('[people-media] listMyMedia query failed', error);
-    return { items: [], total: 0 };
+    console.error('[people-media] listMyMedia match query failed', error);
   }
 
-  const total = countRows[0]?.total ?? 0;
+  try {
+    const ownPosts = await prisma.$queryRaw<MyMediaRow[]>`
+      SELECT pm.id AS media_asset_id,
+             'user_post' AS source,
+             pm.media_type::text AS media_type,
+             pm.media_url,
+             pm.created_at,
+             NULL::uuid AS event_day_media_id,
+             p.id AS post_id,
+             p.caption,
+             1::float AS similarity
+      FROM post_media pm
+      JOIN posts p ON p.id = pm.post_id
+      WHERE p.event_id = ${input.eventId}::uuid
+        AND p.user_id = ${input.userId}::uuid
+        AND p.status = 'active'
+        AND pm.media_type = 'image'
+    `;
+    rows.push(...ownPosts);
+  } catch (error) {
+    console.error('[people-media] listMyMedia own-post query failed', error);
+  }
+
+  const items = mergeMyMedia(rows);
+  const total = items.length;
   return {
-    items: items.map((item) => ({
-      media_asset_id: item.media_asset_id,
-      source: item.source,
-      media_type: item.media_type,
-      media_url: item.media_url,
-      created_at: item.created_at,
-      event_day_media_id: item.event_day_media_id,
-      post_id: item.post_id,
-      caption: item.caption,
-      similarity: item.similarity,
-    })),
+    items: items.slice(offset, offset + input.limit),
     total,
   };
 }

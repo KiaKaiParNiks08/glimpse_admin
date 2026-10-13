@@ -781,6 +781,19 @@ After deploy: open my-media again. No need to re-upload the profile picture.
 
 ---
 
+## 2026-10-13 — My-media includes the user's own feed photos
+
+Vercel still returned `data: []` after profile enroll because `media_matches` stayed empty (Rekognition CompareFaces is not matching yet). This event already had this user's feed images. `GET /api/events/{event_id}/my-media` now also returns that user's own active image posts for the event, so the screen is not empty while face matching is fixed. Photographer / other-guest photos still need a face match.
+
+**Modified files**
+- `src/server/people-media/queries.ts` — union face matches with the user's own feed images
+- `src/app/api/events/[event_id]/my-media/route.ts` — cheap backfill only; do not block GET on Rekognition
+- `src/server/people-media/storage.ts` — recover S3 keys from full `/api/upload/signed` URLs
+- `src/server/people-media/process-batch.ts` / `rekognition.ts` — record the uploader as a match
+- `src/lib/openapi.ts` — my-media description
+
+---
+
 ## 2026-10-13 — My-media GET no longer hangs on Vercel
 
 `GET /api/events/{event_id}/my-media` was calling `ensurePeopleMediaSchema()`, which ran `CREATE EXTENSION vector` and could wait on a DB lock until Flutter’s 60s receive timeout. Listing now only SELECTs matches. If the tables are missing it returns an empty list. Schema create no longer uses `CREATE EXTENSION`.

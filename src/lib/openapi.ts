@@ -1518,7 +1518,7 @@ export function getOpenApiSpec(serverUrl: string) {
         get: {
           summary: 'Photos and posts where this user was recognized',
           description:
-            'Local test: enroll via profile-picture or PUT /api/users/me/face-reference with consent=true, then upload a session photo or create a feed post for the same event_id. Matching runs during that upload. This list is only that event. A post made by another guest is included when this user\'s face matches. On Vercel with FACE_PROVIDER=local, Amazon Rekognition CompareFaces matches different photos of the same person.',
+            'Returns this event\'s photos for the signed-in user: (1) image posts they created, and (2) other guests\' or photographer photos where their face matched. Face matching uses Amazon Rekognition CompareFaces when AWS keys are set.',
           tags: ['Events'],
           security: [{ BearerAuth: [] }],
           parameters: [

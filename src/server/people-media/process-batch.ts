@@ -8,6 +8,7 @@ import {
   ensureMediaFace,
   matchMediaWithRekognition,
   matchUserWithRekognition,
+  recordUploaderMatch,
   rekognitionClient,
 } from './rekognition';
 import { readStoredMedia } from './storage';
@@ -175,6 +176,7 @@ async function processMedia(id: string): Promise<void> {
       event_id: true,
       storage_key: true,
       media_type: true,
+      uploaded_by: true,
     },
   });
   if (!asset) return;
@@ -211,6 +213,9 @@ async function processMedia(id: string): Promise<void> {
   if (asset.media_type === 'image') {
     primaryFaceId = primaryFaceId ?? (await ensureMediaFace(asset.id));
     if (primaryFaceId) {
+      if (asset.uploaded_by) {
+        await recordUploaderMatch(asset.id, primaryFaceId, asset.uploaded_by);
+      }
       const matched = await matchMediaWithRekognition({
         eventId: asset.event_id,
         mediaAssetId: asset.id,
@@ -218,7 +223,7 @@ async function processMedia(id: string): Promise<void> {
         mediaBytes: stored.bytes,
       });
       if (!rekognitionClient()) {
-        console.error('[people-media] Rekognition is not configured; my-media will stay empty');
+        console.error('[people-media] Rekognition is not configured; gallery matches need CompareFaces');
       } else if (matched === 0) {
         console.error('[people-media] Rekognition found no match for media', asset.id);
       }
