@@ -804,6 +804,17 @@ Vercel still returned `data: []` after profile enroll because `media_matches` st
 
 ---
 
+## 2026-10-14 — Deleted comments stay hidden on GET
+
+`DELETE /api/feed/{post_id}/comments/{comment_id}` already soft-deletes and only allows the comment owner. `GET /api/feed/{post_id}/comments` did not filter status, so deleted comments came back. The list now defaults to `status=active`, same as the feed. Pass `status=deleted` to see deleted comments. Create, replies, and ownership rules are unchanged.
+
+**Modified files**
+- `src/lib/validations/comments.ts` — default list status to active
+- `src/server/comments.ts` — list top-level comments and replies as active unless another status is passed
+- `src/lib/openapi.ts` — document the default
+
+---
+
 ## Known open items
 
 - Security issues found during review, not fixed yet: legacy admin cookie forgeable with the default secret; any token can edit/delete users; OTP returned in `/api/auth` responses; venue/explore/upload server actions without auth; feed/like/favorites trust `user_id` from the request.

@@ -112,7 +112,7 @@ export async function listComments(
   const where = {
     post_id: postId,
     parent_comment_id: null,
-    ...(status && { status }),
+    status: status ?? 'active',
   };
   const [comments, total, replyRows] = await Promise.all([
     prisma.comments.findMany({
@@ -127,7 +127,7 @@ export async function listComments(
       where: {
         post_id: postId,
         parent_comment_id: { not: null },
-        ...(status && { status }),
+        status: status ?? 'active',
       },
       select: commentSelect,
       orderBy: { created_at: 'asc' },

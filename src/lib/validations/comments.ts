@@ -17,7 +17,8 @@ export const createCommentBodySchema = z.object({
 
 /** Query params for listing post comments */
 export const listCommentsQuerySchema = paginationSchema.extend({
-  status: commentStatusSchema.optional(),
+  /** Defaults to active so deleted comments stay out of the thread. */
+  status: commentStatusSchema.optional().default('active'),
   /**
    * Kept so older clients that still send root|all do not fail validation.
    * Replies are always nested on each comment; this value does not change the list.

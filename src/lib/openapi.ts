@@ -1010,13 +1010,13 @@ export function getOpenApiSpec(serverUrl: string) {
         get: {
           summary: 'List post comments',
           description:
-            'Paginated top-level comments for a post, newest first. Each comment includes a replies array (oldest first) for that thread, including a reply to a reply. meta.total counts top-level comments only.',
+            'Paginated top-level comments for a post, newest first. Deleted comments are omitted unless status=deleted is passed. Each comment includes a replies array (oldest first) for that thread, including a reply to a reply. meta.total counts top-level comments only.',
           tags: ['Feed'],
           parameters: [
             { name: 'post_id', in: 'path', required: true, schema: { type: 'string', format: 'uuid' }, description: 'Post ID' },
             { name: 'page', in: 'query', schema: { type: 'integer', minimum: 1, default: 1 } },
             { name: 'limit', in: 'query', schema: { type: 'integer', minimum: 1, maximum: 100, default: 20 } },
-            { name: 'status', in: 'query', schema: { type: 'string', enum: ['active', 'deleted'] }, description: 'Filter by comment status' },
+            { name: 'status', in: 'query', schema: { type: 'string', enum: ['active', 'deleted'], default: 'active' }, description: 'Defaults to active. Pass deleted to list soft-deleted comments.' },
             {
               name: 'parent_comment_id',
               in: 'query',
