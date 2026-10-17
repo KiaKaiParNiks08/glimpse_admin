@@ -282,6 +282,7 @@ export function CreateEventWizard({
           bride_name?: string | null;
           greetings_text?: string | null;
           linkedin_url?: string | null;
+          email_suffix?: string | null;
           app_theme_id?: string | null;
           app_themes?: AppThemeOption | null;
           cover_image?: string | null;
@@ -347,6 +348,7 @@ export function CreateEventWizard({
           bride_name: event.bride_name ?? undefined,
           greetings_text: event.greetings_text ?? undefined,
           linkedin_url: event.linkedin_url ?? undefined,
+          email_suffix: event.email_suffix ?? undefined,
           cover_image: event.cover_image ?? undefined,
           cover_images: event.event_cover_images?.length
             ? event.event_cover_images.map((c) => c.image_url)
@@ -895,6 +897,7 @@ export function CreateEventWizard({
                   bride_name: basicPayload.bride_name ?? null,
                   greetings_text: basicPayload.greetings_text ?? null,
                   linkedin_url: basicPayload.linkedin_url ?? null,
+                  email_suffix: basicPayload.email_suffix ?? null,
                   cover_image: basicPayload.cover_image ?? null,
                   cover_images: basicPayload.cover_images ?? [],
                   e_invite_pdf_url: basicPayload.e_invite_pdf_url ?? null,

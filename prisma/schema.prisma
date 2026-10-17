@@ -335,6 +335,8 @@ model events {
   greetings_text                       String?
   /// Required by the panel when the category is a corporate event
   linkedin_url                         String?               @db.VarChar(500)
+  /// Corporate email domain used for code-less login, stored as @company.com
+  email_suffix                         String?               @db.VarChar(150)
   /// Watermark drawn over gallery images: top_left | top_right | center | bottom_left | bottom_right, opacity 0-100,
   /// size = side of the square in actual image pixels (16-120).
   watermark_url                        String?
@@ -375,6 +377,7 @@ model events {
   @@index([slug], map: "idx_events_slug")
   @@index([start_date], map: "idx_events_start_date")
   @@index([status], map: "idx_events_status")
+  @@index([email_suffix], map: "idx_events_email_suffix")
 }
 
 model events_admin {
@@ -676,6 +679,7 @@ model user_devices {
   @@unique([user_id, device_id])
   @@index([device_type], map: "idx_user_devices_device_type")
   @@index([user_id], map: "idx_user_devices_user_id")
+  @@index([device_id], map: "idx_user_devices_device_id")
 }
 
 /// A user's favorite item within one event. Exactly one target column is set, matching item_type

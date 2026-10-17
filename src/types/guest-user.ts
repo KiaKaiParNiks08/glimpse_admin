@@ -7,6 +7,7 @@ export interface FindOrCreateGuestUserParams {
   country_code: string;
   user_role_id: number;
   user_role_name: string;
+  email?: string | null;
 }
 
 export interface FindOrCreateGuestUserResult {

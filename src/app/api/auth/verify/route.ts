@@ -16,26 +16,30 @@ export async function POST(request: Request) {
       return badRequest('Invalid or expired OTP. Please request a new one.');
     }
 
-    // Resolve the user's latest event context so we can include `event_id` in the JWT.
-    const latestGuest = await prisma.event_guests.findFirst({
-      where: { user_id: body.user_id },
-      orderBy: { joined_at: 'desc' },
-      select: { event_id: true },
-    });
+    const guest = body.event_id
+      ? await prisma.event_guests.findUnique({
+          where: { event_id_user_id: { event_id: body.event_id, user_id: body.user_id } },
+          select: { event_id: true },
+        })
+      : await prisma.event_guests.findFirst({
+          where: { user_id: body.user_id },
+          orderBy: { joined_at: 'desc' },
+          select: { event_id: true },
+        });
 
-    if (!latestGuest) {
+    if (!guest) {
       return badRequest('User event context not found. Please request OTP again.');
     }
 
     const { token, expires_at } = createUserJwtToken({
       user_id: body.user_id,
-      event_id: latestGuest.event_id,
+      event_id: guest.event_id,
     });
 
     return ok(
       {
         user_id: body.user_id,
-        event_id: latestGuest.event_id,
+        event_id: guest.event_id,
         token,
         expires_at,
       },

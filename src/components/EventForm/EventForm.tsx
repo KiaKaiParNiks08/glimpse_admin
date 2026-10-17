@@ -11,7 +11,9 @@ import {
 import { CoverImagesField } from '@/components/EventForm/CoverImagesField';
 import { MAX_EVENT_COVER_IMAGES, type CreateEventInput } from '@/lib/validations/events';
 import {
+  EMAIL_SUFFIX_ERROR,
   isCorporateCategory,
+  isEmailSuffix,
   isLinkedInUrl,
   isWeddingCategory as isWedding,
   LINKEDIN_URL_ERROR,
@@ -34,6 +36,7 @@ export type EventFormValues = {
   bride_name: string;
   greetings_text: string;
   linkedin_url: string;
+  email_suffix: string;
   app_theme_id: string;
   /** In display order; the first one is saved as events.cover_image */
   cover_images: string[];
@@ -61,6 +64,7 @@ function emptyValues(): EventFormValues {
     bride_name: '',
     greetings_text: '',
     linkedin_url: '',
+    email_suffix: '',
     app_theme_id: '',
     cover_images: [],
     e_invite_pdf_url: '',
@@ -100,6 +104,7 @@ function eventToFormValues(event: {
   bride_name?: string | null;
   greetings_text?: string | null;
   linkedin_url?: string | null;
+  email_suffix?: string | null;
   app_theme_id?: string | null;
   app_themes?: AppThemeOption | null;
   cover_image?: string | null;
@@ -128,6 +133,7 @@ function eventToFormValues(event: {
     bride_name: event.bride_name ?? '',
     greetings_text: event.greetings_text ?? '',
     linkedin_url: event.linkedin_url ?? '',
+    email_suffix: event.email_suffix ?? '',
     app_theme_id: event.app_theme_id ?? '',
     cover_images: event.cover_images?.length
       ? event.cover_images
@@ -151,6 +157,7 @@ function formValuesToPayload(
   isCorporate: boolean
 ): CreateEventInput {
   const linkedinUrl = isCorporate ? values.linkedin_url.trim() : '';
+  const emailSuffix = isCorporate ? values.email_suffix.trim() : '';
   const tid = values.app_theme_id.trim();
   const organizerName = values.organizer_name.trim();
   const organizerLogo = values.organizer_logo_url.trim();
@@ -175,6 +182,7 @@ function formValuesToPayload(
     bride_name: brideName || undefined,
     greetings_text: greetingsText || undefined,
     linkedin_url: linkedinUrl || undefined,
+    email_suffix: emailSuffix || undefined,
     cover_images: values.cover_images,
     e_invite_pdf_url: values.e_invite_pdf_url.trim() || undefined,
     start_date: values.start_date,
@@ -196,6 +204,7 @@ function formValuesToPayload(
       bride_name: brideName || null,
       greetings_text: greetingsText || null,
       linkedin_url: linkedinUrl || null,
+      email_suffix: emailSuffix || null,
     };
   }
   if (tid) return { ...base, app_theme_id: tid };
@@ -220,6 +229,7 @@ export interface EventFormProps {
     bride_name?: string | null;
     greetings_text?: string | null;
     linkedin_url?: string | null;
+    email_suffix?: string | null;
     app_theme_id?: string | null;
     /** When editing, include so the dropdown can show the label if the list was loaded separately */
     app_themes?: AppThemeOption | null;
@@ -327,6 +337,8 @@ export function EventForm({
     if (isCorporate) {
       if (!values.linkedin_url.trim()) return 'LinkedIn URL is required for corporate events';
       if (!isLinkedInUrl(values.linkedin_url)) return LINKEDIN_URL_ERROR;
+      if (!values.email_suffix.trim()) return 'Email suffix is required for corporate events';
+      if (!isEmailSuffix(values.email_suffix)) return EMAIL_SUFFIX_ERROR;
     }
     if (mode === 'create') {
       if (values.cover_images.length === 0) return 'At least one cover image (background image) is required';
@@ -487,22 +499,40 @@ export function EventForm({
           </>
         )}
         {isCorporate && (
-          <div className={styles.fieldRow} style={{ marginTop: '0.5rem' }}>
-            <div className={styles.field} style={{ flex: '1 1 100%' }}>
-              <label className={styles.label} htmlFor="event-linkedin-url">
-                LinkedIn URL <span className={styles.required}>*</span>
-              </label>
-              <input
-                id="event-linkedin-url"
-                type="url"
-                className={styles.input}
-                value={values.linkedin_url}
-                onChange={(e) => update({ linkedin_url: e.target.value })}
-                placeholder="https://www.linkedin.com/company/your-company"
-                maxLength={500}
-              />
+          <>
+            <div className={styles.fieldRow} style={{ marginTop: '0.5rem' }}>
+              <div className={styles.field} style={{ flex: '1 1 100%' }}>
+                <label className={styles.label} htmlFor="event-linkedin-url">
+                  LinkedIn URL <span className={styles.required}>*</span>
+                </label>
+                <input
+                  id="event-linkedin-url"
+                  type="url"
+                  className={styles.input}
+                  value={values.linkedin_url}
+                  onChange={(e) => update({ linkedin_url: e.target.value })}
+                  placeholder="https://www.linkedin.com/company/your-company"
+                  maxLength={500}
+                />
+              </div>
             </div>
-          </div>
+            <div className={styles.fieldRow} style={{ marginTop: '0.5rem' }}>
+              <div className={styles.field} style={{ flex: '1 1 100%' }}>
+                <label className={styles.label} htmlFor="event-email-suffix">
+                  Email suffix <span className={styles.required}>*</span>
+                </label>
+                <input
+                  id="event-email-suffix"
+                  type="text"
+                  className={styles.input}
+                  value={values.email_suffix}
+                  onChange={(e) => update({ email_suffix: e.target.value })}
+                  placeholder="@company.com"
+                  maxLength={150}
+                />
+              </div>
+            </div>
+          </>
         )}
         <div className={styles.sectionTitle} style={{ marginTop: '0.75rem' }}>Organizer</div>
         <div className={styles.fieldRow} style={{ marginTop: '0.5rem' }}>

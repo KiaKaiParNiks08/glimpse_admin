@@ -1,6 +1,6 @@
 import type { Prisma } from '@prisma/client';
 import prisma from '@/server/prisma';
-import { isCorporateCategory } from '@/lib/event-categories';
+import { emailDomainSuffix, isCorporateCategory, normalizeEmailSuffix } from '@/lib/event-categories';
 import type {
   ListEventsQuery,
   CreateEventInput,
@@ -164,6 +164,7 @@ export async function getEventById(eventId: string) {
     },
     e_invite_pdf_url: true,
     linkedin_url: true,
+    email_suffix: true,
     post_event_pdf_url: true,
     post_event_pdf_original_name: true,
     post_event_pdf_size: true,
@@ -246,9 +247,44 @@ export const getEventDetailsById = getEventById;
 export async function getEventByCode(eventCode: string) {
   const event = await prisma.events.findUnique({
     where: { event_code: eventCode },
-    select: { id: true, main_venue_id: true },
+    select: { id: true, main_venue_id: true, email_suffix: true },
   });
   return event;
+}
+
+const authEventSelect = {
+  id: true,
+  title: true,
+  start_date: true,
+  end_date: true,
+  cover_image: true,
+  main_venue_id: true,
+  email_suffix: true,
+} as const;
+
+export async function getEventForAuthById(eventId: string) {
+  return prisma.events.findUnique({
+    where: { id: eventId },
+    select: authEventSelect,
+  });
+}
+
+export async function listEventsByEmailSuffix(email: string) {
+  const suffix = emailDomainSuffix(email);
+  if (!suffix) return [];
+  return prisma.events.findMany({
+    where: { email_suffix: suffix },
+    select: {
+      id: true,
+      title: true,
+      start_date: true,
+      end_date: true,
+      cover_image: true,
+      main_venue_id: true,
+      email_suffix: true,
+    },
+    orderBy: { start_date: 'desc' },
+  });
 }
 
 /**
@@ -282,6 +318,24 @@ export async function getCorporateLinkedInError(
   if (!isCorporateCategory(category)) return null;
   const linkedin = data.linkedin_url !== undefined ? data.linkedin_url : existing?.linkedin_url;
   return linkedin?.trim() ? null : 'LinkedIn URL is required for corporate events';
+}
+
+export async function getCorporateEmailSuffixError(
+  data: { category_id?: string; email_suffix?: string | null },
+  eventId?: string
+): Promise<string | null> {
+  const existing = eventId
+    ? await prisma.events.findUnique({ where: { id: eventId }, select: { category_id: true, email_suffix: true } })
+    : null;
+  const categoryId = data.category_id ?? existing?.category_id;
+  if (!categoryId) return null;
+  const category = await prisma.event_categories.findUnique({
+    where: { id: categoryId },
+    select: { slug: true, name: true },
+  });
+  if (!isCorporateCategory(category)) return null;
+  const suffix = data.email_suffix !== undefined ? data.email_suffix : existing?.email_suffix;
+  return suffix?.trim() ? null : 'Email suffix is required for corporate events (e.g. @company.com)';
 }
 
 /**
@@ -363,6 +417,7 @@ export async function createEvent(data: CreateEventInput) {
         ? data.greetings_text.trim()
         : null,
     linkedin_url: data.linkedin_url?.trim() || null,
+    email_suffix: data.email_suffix ? normalizeEmailSuffix(data.email_suffix) : null,
     start_date: new Date(data.start_date),
     end_date: new Date(data.end_date),
     main_venue_id: data.main_venue_id ?? null,
@@ -447,6 +502,9 @@ export async function updateEvent(eventId: string, data: UpdateEventInput) {
   if (data.e_invite_pdf_url !== undefined)
     updatePayload.e_invite_pdf_url = data.e_invite_pdf_url ?? null;
   if (data.linkedin_url !== undefined) updatePayload.linkedin_url = data.linkedin_url?.trim() || null;
+  if (data.email_suffix !== undefined) {
+    updatePayload.email_suffix = data.email_suffix ? normalizeEmailSuffix(data.email_suffix) : null;
+  }
   const weddingUpdatePayload: Prisma.eventsUpdateInput = {};
   if (data.groom_name !== undefined)
     weddingUpdatePayload.groom_name =

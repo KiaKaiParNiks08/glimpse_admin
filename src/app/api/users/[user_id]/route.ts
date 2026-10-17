@@ -13,6 +13,7 @@ import { updateGuestWeddingSide } from '@/server/event-guests';
 import { prisma } from '@/server';
 import { Prisma } from '@prisma/client';
 import { getUserFromAuthorizationHeader } from '@/lib/jwt';
+import { listPreviousEventsForUsers } from '@/server/user-devices';
 
 /**
  * GET /api/users/[user_id]
@@ -50,31 +51,29 @@ export async function GET(
     // otherwise from the user's most recently joined event. Wedding events also expose
     // wedding_side (Groom/Bride) on the guest row for profile UI.
     if (role?.name === 'user') {
-      const guestEvent = query.event_id
-        ? await prisma.event_guests.findFirst({
-            where: { user_id: user.id, event_id: query.event_id },
-            select: { event_id: true },
-          })
-        : await prisma.event_guests.findFirst({
-            where: { user_id: user.id },
-            orderBy: [{ joined_at: 'desc' }, { created_at: 'desc' }],
-            select: { event_id: true },
-          });
+      const joinedEvents = await listPreviousEventsForUsers([user.id]);
+      const joinedIds = new Set(joinedEvents.map((event) => event.event_id));
+      const tokenUser = getUserFromAuthorizationHeader(request);
+      const requestedId =
+        query.event_id && joinedIds.has(query.event_id) ? query.event_id : null;
+      const tokenEventId =
+        tokenUser?.id === user.id && joinedIds.has(tokenUser.event_id) ? tokenUser.event_id : null;
+      const current_event_id = requestedId ?? tokenEventId ?? joinedEvents[0]?.event_id ?? null;
 
       let invitePdfUrl: string | null = null;
       let wedding_side: string | null = null;
       let can_edit_wedding_side = false;
 
-      if (guestEvent?.event_id) {
+      if (current_event_id) {
         const [inviteRows, weddingRows, eventDetail] = await Promise.all([
           prisma.$queryRaw<Array<{ e_invite_pdf_url: string | null }>>(
-            Prisma.sql`SELECT e_invite_pdf_url FROM events WHERE id = ${guestEvent.event_id}::uuid LIMIT 1`
+            Prisma.sql`SELECT e_invite_pdf_url FROM events WHERE id = ${current_event_id}::uuid LIMIT 1`
           ),
           prisma.$queryRaw<Array<{ wedding_side: string | null }>>(
-            Prisma.sql`SELECT wedding_side FROM event_guests WHERE event_id = ${guestEvent.event_id}::uuid AND user_id = ${user.id}::uuid LIMIT 1`
+            Prisma.sql`SELECT wedding_side FROM event_guests WHERE event_id = ${current_event_id}::uuid AND user_id = ${user.id}::uuid LIMIT 1`
           ),
           prisma.events.findUnique({
-            where: { id: guestEvent.event_id },
+            where: { id: current_event_id },
             select: { event_categories: { select: { slug: true } } },
           }),
         ]);
@@ -93,6 +92,12 @@ export async function GET(
           wedding_side,
           can_edit_wedding_side,
           isVerified,
+          current_event_id,
+          allow_new_event_login: true,
+          events: joinedEvents.map((event) => ({
+            ...event,
+            is_current: event.event_id === current_event_id,
+          })),
         },
       });
     }

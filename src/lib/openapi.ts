@@ -152,7 +152,7 @@ export function getOpenApiSpec(serverUrl: string) {
           summary: 'Request OTP (login/register)',
           security: [],
           description:
-            'Sends OTP for the given mobile and event. Creates guest user if needed and ensures event guest record. Registers or updates the client device via `device_type` and `device_id`. Use event code EVNT1001.',
+            'Mobile + device is enough for a returning user (logged out or forgot the event code): the response lists events they already joined (`is_returning: true`). They pick the same event or tap join another (`allow_new_event_login`). New users get an empty list and must send `event_code` (or corporate email). OTP is sent only after an event is chosen or a code is provided.',
           tags: ['Auth'],
           requestBody: {
             required: true,
@@ -160,11 +160,13 @@ export function getOpenApiSpec(serverUrl: string) {
               'application/json': {
                 schema: {
                   type: 'object',
-                  required: ['country_code', 'mobile_number', 'event_code', 'device_type', 'device_id'],
+                  required: ['country_code', 'mobile_number', 'device_type', 'device_id'],
                   properties: {
                     country_code: { type: 'string', minLength: 1, maxLength: 20, example: '+91' },
                     mobile_number: { type: 'string', minLength: 1, maxLength: 20, example: '9876543210' },
-                    event_code: { type: 'string', minLength: 1, maxLength: 20, example: 'EVNT1001', description: 'Event code (use EVNT1001)' },
+                    event_code: { type: 'string', minLength: 1, maxLength: 20, example: 'EVNT1001', description: 'Optional. Omit to look up events this mobile already joined.' },
+                    event_id: { type: 'string', format: 'uuid', description: 'Returning user or corporate event pick from a previous response' },
+                    email: { type: 'string', format: 'email', example: 'jane@company.com', description: 'Stored on the user. Matches corporate events by email suffix without an event code.' },
                     device_type: {
                       type: 'string',
                       enum: ['android', 'ios', 'web'],
@@ -175,7 +177,7 @@ export function getOpenApiSpec(serverUrl: string) {
                       type: 'string',
                       minLength: 1,
                       maxLength: 255,
-                      description: 'Opaque device identifier (e.g. push token or install id).',
+                      description: 'Stable device identifier. Must survive app reinstall (Android ID / identifierForVendor), not a random install UUID.',
                       example: 'fcm-or-install-uuid',
                     },
                   },
@@ -199,6 +201,22 @@ export function getOpenApiSpec(serverUrl: string) {
                           country_code: { type: 'string', minLength: 1, maxLength: 20, example: '+91' },
                           mobile_number: { type: 'string', minLength: 1, maxLength: 20, example: '9876543210' },
                           event_id: { type: 'string', format: 'uuid' },
+                          email: { type: 'string', nullable: true },
+                          requires_event_selection: { type: 'boolean', example: false },
+                          events: {
+                            type: 'array',
+                            description: 'Present when requires_event_selection is true',
+                            items: {
+                              type: 'object',
+                              properties: {
+                                event_id: { type: 'string', format: 'uuid' },
+                                title: { type: 'string' },
+                                start_date: { type: 'string', format: 'date' },
+                                end_date: { type: 'string', format: 'date' },
+                                cover_image: { type: 'string', nullable: true },
+                              },
+                            },
+                          },
                           otp: { type: 'string' },
                           otp_expires_at: { type: 'string', format: 'date-time' },
                         },
@@ -219,7 +237,7 @@ export function getOpenApiSpec(serverUrl: string) {
         post: {
           summary: 'Verify OTP',
           security: [],
-          description: 'Verifies the OTP for the given user_id.',
+          description: 'Verifies the OTP for the given user_id. Pass event_id from the auth response so the JWT is for that event.',
           tags: ['Auth'],
           requestBody: {
             required: true,
@@ -231,6 +249,7 @@ export function getOpenApiSpec(serverUrl: string) {
                   properties: {
                     user_id: { type: 'string', format: 'uuid' },
                     otp: { type: 'string', minLength: 6, maxLength: 6, pattern: '^\\d{6}$', example: '123456' },
+                    event_id: { type: 'string', format: 'uuid', description: 'Event chosen at login. If omitted, the latest guest event is used.' },
                   },
                 },
               },
@@ -311,6 +330,56 @@ export function getOpenApiSpec(serverUrl: string) {
               },
             },
             '404': { description: 'User not found' },
+            '500': { description: 'Server error' },
+          },
+        },
+      },
+      '/api/auth/switch-event': {
+        post: {
+          summary: 'Switch the active event (profile account switch)',
+          description:
+            'Requires a valid app-user Bearer JWT. If the user is already a guest of event_id, returns a new JWT for that event. No OTP. Same shape as /api/auth/refresh.',
+          tags: ['Auth'],
+          security: [{ BearerAuth: [] }],
+          requestBody: {
+            required: true,
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['event_id'],
+                  properties: {
+                    event_id: { type: 'string', format: 'uuid' },
+                  },
+                },
+              },
+            },
+          },
+          responses: {
+            '200': {
+              description: 'New token for the chosen event',
+              content: {
+                'application/json': {
+                  schema: {
+                    type: 'object',
+                    properties: {
+                      message: { type: 'string', example: 'Event switched' },
+                      data: {
+                        type: 'object',
+                        properties: {
+                          user_id: { type: 'string', format: 'uuid' },
+                          event_id: { type: 'string', format: 'uuid' },
+                          token: { type: 'string' },
+                          expires_at: { type: 'string', format: 'date-time' },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+            '403': { description: 'Not authenticated' },
+            '404': { description: 'User has not joined this event' },
             '500': { description: 'Server error' },
           },
         },
@@ -1580,7 +1649,7 @@ export function getOpenApiSpec(serverUrl: string) {
         get: {
           summary: 'Get user by ID',
           description:
-            'Returns user details for the given user_id (UUID). Excludes password_hash. Optional query event_id can be passed to resolve e_invite_pdf_url for that event when the user role is "user". For role "user", when the resolved event category is wedding, `wedding_side` and `can_edit_wedding_side` are included for profile UI.',
+            'Returns user details for the given user_id (UUID). Excludes password_hash. Optional query event_id can be passed to resolve e_invite_pdf_url for that event when the user role is "user". For role "user", when the resolved event category is wedding, `wedding_side` and `can_edit_wedding_side` are included for profile UI. Role "user" also includes `events` (every event this user has logged into) and `current_event_id` for Instagram-style event switching. POST /api/auth/switch-event with a Bearer token to change the active event without a new OTP.',
           tags: ['Users'],
           parameters: [
             { name: 'user_id', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } },
@@ -1631,6 +1700,33 @@ export function getOpenApiSpec(serverUrl: string) {
                             type: 'boolean',
                             description:
                               'Present for role "user". True when the resolved event category is wedding (client may show Groom/Bride picker).',
+                          },
+                          current_event_id: {
+                            type: 'string',
+                            format: 'uuid',
+                            nullable: true,
+                            description: 'Event currently shown on this profile (query, JWT, or latest joined).',
+                          },
+                          allow_new_event_login: {
+                            type: 'boolean',
+                            example: true,
+                            description: 'Show an Add event / new login action on the switcher.',
+                          },
+                          events: {
+                            type: 'array',
+                            description: 'Events this user has already joined. Use POST /api/auth/switch-event to change.',
+                            items: {
+                              type: 'object',
+                              properties: {
+                                event_id: { type: 'string', format: 'uuid' },
+                                title: { type: 'string' },
+                                start_date: { type: 'string', format: 'date' },
+                                end_date: { type: 'string', format: 'date' },
+                                cover_image: { type: 'string', nullable: true },
+                                status: { type: 'string' },
+                                is_current: { type: 'boolean' },
+                              },
+                            },
                           },
                         },
                       },
@@ -1804,13 +1900,20 @@ export function getOpenApiSpec(serverUrl: string) {
       },
       '/api/app-info': {
         get: {
-          summary: 'Get app info for event and user',
+          summary: 'Get app info for event, user, and/or device',
           description:
-            'Returns event app theme colors and app configuration rows for client update checks.',
+            'Returns event app theme colors and app configuration rows. Send device_id on launch (including after reinstall) to get previous_events this device has logged into. event_id and user_id are still used together after login for theme colors.',
           tags: ['App configurations'],
           parameters: [
-            { name: 'event_id', in: 'query', required: true, schema: { type: 'string', format: 'uuid' } },
-            { name: 'user_id', in: 'query', required: true, schema: { type: 'string', format: 'uuid' } },
+            { name: 'event_id', in: 'query', required: false, schema: { type: 'string', format: 'uuid' } },
+            { name: 'user_id', in: 'query', required: false, schema: { type: 'string', format: 'uuid' } },
+            {
+              name: 'device_id',
+              in: 'query',
+              required: false,
+              schema: { type: 'string', maxLength: 255 },
+              description: 'Stable device id. Returns previous_events for returning installs.',
+            },
             {
               name: 'platform',
               in: 'query',
@@ -1840,6 +1943,22 @@ export function getOpenApiSpec(serverUrl: string) {
                             nullable: true,
                             example: 'published',
                             description: 'Current event status from events.status',
+                          },
+                          allow_new_event_login: { type: 'boolean', example: true },
+                          previous_events: {
+                            type: 'array',
+                            description: 'Events this device or user has already joined',
+                            items: {
+                              type: 'object',
+                              properties: {
+                                event_id: { type: 'string', format: 'uuid' },
+                                title: { type: 'string' },
+                                start_date: { type: 'string', format: 'date' },
+                                end_date: { type: 'string', format: 'date' },
+                                cover_image: { type: 'string', nullable: true },
+                                status: { type: 'string' },
+                              },
+                            },
                           },
                           app_configurations: {
                             type: 'array',
@@ -1967,6 +2086,12 @@ export function getOpenApiSpec(serverUrl: string) {
                             nullable: true,
                             example: 'https://www.linkedin.com/company/acme',
                             description: 'LinkedIn page; always set for corporate events, usually null otherwise',
+                          },
+                          email_suffix: {
+                            type: 'string',
+                            nullable: true,
+                            example: '@company.com',
+                            description: 'Corporate email domain. Guests with this suffix can log in without an event code.',
                           },
                           phase: {
                             type: 'object',

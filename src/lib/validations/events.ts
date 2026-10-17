@@ -1,7 +1,13 @@
 import { z } from 'zod';
 import { uuidSchema } from './common';
 import { EVENT_PHASES } from '@/lib/event-phase';
-import { isLinkedInUrl, LINKEDIN_URL_ERROR } from '@/lib/event-categories';
+import {
+  isEmailSuffix,
+  isLinkedInUrl,
+  EMAIL_SUFFIX_ERROR,
+  LINKEDIN_URL_ERROR,
+  normalizeEmailSuffix,
+} from '@/lib/event-categories';
 import { WATERMARK_MAX_SIZE_PX, WATERMARK_MIN_SIZE_PX, WATERMARK_POSITIONS } from '@/lib/watermark';
 
 /** Path params for /api/events/[event_id] and nested routes */
@@ -95,6 +101,17 @@ const baseEventSchema = z.object({
     .optional()
     .nullable()
     .refine((val) => !val || isLinkedInUrl(val), { message: LINKEDIN_URL_ERROR }),
+  email_suffix: z
+    .string()
+    .trim()
+    .max(150)
+    .optional()
+    .nullable()
+    .transform((val) => {
+      if (val == null || val === '') return val;
+      return normalizeEmailSuffix(val);
+    })
+    .refine((val) => !val || isEmailSuffix(val), { message: EMAIL_SUFFIX_ERROR }),
 });
 
 /** Create event body */

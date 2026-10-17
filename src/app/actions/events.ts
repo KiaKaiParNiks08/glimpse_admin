@@ -61,6 +61,7 @@ import {
   setCurrentHappeningSettings,
   setPostEventReportSettings,
   getCorporateLinkedInError,
+  getCorporateEmailSuffixError,
 } from '@/server/events';
 import { getEventTeam, setEventTeam, type EventTeamContact } from '@/server/event-team';
 import { getEventDaysByEventId } from '@/server/event-days';
@@ -421,6 +422,8 @@ export async function createEventAction(
   try {
     const linkedInError = await getCorporateLinkedInError(parsed.data);
     if (linkedInError) return { ok: false, error: linkedInError };
+    const suffixError = await getCorporateEmailSuffixError(parsed.data);
+    if (suffixError) return { ok: false, error: suffixError };
     const event = await createEvent(parsed.data);
     return { ok: true, data: toPlainValue(event) as Awaited<ReturnType<typeof createEvent>> };
   } catch (e) {
@@ -447,6 +450,8 @@ export async function updateEventAction(
   try {
     const linkedInError = await getCorporateLinkedInError(parsed.data, eventId);
     if (linkedInError) return { ok: false, error: linkedInError };
+    const suffixError = await getCorporateEmailSuffixError(parsed.data, eventId);
+    if (suffixError) return { ok: false, error: suffixError };
     const event = await updateEvent(eventId, parsed.data);
     if (!event) return { ok: false, error: 'Event not found' };
     return { ok: true, data: toPlainValue(event) as Awaited<ReturnType<typeof updateEvent>> };

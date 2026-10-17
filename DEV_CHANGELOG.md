@@ -815,6 +815,75 @@ Vercel still returned `data: []` after profile enroll because `media_matches` st
 
 ---
 
+## 2026-10-17 — Returning-user event pick; faster login
+
+Mobile-only `/api/auth` is only for returning / logged-out users: it lists events they already joined so they can open the same event without the code, or join another with a code. New users still get an empty list and must enter an event code. OTP is not sent until they pick an event or send a code. Login was slow because role, venue, user, device, OTP, and guest writes ran one after another; role is cached and OTP / device / guest work now run together.
+
+**Modified files**
+- `src/server/auth-login.ts` — one SQL for previous events; never auto-OTP on mobile-only
+- `src/app/api/auth/route.ts` — `is_returning`; parallel OTP/device/guest
+- `src/server/roles.ts` — cache role lookup
+- `src/server/guest-user.ts` — one user lookup by mobile
+- `src/lib/openapi.ts`
+
+---
+
+## 2026-10-17 — Login by mobile lists previous events
+
+`POST /api/auth` no longer requires `event_code`. Mobile + device is enough. If that number already joined events, those events are returned so the user can pick one without remembering the code. One match sends OTP for that event. Several matches return `requires_event_selection`. No matches: empty `events` and they can still send `event_code` or corporate `email`. Existing event-code login is unchanged.
+
+**Modified files**
+- `src/lib/validations/auth.ts` — event_code / event_id / email optional
+- `src/server/auth-login.ts` — look up joined events by mobile
+- `src/app/api/auth/route.ts` — selection payload includes `allow_new_event_login`
+- `src/lib/openapi.ts`
+
+---
+
+## 2026-10-17 — Profile event switcher
+
+GET `/api/users/{user_id}` for role `user` now includes every event the user has joined (`events`, `current_event_id`, `allow_new_event_login`) so the app can switch like Instagram accounts. `POST /api/auth/switch-event` issues a new JWT for a joined event without OTP.
+
+**New files**
+- `src/app/api/auth/switch-event/route.ts`
+
+**Modified files**
+- `src/app/api/users/[user_id]/route.ts` — `events` + `current_event_id` on profile
+- `src/lib/validations/auth.ts` — switch-event body
+- `src/lib/openapi.ts` — profile and switch-event docs
+
+---
+
+## 2026-10-16 — Returning-device events, email login, corporate email suffix
+
+Login already stored `device_id` on `user_devices`, but `GET /api/app-info` did not return past events after reinstall, and guest login was mobile + event code only (placeholder `@glimps.guest` emails).
+
+**New files**
+- `prisma/migrations/20261016120000_event_email_suffix/migration.sql` — `events.email_suffix`, index on `user_devices.device_id`
+- `src/server/auth-login.ts` — resolve event by code, returning `event_id`, or corporate email suffix
+
+**Modified files**
+- `prisma/schema.prisma` — `email_suffix`; device_id index
+- `src/app/api/auth/route.ts` — optional `event_code` / `event_id` / `email`; OTP after a single event is chosen
+- `src/app/api/auth/verify/route.ts` — optional `event_id` on the JWT
+- `src/app/api/app-info/route.ts` / `src/server/app-info.ts` — `device_id` query; `previous_events`
+- `src/server/guest-user.ts` — store a real email when sent
+- `src/server/user-devices.ts` — list events for a device
+- `src/server/events.ts` / `src/lib/validations/events.ts` / EventForm / wizard / actions — corporate email suffix field
+- `src/lib/openapi.ts` — auth and app-info docs
+
+**Undo the DB part**
+```sql
+DROP INDEX IF EXISTS idx_user_devices_device_id;
+DROP INDEX IF EXISTS idx_events_email_suffix;
+ALTER TABLE events DROP COLUMN IF EXISTS email_suffix;
+DELETE FROM _prisma_migrations WHERE migration_name = '20261016120000_event_email_suffix';
+```
+
+After deploy: `npx prisma migrate deploy` on the hosted DB. Existing corporate events must be edited to set an email suffix before code-less email login works.
+
+---
+
 ## Known open items
 
 - Security issues found during review, not fixed yet: legacy admin cookie forgeable with the default secret; any token can edit/delete users; OTP returned in `/api/auth` responses; venue/explore/upload server actions without auth; feed/like/favorites trust `user_id` from the request.
