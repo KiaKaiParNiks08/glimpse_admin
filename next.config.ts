@@ -11,6 +11,17 @@ const nextConfig: NextConfig = {
   //   // Run `npx tsc --noEmit` in CI or locally.
   //   ignoreBuildErrors: true,
   // },
+  async headers() {
+    const association = [
+      { key: 'Content-Type', value: 'application/json' },
+      { key: 'Cache-Control', value: 'public, max-age=300' },
+      { key: 'X-Content-Type-Options', value: 'nosniff' },
+    ];
+    return [
+      { source: '/.well-known/assetlinks.json', headers: association },
+      { source: '/.well-known/apple-app-site-association', headers: association },
+    ];
+  },
   experimental: {
     serverActions: {
       // One post can be six 10MB images, or one 50MB video, plus the form fields.

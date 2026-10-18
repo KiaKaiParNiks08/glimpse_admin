@@ -815,6 +815,47 @@ Vercel still returned `data: []` after profile enroll because `media_matches` st
 
 ---
 
+## 2026-10-18 — App Link and Universal Link files
+
+`/.well-known/assetlinks.json` and `/.well-known/apple-app-site-association` are public JSON routes. They use `app.glimps` and a placeholder fingerprint or Team ID until `ANDROID_SHA256_CERT_FINGERPRINTS` and `IOS_TEAM_ID` are set. The join page no longer redirects on load. The Play Store link still carries `referrer=event_code=...`. Templates that are not served live in `deep-link-templates/.well-known/`.
+
+**Modified files**
+- `src/lib/app-share.ts` — association JSON, referrer encoding, join access rules
+- `src/lib/app-share.test.ts` — node:test coverage
+- `src/app/.well-known/assetlinks.json/route.ts`
+- `src/app/.well-known/apple-app-site-association/route.ts`
+- `src/app/join/[code]/page.tsx` — store links without an automatic scheme redirect
+- `next.config.ts` — JSON headers for the association paths
+- `package.json` — `npm test`
+
+**New files**
+- `deep-link-templates/.well-known/assetlinks.json`
+- `deep-link-templates/.well-known/apple-app-site-association`
+
+---
+
+## 2026-10-18 — Event share QR and deep link landing
+
+Events list has a QR button. The code is drawn on this server into a QR that contains only `APP_PUBLIC_URL/join/{event_code}`. Scanning opens that page. Android goes to the Play Store URL (with `referrer=event_code=...`). iPhone goes to the App Store URL. Store URLs, package name, bundle id, team id, and Android cert fingerprints are env values and can be replaced when the store listings exist.
+
+No Branch, AppsFlyer, or other link vendor. The `qrcode` package only draws the image in this process.
+
+**New files**
+- `src/lib/app-share.ts` — join URL, store URLs, intent URL
+- `src/lib/qr-svg.ts` — local QR SVG
+- `src/app/actions/event-share.ts`
+- `src/app/join/[code]/page.tsx`
+- `src/app/.well-known/apple-app-site-association/route.ts`
+- `src/app/.well-known/assetlinks.json/route.ts`
+- `src/app/dashboard/events/EventShareQrModal.tsx`
+
+**Modified files**
+- `src/app/dashboard/events/page.tsx` — QR action
+- `.env.example` — store and deep-link placeholders
+- `package.json` / `package-lock.json` — local `qrcode` encoder
+
+---
+
 ## 2026-10-18 — App session media upload (max 10)
 
 Guests who can upload call `POST /api/events/{event_id}/sessions/{session_id}/media` with multipart `media` files (max 10) and the user JWT. The route checks the session uploader list, stores the files, and creates gallery rows.

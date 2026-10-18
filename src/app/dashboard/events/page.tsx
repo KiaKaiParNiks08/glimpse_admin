@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import styles from './events.module.scss';
 import { PaginatedTable } from '@/components/PaginatedTable';
 import { CurrentHappeningModal } from './CurrentHappeningModal';
+import { EventShareQrModal } from './EventShareQrModal';
 import { adminBearerAuthHeader } from '@/lib/admin-jwt-client';
 import { useRouteProgress } from '@/components/navigation/NavigationProvider';
 import Link from 'next/link';
@@ -35,6 +36,7 @@ export default function DashboardEventsPage() {
   const [selectedEventId, setSelectedEventId] = useState<string | null>(null);
   const [selectedEventTitle, setSelectedEventTitle] = useState('');
   const [currentHappeningOpen, setCurrentHappeningOpen] = useState(false);
+  const [shareQrOpen, setShareQrOpen] = useState(false);
   const [listRefreshKey, setListRefreshKey] = useState(0);
   const [categories, setCategories] = useState<EventCategoryOption[]>([]);
   const [venues, setVenues] = useState<VenueOption[]>([]);
@@ -348,6 +350,17 @@ export default function DashboardEventsPage() {
                 >
                   Happening
                 </button>
+                <button
+                  type="button"
+                  className={styles.btnEdit}
+                  onClick={() => {
+                    setSelectedEventId(ev.id);
+                    setSelectedEventTitle(ev.title);
+                    setShareQrOpen(true);
+                  }}
+                >
+                  QR
+                </button>
                 <Link
                   href={`/dashboard/events/${ev.id}/media`}
                   className={styles.btnEdit}
@@ -386,6 +399,12 @@ export default function DashboardEventsPage() {
           </tr>
         ))}
       </PaginatedTable>
+
+      <EventShareQrModal
+        open={shareQrOpen}
+        eventId={selectedEventId}
+        onClose={() => setShareQrOpen(false)}
+      />
 
       {currentUser && (
         <CurrentHappeningModal

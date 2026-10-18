@@ -1,0 +1,10 @@
+{
+  "applinks": {
+    "details": [
+      {
+        "appIDs": ["REPLACE_WITH_REAL_TEAM_ID.app.glimps"],
+        "components": [{ "/": "/join/*" }]
+      }
+    ]
+  }
+}
