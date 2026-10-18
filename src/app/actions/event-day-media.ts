@@ -14,6 +14,13 @@ import {
 } from '@/lib/upload-rules';
 import { createEventDayMedia, deleteEventDayMediaById } from '@/server/event-day-media';
 import { buildEventWatermark, type EventWatermark } from '@/lib/watermark';
+import { isCorporateCategory } from '@/lib/event-categories';
+import {
+  addSessionUploader,
+  listUploadersForEvent,
+  removeSessionUploader,
+  type SessionUploader,
+} from '@/server/session-uploaders';
 
 type AdminViewer = { id: string; role_name: 'super_admin' | 'event_admin' };
 
@@ -42,8 +49,14 @@ function normalizeDecimal(value: unknown): number | null {
 export type GetEventDaysForMediaResult =
   | {
       ok: true;
-      event: { id: string; title: string; watermark: EventWatermark | null };
+      event: {
+        id: string;
+        title: string;
+        watermark: EventWatermark | null;
+        is_corporate: boolean;
+      };
       days: Awaited<ReturnType<typeof getEventDaysByEventId>>;
+      uploaders: SessionUploader[];
     }
   | { ok: false; error: string };
 
@@ -63,7 +76,10 @@ export async function getEventDaysForMediaAction(eventId: string): Promise<GetEv
   const event = await getEventById(eventId);
   if (!event) return { ok: false, error: 'Event not found' };
 
-  const days = await getEventDaysByEventId(eventId);
+  const [days, uploaders] = await Promise.all([
+    getEventDaysByEventId(eventId),
+    listUploadersForEvent(eventId),
+  ]);
   const normalizedDays = days.map((day) => ({
     ...day,
     event_sessions: day.event_sessions.map((session) => ({
@@ -79,9 +95,53 @@ export async function getEventDaysForMediaAction(eventId: string): Promise<GetEv
   }));
   return {
     ok: true,
-    event: { id: event.id, title: event.title, watermark: buildEventWatermark(event) },
+    event: {
+      id: event.id,
+      title: event.title,
+      watermark: buildEventWatermark(event),
+      is_corporate: isCorporateCategory(event.event_categories),
+    },
     days: normalizedDays,
+    uploaders,
   };
+}
+
+export async function addSessionUploaderAction(input: {
+  eventId: string;
+  eventSessionId: string;
+  mobile_number?: string;
+  country_code?: string;
+  email?: string;
+}): Promise<{ ok: true; data: SessionUploader } | { ok: false; error: string }> {
+  const auth = await requireAdmin();
+  if (!auth.ok) return { ok: false, error: auth.error };
+  const allowed = await canAccessEvent(input.eventId, auth.admin);
+  if (!allowed) return { ok: false, error: 'Event not found' };
+  try {
+    const data = await addSessionUploader(input);
+    return { ok: true, data };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : '';
+    if (message === 'SESSION_NOT_FOUND') return { ok: false, error: 'Session not found' };
+    if (message === 'CONTACT_REQUIRED') return { ok: false, error: 'Enter a mobile number or email' };
+    if (message === 'INVALID_EMAIL') return { ok: false, error: 'Enter a valid email' };
+    if (message === 'INVALID_MOBILE') return { ok: false, error: 'Enter a valid mobile number' };
+    console.error(error);
+    return { ok: false, error: 'Unable to add uploader' };
+  }
+}
+
+export async function removeSessionUploaderAction(input: {
+  eventId: string;
+  uploaderId: string;
+}): Promise<{ ok: true } | { ok: false; error: string }> {
+  const auth = await requireAdmin();
+  if (!auth.ok) return { ok: false, error: auth.error };
+  const allowed = await canAccessEvent(input.eventId, auth.admin);
+  if (!allowed) return { ok: false, error: 'Event not found' };
+  const removed = await removeSessionUploader(input);
+  if (!removed) return { ok: false, error: 'Uploader not found' };
+  return { ok: true };
 }
 
 export type PresignEventDayMediaResult =

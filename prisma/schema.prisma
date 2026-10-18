@@ -276,9 +276,10 @@ model event_sessions {
   event_organizer_id      String?                   @db.Uuid
   session_theme           String?                   @db.VarChar(200)
   venue_subvenue_id       String?                   @db.Uuid
-  event_day_media         event_day_media[]
-  event_session_offerings event_session_offerings[]
-  event_days              event_days                @relation(fields: [event_day_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_session_day")
+  event_day_media           event_day_media[]
+  event_session_offerings   event_session_offerings[]
+  event_session_uploaders   event_session_uploaders[]
+  event_days                event_days                @relation(fields: [event_day_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_session_day")
   event_organizers        event_organizers?         @relation(fields: [event_organizer_id], references: [id], onUpdate: NoAction, map: "fk_session_organizer")
   venues                  venues?                   @relation(fields: [venue_id], references: [id], onUpdate: NoAction, map: "fk_session_venue")
   venue_subvenues         venue_subvenues?          @relation(fields: [venue_subvenue_id], references: [id], onUpdate: NoAction, map: "fk_session_venue_subvenue")
@@ -288,6 +289,19 @@ model event_sessions {
   @@index([event_organizer_id], map: "idx_event_sessions_event_organizer_id")
   @@index([venue_id], map: "idx_event_sessions_venue_id")
   @@index([venue_subvenue_id], map: "idx_event_sessions_venue_subvenue_id")
+}
+
+/// Guests allowed to upload gallery media for a session. Match by mobile (most events) or email (corporate).
+model event_session_uploaders {
+  id               String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  event_session_id String         @db.Uuid
+  mobile_number    String?        @db.VarChar(20)
+  country_code     String?        @db.VarChar(20)
+  email            String?        @db.VarChar(150)
+  created_at       DateTime?      @default(now()) @db.Timestamptz(6)
+  event_sessions   event_sessions @relation(fields: [event_session_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_session_uploader_session")
+
+  @@index([event_session_id], map: "idx_event_session_uploaders_session_id")
 }
 
 /// Master list of app color themes (app + button) for events.

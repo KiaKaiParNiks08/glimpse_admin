@@ -4,10 +4,12 @@ import { use, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import styles from './event-media.module.scss';
 import {
+  addSessionUploaderAction,
   createEventDayMediaAction,
   deleteEventDayMediaAction,
   deleteEventDayMediaBulkAction,
   getEventDaysForMediaAction,
+  removeSessionUploaderAction,
   uploadSessionMediaFileAction,
 } from '@/app/actions/event-day-media';
 import {
@@ -41,7 +43,20 @@ type EventDay = {
   event_sessions: DaySession[];
 };
 
-type EventDetails = { id: string; title: string; watermark: EventWatermark | null };
+type EventDetails = {
+  id: string;
+  title: string;
+  watermark: EventWatermark | null;
+  is_corporate: boolean;
+};
+
+type SessionUploader = {
+  id: string;
+  event_session_id: string;
+  mobile_number: string | null;
+  country_code: string | null;
+  email: string | null;
+};
 
 /** A gallery the admin can pick: one session, or the older day-wise uploads that have no session. */
 type GalleryTarget = {
@@ -103,7 +118,10 @@ export default function EventDayMediaPage({
 
   const [event, setEvent] = useState<EventDetails | null>(null);
   const [days, setDays] = useState<EventDay[]>([]);
+  const [uploaders, setUploaders] = useState<SessionUploader[]>([]);
   const [selectedKey, setSelectedKey] = useState<string>('');
+  const [uploaderDraft, setUploaderDraft] = useState('');
+  const [savingUploader, setSavingUploader] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -127,6 +145,10 @@ export default function EventDayMediaPage({
   const selectedTarget = targets.find((t) => t.key === selectedKey) ?? null;
   const selectedTargetLabel = selectedTarget ? `${selectedTarget.dayLabel} — ${selectedTarget.label}` : '';
   const selectedSessionId = selectedTarget?.sessionId ?? null;
+  const sessionUploaders = useMemo(
+    () => uploaders.filter((row) => row.event_session_id === selectedSessionId),
+    [uploaders, selectedSessionId]
+  );
   const dayMedia = useMemo(() => {
     if (!selectedTarget) return [];
     const day = days.find((d) => d.id === selectedTarget.dayId);
@@ -165,6 +187,7 @@ export default function EventDayMediaPage({
       if (!res.ok) throw new Error(res.error);
       setEvent(res.event);
       setDays(res.days as unknown as EventDay[]);
+      setUploaders(res.uploaders);
       setSelectedMediaIds(new Set());
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Unable to load');
@@ -203,6 +226,47 @@ export default function EventDayMediaPage({
     return () => window.removeEventListener('keydown', onKeyDown);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [lightboxIndex, dayMedia.length]);
+
+  async function handleAddUploader() {
+    if (!selectedSessionId) {
+      alert('Select a session first.');
+      return;
+    }
+    const value = uploaderDraft.trim();
+    if (!value) return;
+    setSavingUploader(true);
+    setError(null);
+    try {
+      const isEmail = value.includes('@');
+      const res = await addSessionUploaderAction({
+        eventId,
+        eventSessionId: selectedSessionId,
+        email: isEmail ? value : undefined,
+        mobile_number: isEmail ? undefined : value,
+      });
+      if (!res.ok) throw new Error(res.error);
+      setUploaders((prev) => (prev.some((row) => row.id === res.data.id) ? prev : [...prev, res.data]));
+      setUploaderDraft('');
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Unable to add uploader');
+    } finally {
+      setSavingUploader(false);
+    }
+  }
+
+  async function handleRemoveUploader(uploaderId: string) {
+    setSavingUploader(true);
+    setError(null);
+    try {
+      const res = await removeSessionUploaderAction({ eventId, uploaderId });
+      if (!res.ok) throw new Error(res.error);
+      setUploaders((prev) => prev.filter((row) => row.id !== uploaderId));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Unable to remove uploader');
+    } finally {
+      setSavingUploader(false);
+    }
+  }
 
   async function handleUpload() {
     if (!selectedSessionId) {
@@ -317,7 +381,9 @@ export default function EventDayMediaPage({
           <p>
             {event?.title ? (
               <>
-                Manage session-wise images/videos for <strong>{event.title}</strong>.
+                Manage session-wise images/videos for <strong>{event.title}</strong>. Add guest
+                mobiles{event.is_corporate ? ' or emails' : ''} who may upload to a session from the
+                app.
               </>
             ) : (
               'Manage session-wise images/videos.'
@@ -360,6 +426,65 @@ export default function EventDayMediaPage({
           Events
         </Link>
       </div>
+
+      {selectedSessionId && (
+        <div className={styles.uploadCard}>
+          <div>
+            <div style={{ color: '#0f172a', fontWeight: 600 }}>Who can upload from the app</div>
+            <div className={styles.hint}>
+              {event?.is_corporate
+                ? 'Corporate event: add work emails (and mobiles if you want). The matching logged-in guest sees an upload icon for this session.'
+                : 'Add mobile numbers of guests who may upload media to this session. Corporate events can use email instead.'}
+            </div>
+          </div>
+          <div className={styles.uploadRow}>
+            <input
+              className={styles.uploaderInput}
+              type="text"
+              value={uploaderDraft}
+              onChange={(e) => setUploaderDraft(e.target.value)}
+              placeholder={event?.is_corporate ? 'Email or mobile number' : 'Mobile number'}
+              disabled={savingUploader}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault();
+                  void handleAddUploader();
+                }
+              }}
+            />
+            <button
+              type="button"
+              className={styles.btnPrimary}
+              onClick={() => void handleAddUploader()}
+              disabled={savingUploader || !uploaderDraft.trim()}
+            >
+              {savingUploader ? 'Saving…' : 'Add'}
+            </button>
+          </div>
+          {sessionUploaders.length > 0 ? (
+            <div className={styles.chipRow}>
+              {sessionUploaders.map((row) => (
+                <span key={row.id} className={styles.chip}>
+                  {row.email ||
+                    [row.country_code, row.mobile_number].filter(Boolean).join(' ') ||
+                    row.mobile_number}
+                  <button
+                    type="button"
+                    className={styles.chipRemove}
+                    onClick={() => void handleRemoveUploader(row.id)}
+                    disabled={savingUploader}
+                    aria-label="Remove uploader"
+                  >
+                    ×
+                  </button>
+                </span>
+              ))}
+            </div>
+          ) : (
+            <div className={styles.hint}>No guests can upload to this session yet.</div>
+          )}
+        </div>
+      )}
 
       <div className={styles.uploadCard}>
         <div>

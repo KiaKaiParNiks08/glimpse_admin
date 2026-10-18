@@ -815,6 +815,44 @@ Vercel still returned `data: []` after profile enroll because `media_matches` st
 
 ---
 
+## 2026-10-18 — App session media upload (max 10)
+
+Guests who can upload call `POST /api/events/{event_id}/sessions/{session_id}/media` with multipart `media` files (max 10) and the user JWT. The route checks the session uploader list, stores the files, and creates gallery rows.
+
+**New files**
+- `src/app/api/events/[event_id]/sessions/[session_id]/media/route.ts`
+
+**Modified files**
+- `src/lib/openapi.ts`
+
+---
+
+## 2026-10-18 — Session media uploaders (mobile / email)
+
+Admins can add guest mobiles (or emails on corporate events) per session on **Events → Media**. Those guests get `can_upload` on the dashboard and day-media APIs so the app can show an upload icon.
+
+**New files**
+- `prisma/migrations/20261018140000_session_uploaders/migration.sql`
+- `src/server/session-uploaders.ts`
+
+**Modified files**
+- `prisma/schema.prisma` — `event_session_uploaders`
+- `src/app/dashboard/events/[event_id]/media/page.tsx` — add/remove uploaders on the selected session
+- `src/app/actions/event-day-media.ts` — save/list uploaders
+- `src/app/api/events/[event_id]/route.ts` — `can_upload_media` + per-session `can_upload`
+- `src/app/api/events/day-media/route.ts` — `meta.can_upload`
+- `src/lib/openapi.ts`
+
+**Undo the DB part**
+```sql
+DROP TABLE IF EXISTS event_session_uploaders;
+DELETE FROM _prisma_migrations WHERE migration_name = '20261018140000_session_uploaders';
+```
+
+After deploy: `npx prisma migrate deploy` on the hosted DB.
+
+---
+
 ## 2026-10-18 — Login event type + faster auth
 
 Login and OTP verify now return the event category so the app can hide bride/groom unless the event is a wedding. Same fields are on each item in the event-pick list.
@@ -930,7 +968,7 @@ After deploy: `npx prisma migrate deploy` on the hosted DB. Existing corporate e
 
 - Security issues found during review, not fixed yet: legacy admin cookie forgeable with the default secret; any token can edit/delete users; OTP returned in `/api/auth` responses; venue/explore/upload server actions without auth; feed/like/favorites trust `user_id` from the request.
 - No admin UI for event categories (seeded by migration since 2026-10-02; add/rename others directly in `event_categories`).
-- Other environments still need `npm run prisma:deploy` for `20260927140000_add_user_favorites`, `20260929160000_session_media_and_watermark`, `20261001120000_happening_and_report_settings`, `20261002150000_seed_event_categories`, `20261002170000_watermark_size`, `20261002190000_event_cover_images`, `20261003000000_event_linkedin_url`, `20261004120000_people_in_media`, `20261004210000_event_team` and `20261011120000_posts_height`. Install pgvector before the people-in-media migration, or `prisma migrate deploy` stops before `event_team`. If an environment already applied `20260928180000_add_session_phase_tags`, run its undo SQL (2026-09-28 section) first.
+- Other environments still need `npm run prisma:deploy` for `20260927140000_add_user_favorites`, `20260929160000_session_media_and_watermark`, `20261001120000_happening_and_report_settings`, `20261002150000_seed_event_categories`, `20261002170000_watermark_size`, `20261002190000_event_cover_images`, `20261003000000_event_linkedin_url`, `20261004120000_people_in_media`, `20261004210000_event_team`, `20261011120000_posts_height` and `20261018140000_session_uploaders`. Install pgvector before the people-in-media migration, or `prisma migrate deploy` stops before `event_team`. If an environment already applied `20260928180000_add_session_phase_tags`, run its undo SQL (2026-09-28 section) first.
 - People in media: tables are created on first upload if the pgvector migration never ran. Matching uses Rekognition CompareFaces. The AWS IAM user needs `rekognition:CompareFaces`. Profile photos should be JPEG or PNG (Rekognition rejects WebP).
 - Before deploying: go through the production checklist in the 2026-10-03 "/login ⇄ /dashboard redirect loop" section (`ADMIN_JWT_SECRET`, `X-Forwarded-Proto`, post-deploy login test).
 - Swapping two session titles on the same day in one save (A↔B) hits the unique (day, title) constraint; rename in two saves.

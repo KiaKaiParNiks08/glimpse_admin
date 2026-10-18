@@ -1525,12 +1525,59 @@ export function getOpenApiSpec(serverUrl: string) {
           },
         },
       },
+      '/api/events/{event_id}/sessions/{session_id}/media': {
+        post: {
+          summary: 'Upload session gallery media (app user)',
+          description:
+            'Multipart upload for a guest who was added as a session uploader. Authorization: user Bearer JWT for this event_id. ' +
+            'Repeat the `media` field, maximum 10 files (images and/or videos). Images max 10MB. Videos max 50MB and 120 seconds; send `video_duration_sec` once per video in the same order. ' +
+            'Returns 403 when this user cannot upload to the session.',
+          tags: ['Events'],
+          security: [{ BearerAuth: [] }],
+          parameters: [
+            { name: 'event_id', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } },
+            { name: 'session_id', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } },
+          ],
+          requestBody: {
+            required: true,
+            content: {
+              'multipart/form-data': {
+                schema: {
+                  type: 'object',
+                  required: ['media'],
+                  properties: {
+                    media: {
+                      type: 'array',
+                      maxItems: 10,
+                      items: { type: 'string', format: 'binary' },
+                      description: '1 to 10 image or video files',
+                    },
+                    video_duration_sec: {
+                      type: 'array',
+                      items: { type: 'number' },
+                      description: 'One value per video file, same order, seconds',
+                    },
+                  },
+                },
+              },
+            },
+          },
+          responses: {
+            '200': { description: 'Gallery rows created for the session' },
+            '400': { description: 'Missing files, more than 10, or invalid type/size/duration' },
+            '403': { description: 'Not allowed to upload to this session, or JWT is for another event' },
+            '404': { description: 'Session not found on this event' },
+            '500': { description: 'Server error' },
+          },
+        },
+      },
       '/api/events/day-media': {
         get: {
           summary: 'List gallery media of a session or a day',
           description:
             'Returns gallery media rows of one session (event_session_id, preferred) or of a whole day (event_day_id, every session of that day). One of the two is required. ' +
-            'The event watermark to draw over images is returned by GET /api/events/{event_id} (`watermark`).',
+            'The event watermark to draw over images is returned by GET /api/events/{event_id} (`watermark`). ' +
+            'When viewer_user_id is set, `meta.can_upload` is true if that user may upload media to this session (or any session of the day).',
           tags: ['Events'],
           parameters: [
             { name: 'event_session_id', in: 'query', required: false, schema: { type: 'string', format: 'uuid' } },
@@ -1539,7 +1586,7 @@ export function getOpenApiSpec(serverUrl: string) {
               name: 'viewer_user_id',
               in: 'query',
               schema: { type: 'string', format: 'uuid' },
-              description: 'When provided, each item includes is_favorite=true/false for this user',
+              description: 'When provided, each item includes is_favorite and meta.can_upload for this user',
             },
           ],
           responses: {
@@ -1574,6 +1621,15 @@ export function getOpenApiSpec(serverUrl: string) {
                           },
                         },
                       },
+                      meta: {
+                        type: 'object',
+                        properties: {
+                          can_upload: {
+                            type: 'boolean',
+                            description: 'true when viewer_user_id matches a mobile/email allowed to upload to this session',
+                          },
+                        },
+                      },
                     },
                   },
                   example: {
@@ -1590,6 +1646,7 @@ export function getOpenApiSpec(serverUrl: string) {
                         is_favorite: false,
                       },
                     ],
+                    meta: { can_upload: true },
                   },
                 },
               },
@@ -2054,7 +2111,8 @@ export function getOpenApiSpec(serverUrl: string) {
             '`current_happening` is present only when the event has happening items and the admin enabled the section for the current phase; ' +
             '`post_event_report` only when a PDF is uploaded and the admin enabled it for the current phase. When present, show them. ' +
             'The raw `post_event_pdf_*` columns are not returned; use `post_event_report`. ' +
-            'Admin tokens may pass `phase` to preview another phase.',
+            'Admin tokens may pass `phase` to preview another phase. ' +
+            'Pass `viewer_user_id` so `can_upload_media` (event) and `can_upload` (each session / media section) are true when that guest\'s mobile or email was added as a session uploader.',
           tags: ['Events'],
           parameters: [
             { name: 'event_id', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } },
@@ -2069,7 +2127,7 @@ export function getOpenApiSpec(serverUrl: string) {
               name: 'viewer_user_id',
               in: 'query',
               required: false,
-              description: 'When provided, each media item includes is_favorite=true/false for this user',
+              description: 'When provided, media items include is_favorite and sessions include can_upload for this user',
               schema: { type: 'string', format: 'uuid' },
             },
           ],
@@ -2143,8 +2201,16 @@ export function getOpenApiSpec(serverUrl: string) {
                                   },
                                 },
                                 media_count: { type: 'integer', description: 'Gallery items uploaded for this session' },
+                                can_upload: {
+                                  type: 'boolean',
+                                  description: 'true when viewer_user_id may upload media to this session',
+                                },
                               },
                             },
+                          },
+                          can_upload_media: {
+                            type: 'boolean',
+                            description: 'true when viewer_user_id may upload to at least one session. Show a global upload icon.',
                           },
                           watermark: {
                             type: 'object',
@@ -2177,6 +2243,10 @@ export function getOpenApiSpec(serverUrl: string) {
                                 date: { type: 'string', format: 'date-time', nullable: true },
                                 start_time: { type: 'string', nullable: true, example: '10:00' },
                                 media_count: { type: 'integer' },
+                                can_upload: {
+                                  type: 'boolean',
+                                  description: 'true when viewer_user_id may upload to this session (All media is true if any session allows it)',
+                                },
                                 media: {
                                   type: 'array',
                                   items: {

@@ -18,6 +18,7 @@ import { getEventDaysByEventId } from '@/server/event-days';
 import { getEventDayMediaByEventId } from '@/server/event-day-media';
 import { getFavoritedItemIds } from '@/server/favorites';
 import { getCurrentHappeningByEventId } from '@/server/current-happening';
+import { sessionIdsViewerCanUpload } from '@/server/session-uploaders';
 
 /**
  * GET /api/events/[event_id]
@@ -52,9 +53,13 @@ export async function GET(
       getEventDayMediaByEventId(event.id),
     ]);
 
-    const favorited = query.viewer_user_id
-      ? await getFavoritedItemIds(query.viewer_user_id, 'day_media', mediaRows.map((m) => m.id))
-      : null;
+    const sessionIds = days.flatMap((day) => day.event_sessions.map((s) => s.id));
+    const [favorited, canUploadIds] = await Promise.all([
+      query.viewer_user_id
+        ? getFavoritedItemIds(query.viewer_user_id, 'day_media', mediaRows.map((m) => m.id))
+        : Promise.resolve(null),
+      sessionIdsViewerCanUpload(sessionIds, query.viewer_user_id),
+    ]);
     const allMedia = mediaRows.map(({ media_key, ...m }) => ({
       ...m,
       ...(favorited && { is_favorite: favorited.has(m.id) }),
@@ -67,6 +72,8 @@ export async function GET(
       mediaBySession.set(m.event_session_id, list);
     }
 
+    const can_upload_media = canUploadIds.size > 0;
+
     const event_sessions = days.flatMap((day) =>
       day.event_sessions
         .map((s) => ({
@@ -76,6 +83,7 @@ export async function GET(
           date: day.date,
           event_day: { id: day.id, title: day.title, date: day.date },
           media_count: mediaBySession.get(s.id)?.length ?? 0,
+          can_upload: canUploadIds.has(s.id),
         }))
         .sort((a, b) => (a.start_time ?? '99:99').localeCompare(b.start_time ?? '99:99'))
     );
@@ -89,6 +97,7 @@ export async function GET(
         start_time: null,
         media_count: allMedia.length,
         media: allMedia,
+        can_upload: can_upload_media,
       },
       ...event_sessions.map((s) => {
         const media = mediaBySession.get(s.id) ?? [];
@@ -100,6 +109,7 @@ export async function GET(
           start_time: s.start_time,
           media_count: media.length,
           media,
+          can_upload: s.can_upload,
         };
       }),
     ];
@@ -172,6 +182,7 @@ export async function GET(
         cover_images: event.event_cover_images.map((c) => c.image_url),
         phase: { current, is_preview: previewPhase !== undefined, today, timezone },
         event_sessions,
+        can_upload_media,
         ...(watermark && { watermark }),
         media_sections,
         ...(current_happening && { current_happening }),
