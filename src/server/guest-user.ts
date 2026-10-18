@@ -27,30 +27,61 @@ async function applyGuestEmail(userId: string, email: string | null | undefined)
   }
 }
 
+async function applyGuestMobile(
+  userId: string,
+  mobileNumber: string | null,
+  countryCode?: string | null
+): Promise<void> {
+  if (!mobileNumber) return;
+  const data: { mobile_number: string; country_code?: string } = { mobile_number: mobileNumber };
+  if (countryCode) data.country_code = countryCode;
+  await prisma.users.update({
+    where: { id: userId },
+    data,
+  });
+}
+
 export async function findOrCreateGuestUser(
   params: FindOrCreateGuestUserParams
 ): Promise<FindOrCreateGuestUserResult> {
-  const { mobile_number, country_code, user_role_id, user_role_name, email } = params;
+  const { country_code, user_role_id, user_role_name } = params;
+  const mobile_number = params.mobile_number?.trim() || null;
+  const email = params.email?.trim().toLowerCase() || null;
 
-  const existingUser = await prisma.users.findFirst({
-    where: { mobile_number },
-    select: { id: true, role_id: true, roles: { select: { name: true } } },
-  });
+  const existingUser = email
+    ? await prisma.users.findFirst({
+        where: { email, role_id: user_role_id },
+        select: { id: true, role_id: true, roles: { select: { name: true } } },
+      })
+    : null;
 
-  if (existingUser) {
-    if (existingUser.role_id !== user_role_id || existingUser.roles.name !== user_role_name) {
+  const existingByMobile =
+    !existingUser && mobile_number
+      ? await prisma.users.findFirst({
+          where: { mobile_number },
+          select: { id: true, role_id: true, roles: { select: { name: true } } },
+        })
+      : null;
+
+  const found = existingUser ?? existingByMobile;
+
+  if (found) {
+    if (found.role_id !== user_role_id || found.roles.name !== user_role_name) {
       throw new Error('MOBILE_REGISTERED_DIFFERENT_ROLE');
     }
-    await applyGuestEmail(existingUser.id, email);
-    return { user_id: existingUser.id, is_new_user: false };
+    await applyGuestEmail(found.id, email);
+    await applyGuestMobile(found.id, mobile_number, country_code);
+    return { user_id: found.id, is_new_user: false };
   }
 
-  const placeholderEmail = `${country_code}_${mobile_number}@${GUEST_EMAIL_DOMAIN}`.slice(0, 150);
+  const placeholderEmail = mobile_number
+    ? `${country_code ?? ''}_${mobile_number}@${GUEST_EMAIL_DOMAIN}`.slice(0, 150)
+    : `email_${Date.now()}@${GUEST_EMAIL_DOMAIN}`.slice(0, 150);
 
   const newUser = await prisma.users.create({
     data: {
       full_name: '',
-      email: placeholderEmail,
+      email: email && !email.endsWith(`@${GUEST_EMAIL_DOMAIN}`) ? email.slice(0, 150) : placeholderEmail,
       password_hash: PLACEHOLDER_PASSWORD_HASH,
       role_id: user_role_id,
       country_code: country_code || null,
@@ -60,6 +91,5 @@ export async function findOrCreateGuestUser(
     select: { id: true },
   });
 
-  await applyGuestEmail(newUser.id, email);
   return { user_id: newUser.id, is_new_user: true };
 }

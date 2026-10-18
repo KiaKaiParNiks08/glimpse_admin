@@ -247,13 +247,14 @@ export const getEventDetailsById = getEventById;
 export async function getEventByCode(eventCode: string) {
   const event = await prisma.events.findUnique({
     where: { event_code: eventCode },
-    select: { id: true, main_venue_id: true, email_suffix: true },
+    select: { id: true, event_code: true, main_venue_id: true, email_suffix: true },
   });
   return event;
 }
 
 const authEventSelect = {
   id: true,
+  event_code: true,
   title: true,
   start_date: true,
   end_date: true,
@@ -272,10 +273,17 @@ export async function getEventForAuthById(eventId: string) {
 export async function listEventsByEmailSuffix(email: string) {
   const suffix = emailDomainSuffix(email);
   if (!suffix) return [];
+  const bare = suffix.slice(1);
   return prisma.events.findMany({
-    where: { email_suffix: suffix },
+    where: {
+      OR: [
+        { email_suffix: { equals: suffix, mode: 'insensitive' } },
+        { email_suffix: { equals: bare, mode: 'insensitive' } },
+      ],
+    },
     select: {
       id: true,
+      event_code: true,
       title: true,
       start_date: true,
       end_date: true,

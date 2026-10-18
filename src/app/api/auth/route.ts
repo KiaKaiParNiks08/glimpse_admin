@@ -13,6 +13,24 @@ import { resolveAuthEvent } from '@/server/auth-login';
 
 const USER_ROLE_NAME = 'user';
 
+function mapChoice(event: {
+  event_id: string;
+  event_code: string;
+  title: string;
+  start_date: Date;
+  end_date: Date;
+  cover_image: string | null;
+}) {
+  return {
+    event_id: event.event_id,
+    event_code: event.event_code,
+    title: event.title,
+    start_date: event.start_date,
+    end_date: event.end_date,
+    cover_image: event.cover_image,
+  };
+}
+
 export async function POST(request: Request) {
   try {
     const [body, err] = await parseBody(request, authRequestSchema);
@@ -34,24 +52,20 @@ export async function POST(request: Request) {
     });
     if (!resolved.ok) {
       if (resolved.status === 'choose') {
-        const isReturning = resolved.events.length > 0;
+        const events = resolved.events.map(mapChoice);
+        const isReturning = events.length > 0;
         return ok(
           {
             user_id: null,
-            country_code,
-            mobile_number,
+            country_code: country_code ?? null,
+            mobile_number: mobile_number ?? null,
             email: email ?? null,
             event_id: null,
             is_returning: isReturning,
             requires_event_selection: isReturning,
             allow_new_event_login: true,
-            events: resolved.events.map((event) => ({
-              event_id: event.event_id,
-              title: event.title,
-              start_date: event.start_date,
-              end_date: event.end_date,
-              cover_image: event.cover_image,
-            })),
+            event_count: events.length,
+            events,
           },
           isReturning
             ? 'Select a previous event or join a new one'
@@ -87,7 +101,9 @@ export async function POST(request: Request) {
 
     const [otpResult] = await Promise.all([
       createOtpForUser({ user_id, expiry_minutes: 10 }),
-      upsertUserDevice({ user_id, device_type, device_id }),
+      device_id && device_type
+        ? upsertUserDevice({ user_id, device_type, device_id })
+        : Promise.resolve(),
       (async () => {
         if (!is_new_user && (await isEventGuest(event.id, user_id))) return;
         const venue_contact_id = await getVenueContactForEvent(event.main_venue_id);
@@ -103,11 +119,13 @@ export async function POST(request: Request) {
     return ok(
       {
         user_id,
-        country_code,
-        mobile_number,
+        country_code: country_code ?? null,
+        mobile_number: mobile_number ?? null,
         email: email ?? null,
         event_id: event.id,
+        event_code: event.event_code ?? event_code ?? null,
         requires_event_selection: false,
+        event_count: 1,
         otp,
         otp_expires_at: expires_at.toISOString(),
       },

@@ -3,8 +3,8 @@
  */
 
 export interface FindOrCreateGuestUserParams {
-  mobile_number: string;
-  country_code: string;
+  mobile_number?: string | null;
+  country_code?: string | null;
   user_role_id: number;
   user_role_name: string;
   email?: string | null;

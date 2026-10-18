@@ -1,15 +1,40 @@
 import { z } from 'zod';
 
-/** Auth request (POST body) – mobile + device. Event code / event_id / email are optional. */
-export const authRequestSchema = z.object({
-  country_code: z.string().min(1).max(20),
-  mobile_number: z.string().min(1).max(20),
-  event_code: z.string().min(1).max(20).optional(),
-  event_id: z.string().uuid().optional(),
-  email: z.string().trim().email().max(150).optional(),
-  device_type: z.enum(['android', 'ios', 'web']),
-  device_id: z.string().min(1).max(255),
-});
+const optionalText = (max: number) =>
+  z.preprocess(
+    (value) => (value === '' || value === null ? undefined : value),
+    z.string().trim().min(1).max(max).optional()
+  );
+
+/** Auth request – mobile and/or email. Event code logs into that event. */
+export const authRequestSchema = z
+  .object({
+    country_code: optionalText(20),
+    mobile_number: optionalText(20),
+    event_code: optionalText(20),
+    event_id: z.preprocess(
+      (value) => (value === '' || value === null ? undefined : value),
+      z.string().uuid().optional()
+    ),
+    email: z.preprocess(
+      (value) => (value === '' || value === null ? undefined : value),
+      z.string().trim().email().max(150).optional()
+    ),
+    device_type: z.preprocess(
+      (value) => (value === '' || value === null ? undefined : value),
+      z.enum(['android', 'ios', 'web']).optional()
+    ),
+    device_id: optionalText(255),
+  })
+  .superRefine((data, ctx) => {
+    if (!data.mobile_number && !data.email) {
+      ctx.addIssue({
+        code: 'custom',
+        message: 'Provide mobile_number or email',
+        path: ['mobile_number'],
+      });
+    }
+  });
 
 export type AuthRequestInput = z.infer<typeof authRequestSchema>;
 

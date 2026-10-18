@@ -152,7 +152,7 @@ export function getOpenApiSpec(serverUrl: string) {
           summary: 'Request OTP (login/register)',
           security: [],
           description:
-            'Mobile + device is enough for a returning user (logged out or forgot the event code): the response lists events they already joined (`is_returning: true`). They pick the same event or tap join another (`allow_new_event_login`). New users get an empty list and must send `event_code` (or corporate email). OTP is sent only after an event is chosen or a code is provided.',
+            'Send `mobile_number` and/or `email`. Email only is valid. If the email suffix matches one corporate event, OTP is sent for that event. If it matches several, the list is returned (`event_code`, `cover_image`, `event_count`). Mobile only lists previously joined events. `event_code` + mobile or email logs into that event. If mobile is sent with email, it is stored on the user. Device fields are optional.',
           tags: ['Auth'],
           requestBody: {
             required: true,
@@ -160,24 +160,23 @@ export function getOpenApiSpec(serverUrl: string) {
               'application/json': {
                 schema: {
                   type: 'object',
-                  required: ['country_code', 'mobile_number', 'device_type', 'device_id'],
                   properties: {
                     country_code: { type: 'string', minLength: 1, maxLength: 20, example: '+91' },
-                    mobile_number: { type: 'string', minLength: 1, maxLength: 20, example: '9876543210' },
-                    event_code: { type: 'string', minLength: 1, maxLength: 20, example: 'EVNT1001', description: 'Optional. Omit to look up events this mobile already joined.' },
-                    event_id: { type: 'string', format: 'uuid', description: 'Returning user or corporate event pick from a previous response' },
-                    email: { type: 'string', format: 'email', example: 'jane@company.com', description: 'Stored on the user. Matches corporate events by email suffix without an event code.' },
+                    mobile_number: { type: 'string', minLength: 1, maxLength: 20, example: '9876543210', description: 'Required unless email is sent.' },
+                    event_code: { type: 'string', minLength: 1, maxLength: 20, example: 'EVNT1001', description: 'When sent with mobile or email, logs into that event and sends OTP.' },
+                    event_id: { type: 'string', format: 'uuid', description: 'Pick from a previous events list instead of event_code.' },
+                    email: { type: 'string', format: 'email', example: 'jane@company.com', description: 'Required unless mobile_number is sent. Alone, logs into the matching corporate event when there is one, or lists them when there are several.' },
                     device_type: {
                       type: 'string',
                       enum: ['android', 'ios', 'web'],
-                      description: 'Client platform; stored on user_devices.',
+                      description: 'Optional. Stored on user_devices when sent with device_id.',
                       example: 'android',
                     },
                     device_id: {
                       type: 'string',
                       minLength: 1,
                       maxLength: 255,
-                      description: 'Stable device identifier. Must survive app reinstall (Android ID / identifierForVendor), not a random install UUID.',
+                      description: 'Optional. Stable device identifier.',
                       example: 'fcm-or-install-uuid',
                     },
                   },
@@ -187,7 +186,7 @@ export function getOpenApiSpec(serverUrl: string) {
           },
           responses: {
             '200': {
-              description: 'OTP sent',
+              description: 'OTP sent, or previous / corporate events to pick from',
               content: {
                 'application/json': {
                   schema: {
@@ -197,23 +196,28 @@ export function getOpenApiSpec(serverUrl: string) {
                       data: {
                         type: 'object',
                         properties: {
-                          user_id: { type: 'string', format: 'uuid' },
-                          country_code: { type: 'string', minLength: 1, maxLength: 20, example: '+91' },
-                          mobile_number: { type: 'string', minLength: 1, maxLength: 20, example: '9876543210' },
-                          event_id: { type: 'string', format: 'uuid' },
+                          user_id: { type: 'string', format: 'uuid', nullable: true },
+                          country_code: { type: 'string', nullable: true, example: '+91' },
+                          mobile_number: { type: 'string', nullable: true, example: '9876543210' },
+                          event_id: { type: 'string', format: 'uuid', nullable: true },
+                          event_code: { type: 'string', nullable: true, example: 'EVNT1001' },
                           email: { type: 'string', nullable: true },
-                          requires_event_selection: { type: 'boolean', example: false },
+                          is_returning: { type: 'boolean', example: true },
+                          requires_event_selection: { type: 'boolean', example: true },
+                          allow_new_event_login: { type: 'boolean', example: true },
+                          event_count: { type: 'integer', example: 2 },
                           events: {
                             type: 'array',
-                            description: 'Present when requires_event_selection is true',
+                            description: 'Returned when only mobile or only email is sent. Each item has event_code and cover_image (event background).',
                             items: {
                               type: 'object',
                               properties: {
                                 event_id: { type: 'string', format: 'uuid' },
+                                event_code: { type: 'string', example: 'EVNT1001' },
                                 title: { type: 'string' },
                                 start_date: { type: 'string', format: 'date' },
                                 end_date: { type: 'string', format: 'date' },
-                                cover_image: { type: 'string', nullable: true },
+                                cover_image: { type: 'string', nullable: true, description: 'Background / cover set when the event was added' },
                               },
                             },
                           },

@@ -815,6 +815,26 @@ Vercel still returned `data: []` after profile enroll because `media_matches` st
 
 ---
 
+## 2026-10-18 — Login: mobile-only / email-only lists events; code logs in
+
+`POST /api/auth` now keys off mobile, email, and event code (device is optional).
+
+- Mobile only → previous events this number joined: `event_count`, each with `event_code` and `cover_image`. No OTP.
+- Email only → if one corporate / joined event matches the suffix, OTP is sent for that event. Several matches return the list (`event_code`, `cover_image`).
+- `event_code` + mobile or `event_code` + email → OTP for that event.
+- Guest users can be created from email alone. If mobile is also sent, it is stored on the user.
+- Empty / missing `country_code` and `mobile_number` are valid when `email` is present.
+
+**Modified files**
+- `src/lib/validations/auth.ts` — mobile or email required; empty strings ignored
+- `src/server/auth-login.ts` — one email-suffix match logs in; several return the list
+- `src/app/api/auth/route.ts` — `event_count`; skip device upsert when omitted
+- `src/server/guest-user.ts` / `src/types/guest-user.ts` — find/create by email; store mobile when sent
+- `src/server/events.ts` — suffix match accepts `@kake.com` or `kake.com`
+- `src/lib/openapi.ts`
+
+---
+
 ## 2026-10-17 — Returning-user event pick; faster login
 
 Mobile-only `/api/auth` is only for returning / logged-out users: it lists events they already joined so they can open the same event without the code, or join another with a code. New users still get an empty list and must enter an event code. OTP is not sent until they pick an event or send a code. Login was slow because role, venue, user, device, OTP, and guest writes ran one after another; role is cached and OTP / device / guest work now run together.
