@@ -50,26 +50,19 @@ export async function verifyOtpForUser(
   options: VerifyOtpForUserOptions
 ): Promise<VerifyOtpForUserResult> {
   const { user_id, otp } = options;
-  const now = new Date();
-
-  const record = await prisma.user_otps.findFirst({
+  const updated = await prisma.user_otps.updateMany({
     where: {
       user_id,
       otp,
       is_verified: false,
-      expires_at: { gt: now },
+      expires_at: { gt: new Date() },
     },
-    orderBy: { created_at: 'desc' },
-  });
-
-  if (!record) {
-    return { success: false, reason: 'invalid_or_expired' };
-  }
-
-  await prisma.user_otps.update({
-    where: { id: record.id },
     data: { is_verified: true },
   });
+
+  if (updated.count === 0) {
+    return { success: false, reason: 'invalid_or_expired' };
+  }
 
   return { success: true };
 }

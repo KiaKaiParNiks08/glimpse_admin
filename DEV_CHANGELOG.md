@@ -815,6 +815,28 @@ Vercel still returned `data: []` after profile enroll because `media_matches` st
 
 ---
 
+## 2026-10-18 — Login event type + faster auth
+
+Login and OTP verify now return the event category so the app can hide bride/groom unless the event is a wedding. Same fields are on each item in the event-pick list.
+
+- `event_type` — category slug (`wedding`, `corporate-event`, …)
+- `event_category` — display name
+- `show_wedding_side` — `true` only for wedding
+
+Login and verify were slow from sequential Vercel→Postgres round-trips. Role + event lookup, user + venue contact, OTP + device + guest, and OTP verify + guest/category now run together. OTP verify is one `updateMany`. Guest ensure is one upsert. Guest find/create is one user lookup.
+
+**Modified files**
+- `src/server/auth-login.ts` — category on event lists; skip extra event refetch
+- `src/server/events.ts` — category on auth event selects
+- `src/app/api/auth/route.ts` — category on OTP response; parallel user/venue/OTP/guest
+- `src/app/api/auth/verify/route.ts` — category on verify; OTP and guest in parallel
+- `src/server/otp.ts` — verify in one write
+- `src/server/event-guests.ts` — upsert guest
+- `src/server/guest-user.ts` — one find, one optional update
+- `src/lib/openapi.ts`
+
+---
+
 ## 2026-10-18 — Login: mobile-only / email-only lists events; code logs in
 
 `POST /api/auth` now keys off mobile, email, and event code (device is optional).

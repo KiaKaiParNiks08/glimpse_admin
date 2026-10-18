@@ -244,10 +244,22 @@ export const getEventDetailsById = getEventById;
 /**
  * Get an event by event_code (e.g. for auth/check-in flow).
  */
+const authCategorySelect = {
+  id: true,
+  name: true,
+  slug: true,
+} as const;
+
 export async function getEventByCode(eventCode: string) {
   const event = await prisma.events.findUnique({
     where: { event_code: eventCode },
-    select: { id: true, event_code: true, main_venue_id: true, email_suffix: true },
+    select: {
+      id: true,
+      event_code: true,
+      main_venue_id: true,
+      email_suffix: true,
+      event_categories: { select: authCategorySelect },
+    },
   });
   return event;
 }
@@ -261,6 +273,7 @@ const authEventSelect = {
   cover_image: true,
   main_venue_id: true,
   email_suffix: true,
+  event_categories: { select: authCategorySelect },
 } as const;
 
 export async function getEventForAuthById(eventId: string) {
@@ -290,6 +303,7 @@ export async function listEventsByEmailSuffix(email: string) {
       cover_image: true,
       main_venue_id: true,
       email_suffix: true,
+      event_categories: { select: authCategorySelect },
     },
     orderBy: { start_date: 'desc' },
   });
