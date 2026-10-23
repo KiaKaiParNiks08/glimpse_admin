@@ -9,9 +9,13 @@ export type EventDayMediaCreateInput = {
   media_key: string;
   media_url: string;
   media_type: 'image' | 'video';
+  thumbnail_url?: string | null;
+  thumbnail_key?: string | null;
   uploaded_by?: string | null;
   display_order?: number | null;
 };
+
+export const SESSION_MEDIA_PAGE_SIZE = 15;
 
 function tryExtractKeyFromStoredUrl(url: string): string | null {
   if (!url?.trim()) return null;
@@ -43,6 +47,8 @@ export async function createEventDayMedia(items: EventDayMediaCreateInput[]) {
           media_key: item.media_key,
           media_url: item.media_url,
           media_type: item.media_type,
+          thumbnail_url: item.thumbnail_url ?? null,
+          thumbnail_key: item.thumbnail_key ?? null,
           uploaded_by: item.uploaded_by ?? null,
           display_order: item.display_order ?? 0,
         },
@@ -53,6 +59,7 @@ export async function createEventDayMedia(items: EventDayMediaCreateInput[]) {
           media_key: true,
           media_url: true,
           media_type: true,
+          thumbnail_url: true,
           display_order: true,
           created_at: true,
         },
@@ -70,9 +77,35 @@ const eventDayMediaSelect = {
   media_key: true,
   media_url: true,
   media_type: true,
+  thumbnail_url: true,
   display_order: true,
   created_at: true,
 } as const;
+
+export async function listSessionMediaPage(input: {
+  eventId: string;
+  eventSessionId?: string;
+  page: number;
+}) {
+  const where = {
+    event_days: { event_id: input.eventId },
+    event_session_id: input.eventSessionId ?? { not: null },
+  };
+  const [total, rows] = await Promise.all([
+    prisma.event_day_media.count({ where }),
+    prisma.event_day_media.findMany({
+      where,
+      orderBy: [{ created_at: 'desc' }, { id: 'desc' }],
+      skip: (input.page - 1) * SESSION_MEDIA_PAGE_SIZE,
+      take: SESSION_MEDIA_PAGE_SIZE,
+      select: {
+        ...eventDayMediaSelect,
+        uploaded_by: true,
+      },
+    }),
+  ]);
+  return { total, rows };
+}
 
 export async function getEventDayMediaByEventDayId(eventDayId: string) {
   return prisma.event_day_media.findMany({
@@ -102,18 +135,17 @@ export async function getEventDayMediaByEventId(eventId: string) {
 export async function deleteEventDayMediaById(mediaId: string): Promise<boolean> {
   const row = await prisma.event_day_media.findUnique({
     where: { id: mediaId },
-    select: { id: true, media_key: true, media_url: true },
+    select: { id: true, media_key: true, media_url: true, thumbnail_key: true },
   });
   if (!row) return false;
 
   const key = row.media_key ?? (row.media_url ? tryExtractKeyFromStoredUrl(row.media_url) : null);
-  if (key) {
-    try {
-      await deleteObjectByKey(key);
-    } catch (e) {
-      // If S3 deletion fails, do NOT remove DB row (keeps consistency).
-      throw e;
-    }
+  try {
+    if (row.thumbnail_key) await deleteObjectByKey(row.thumbnail_key);
+    if (key) await deleteObjectByKey(key);
+  } catch (e) {
+    // If S3 deletion fails, do NOT remove DB row (keeps consistency).
+    throw e;
   }
 
   await prisma.event_day_media.delete({ where: { id: mediaId } });

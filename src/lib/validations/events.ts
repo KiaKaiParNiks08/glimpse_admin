@@ -244,6 +244,13 @@ export const listHappeningPhotosQuerySchema = z.object({
 });
 
 /** Query for listing event day media (GET /api/events/day-media?event_day_id=) */
+/** All session gallery media for one event. Page size is fixed at 15. */
+export const listSessionMediaQuerySchema = z.object({
+  page: z.coerce.number().int().min(1).default(1),
+  event_session_id: z.string().uuid().optional(),
+  viewer_user_id: z.string().uuid().optional(),
+});
+
 export const listEventDayMediaQuerySchema = z
   .object({
     /** Media of one session (preferred) */

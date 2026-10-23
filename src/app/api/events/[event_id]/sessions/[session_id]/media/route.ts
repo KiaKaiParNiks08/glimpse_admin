@@ -56,12 +56,18 @@ export async function POST(
 
     const files: File[] = [];
     const durations: string[] = [];
+    const thumbnails: File[] = [];
     for (const [key, value] of formData.entries()) {
       if (key === 'media' || key === 'media[]' || key.startsWith('media[')) {
         if (!(value instanceof File) || value.size <= 0) {
           return badRequest('A media file was missing or did not finish uploading.');
         }
         files.push(value);
+      } else if (key === 'thumbnail' || key === 'thumbnail[]' || key.startsWith('thumbnail[')) {
+        if (!(value instanceof File) || value.size <= 0) {
+          return badRequest('A video thumbnail was missing or did not finish uploading.');
+        }
+        thumbnails.push(value);
       } else if (key === 'video_duration_sec' || key === 'video_duration_sec[]' || key.startsWith('video_duration_sec[')) {
         if (typeof value === 'string') durations.push(value);
       }
@@ -93,14 +99,26 @@ export async function POST(
         const durationError = validateDeclaredVideoDuration(duration);
         if (durationError) return badRequest(durationError);
       }
+      if (thumbnails.length > 0 && thumbnails.length !== videos.length) {
+        return badRequest('Send one thumbnail image for each video, in the same order');
+      }
+      for (const thumbnail of thumbnails) {
+        const mime = resolveUploadMime(thumbnail.type, thumbnail.name);
+        if (getMediaKind(mime) !== 'image') return badRequest('Video thumbnail must be an image');
+        const sizeError = validateMediaFile({ type: mime, size: thumbnail.size }, 'image');
+        if (sizeError) return badRequest(sizeError);
+      }
     }
 
     const saved: Array<{
       media_key: string;
       media_url: string;
       media_type: 'image' | 'video';
+      thumbnail_url: string | null;
+      thumbnail_key: string | null;
       display_order: number;
     }> = [];
+    let videoIndex = 0;
 
     for (let i = 0; i < validated.length; i++) {
       const { file, kind, mime } = validated[i];
@@ -109,10 +127,25 @@ export async function POST(
           prefix: `events/${event_id}/sessions/${session.id}`,
           contentType: mime,
         });
+        let thumbnail_url: string | null = null;
+        let thumbnail_key: string | null = null;
+        if (kind === 'video' && thumbnails[videoIndex]) {
+          const thumbnail = thumbnails[videoIndex];
+          const thumbMime = resolveUploadMime(thumbnail.type, thumbnail.name);
+          const thumbStored = await saveUploadedFile(thumbnail, 'image', process.cwd(), {
+            prefix: `events/${event_id}/sessions/${session.id}/thumbnails`,
+            contentType: thumbMime,
+          });
+          thumbnail_url = thumbStored.relativeUrl;
+          thumbnail_key = thumbStored.storageKey;
+          videoIndex += 1;
+        }
         saved.push({
           media_key: stored.storageKey,
           media_url: stored.relativeUrl,
           media_type: kind,
+          thumbnail_url,
+          thumbnail_key,
           display_order: i,
         });
       } catch (error) {
@@ -128,6 +161,8 @@ export async function POST(
         media_key: item.media_key,
         media_url: item.media_url,
         media_type: item.media_type,
+        thumbnail_url: item.thumbnail_url,
+        thumbnail_key: item.thumbnail_key,
         display_order: item.display_order,
         uploaded_by: user.id,
       }))

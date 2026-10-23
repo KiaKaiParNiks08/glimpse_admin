@@ -63,6 +63,7 @@ const favoriteMediaSelect = {
   event_day_id: true,
   media_url: true,
   media_type: true,
+  thumbnail_url: true,
   display_order: true,
   created_at: true,
   event_days: { select: { id: true, title: true, date: true } },

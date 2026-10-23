@@ -815,6 +815,49 @@ Vercel still returned `data: []` after profile enroll because `media_matches` st
 
 ---
 
+## 2026-10-21 — Paginated session media, video thumbnails, delete own upload
+
+Session gallery had no paged list and no video poster. `GET /api/events/{event_id}/session-media` returns 15 items per page. Videos store `thumbnail_url` when the app sends a `thumbnail` image (session upload and feed post). Favorites, day-media, and my-media (AI matches and the user's own posts, including videos) return that poster. `DELETE /api/events/{event_id}/sessions/{session_id}/media/{media_id}` removes only media that same user uploaded, and only if they can still upload to the session.
+
+**New files**
+- `prisma/migrations/20261021120000_session_media_thumbnail/migration.sql` — `event_day_media.thumbnail_url` and `thumbnail_key`
+- `src/app/api/events/[event_id]/session-media/route.ts` — paged list
+- `src/app/api/events/[event_id]/sessions/[session_id]/media/[media_id]/route.ts` — owner delete
+
+**Modified files**
+- `prisma/schema.prisma` — thumbnail columns
+- `src/server/event-day-media.ts` — store, list, and delete the poster
+- `src/app/api/events/[event_id]/sessions/[session_id]/media/route.ts` — accept thumbnails
+- `src/app/api/feed/route.ts` — accept one video thumbnail
+- `src/server/favorites.ts` — return `thumbnail_url` on day media
+- `src/server/people-media/queries.ts` — thumbnail plus the user's own videos
+- `src/lib/validations/events.ts` — session media query
+- `src/lib/openapi.ts`
+
+Local DB: columns were added with `npx prisma db execute --file prisma/migrations/20261021120000_session_media_thumbnail/migration.sql` because `prisma migrate deploy` is blocked by the already-failed migration `20261004120000_people_in_media`. Apply the same SQL on the hosted database before this code is deployed, or resolve that failed migration and then run migrate deploy. The new SQL is safe to run twice (`IF NOT EXISTS`).
+
+Undo the DB part:
+
+```sql
+ALTER TABLE event_day_media DROP COLUMN IF EXISTS thumbnail_url;
+ALTER TABLE event_day_media DROP COLUMN IF EXISTS thumbnail_key;
+DELETE FROM "_prisma_migrations" WHERE migration_name = '20261021120000_session_media_thumbnail';
+```
+
+---
+
+## 2026-10-21 — First login requires an event code
+
+`POST /api/auth` still accepts one identity. A mobile or email that has not joined an event must also send `event_code`; otherwise the response is 400 and `message` is `Enter an event code to continue`. A returning mobile or email can omit the code. More than one match returns the event list and no OTP. One match sends OTP. `event_code` alone confirms the event and does not create a user or send OTP. `event_code` with mobile or email still sends OTP. Verify is unchanged.
+
+**Modified files**
+- `src/lib/validations/auth.ts` — event_code alone is a valid body
+- `src/server/auth-login.ts` — first vs returning identity
+- `src/app/api/auth/route.ts` — 400 when a code is required; no OTP on the event list
+- `src/lib/openapi.ts`
+
+---
+
 ## 2026-10-18 — App Link and Universal Link files
 
 `/.well-known/assetlinks.json` and `/.well-known/apple-app-site-association` are public JSON routes. They use `app.glimps` and a placeholder fingerprint or Team ID until `ANDROID_SHA256_CERT_FINGERPRINTS` and `IOS_TEAM_ID` are set. The join page no longer redirects on load. The Play Store link still carries `referrer=event_code=...`. Templates that are not served live in `deep-link-templates/.well-known/`.

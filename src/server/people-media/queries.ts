@@ -13,6 +13,7 @@ type MyMediaRow = {
   source: string;
   media_type: string;
   media_url: string;
+  thumbnail_url: string | null;
   created_at: Date | null;
   event_day_media_id: string | null;
   post_id: string | null;
@@ -46,6 +47,7 @@ export async function listMyMedia(input: { userId: string; eventId: string; page
              ma.source,
              ma.media_type::text AS media_type,
              ma.media_url,
+             COALESCE(edm.thumbnail_url, pm.thumbnail_url) AS thumbnail_url,
              ma.created_at,
              ma.event_day_media_id,
              pm.post_id,
@@ -53,11 +55,12 @@ export async function listMyMedia(input: { userId: string; eventId: string; page
              MAX(mm.similarity) AS similarity
       FROM media_matches mm
       JOIN media_assets ma ON ma.id = mm.media_asset_id
+      LEFT JOIN event_day_media edm ON edm.id = ma.event_day_media_id
       LEFT JOIN post_media pm ON pm.id = ma.post_media_id
       LEFT JOIN posts p ON p.id = pm.post_id
       WHERE mm.user_id = ${input.userId}::uuid
         AND ma.event_id = ${input.eventId}::uuid
-      GROUP BY ma.id, ma.source, ma.media_type, ma.media_url, ma.created_at, ma.event_day_media_id, pm.post_id, p.caption
+      GROUP BY ma.id, ma.source, ma.media_type, ma.media_url, edm.thumbnail_url, pm.thumbnail_url, ma.created_at, ma.event_day_media_id, pm.post_id, p.caption
     `;
     rows.push(...matched);
   } catch (error) {
@@ -70,6 +73,7 @@ export async function listMyMedia(input: { userId: string; eventId: string; page
              'user_post' AS source,
              pm.media_type::text AS media_type,
              pm.media_url,
+             pm.thumbnail_url,
              pm.created_at,
              NULL::uuid AS event_day_media_id,
              p.id AS post_id,
@@ -80,7 +84,7 @@ export async function listMyMedia(input: { userId: string; eventId: string; page
       WHERE p.event_id = ${input.eventId}::uuid
         AND p.user_id = ${input.userId}::uuid
         AND p.status = 'active'
-        AND pm.media_type = 'image'
+        AND pm.media_type IN ('image', 'video')
     `;
     rows.push(...ownPosts);
   } catch (error) {

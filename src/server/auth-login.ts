@@ -30,10 +30,13 @@ type AuthEvent = {
   event_categories?: { id: string; name: string; slug: string } | null;
 };
 
+export const EVENT_CODE_REQUIRED_MESSAGE = 'Enter an event code to continue';
+
 export type ResolveAuthEventResult =
   | { ok: true; event: AuthEvent }
   | { ok: false; status: 'not_found'; message: string }
   | { ok: false; status: 'forbidden'; message: string }
+  | { ok: false; status: 'needs_code'; message: string }
   | { ok: false; status: 'choose'; events: AuthEventChoice[] };
 
 export function toAuthCategoryFields(
@@ -224,9 +227,21 @@ async function listJoinedEventsByEmail(email: string, roleId: number): Promise<A
   }));
 }
 
+function chooseOrLogin(events: AuthEventListRow[], hasJoinedBefore: boolean): ResolveAuthEventResult {
+  if (!hasJoinedBefore) {
+    return { ok: false, status: 'needs_code', message: EVENT_CODE_REQUIRED_MESSAGE };
+  }
+  if (events.length > 1) {
+    return { ok: false, status: 'choose', events: events.map(toPublicEventChoice) };
+  }
+  if (events.length === 1) return { ok: true, event: toResolvedEvent(events[0]) };
+  return { ok: false, status: 'needs_code', message: EVENT_CODE_REQUIRED_MESSAGE };
+}
+
 /**
  * event_code + mobile or email → that event.
- * Mobile only or email only → previous / corporate events for the bottom sheet.
+ * A first mobile or email needs an event code.
+ * A returning mobile or email can omit the code. Several matches return a list and no OTP.
  */
 export async function resolveAuthEvent(input: {
   event_code?: string;
@@ -268,16 +283,11 @@ export async function resolveAuthEvent(input: {
       listJoinedEventsByEmail(input.email, input.user_role_id),
       listEventsByEmailSuffix(input.email),
     ]);
-    const events = mergeChoices([joinedByEmail, corporate.map(toChoice)]);
-    if (events.length === 1) return { ok: true, event: toResolvedEvent(events[0]) };
-    return { ok: false, status: 'choose', events: events.map(toPublicEventChoice) };
+    return chooseOrLogin(mergeChoices([joinedByEmail, corporate.map(toChoice)]), joinedByEmail.length > 0);
   }
 
-  return {
-    ok: false,
-    status: 'choose',
-    events: input.mobile_number
-      ? (await listJoinedEventsByMobile(input.mobile_number, input.user_role_id)).map(toPublicEventChoice)
-      : [],
-  };
+  const joinedByMobile = input.mobile_number
+    ? await listJoinedEventsByMobile(input.mobile_number, input.user_role_id)
+    : [];
+  return chooseOrLogin(joinedByMobile, joinedByMobile.length > 0);
 }

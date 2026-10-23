@@ -94,9 +94,10 @@ export async function POST(request: NextRequest) {
       await ensureEventGuest({ event_id: eventId, user_id: parsed.data.user_id });
     }
 
-    const mediaItems: Array<{
+    const       mediaItems: Array<{
       media_type: 'image' | 'video';
       media_url: string;
+      thumbnail_url?: string;
       media_order: number;
       storageKey: string;
     }> = [];
@@ -105,13 +106,16 @@ export async function POST(request: NextRequest) {
     // Collect all media files: "media", "media[]", or "media[0]", "media[1]" (Swagger UI array).
     // An empty part means the body was cut off. Do not create the post without that file.
     const files: File[] = [];
+    const thumbnails: File[] = [];
     for (const [key, value] of formData.entries()) {
       const isMediaField = key === 'media' || key === 'media[]' || key.startsWith('media[');
-      if (!isMediaField) continue;
+      const isThumbField = key === 'thumbnail' || key === 'thumbnail[]' || key.startsWith('thumbnail[');
+      if (!isMediaField && !isThumbField) continue;
       if (!(value instanceof File) || value.size <= 0) {
         return badRequest('The media file was missing or did not finish uploading. Please try again.');
       }
-      files.push(value);
+      if (isThumbField) thumbnails.push(value);
+      else files.push(value);
     }
 
     // Validate type/size and collect kinds: max 1 video OR max 6 images (no mixing)
@@ -151,8 +155,26 @@ export async function POST(request: NextRequest) {
     if (videoCount >= 1 && imageCount >= 1) {
       return badRequest('Post must contain either a single video or up to 6 images, not both.');
     }
+    if (videoCount === 1 && thumbnails.length > 1) {
+      return badRequest('Send one thumbnail image for the video');
+    }
+    if (thumbnails.length === 1) {
+      const mime = resolveUploadMime(thumbnails[0].type, thumbnails[0].name);
+      if (getMediaKind(mime) !== 'image') return badRequest('Video thumbnail must be an image');
+      const sizeError = validateMediaFile({ type: mime, size: thumbnails[0].size }, 'image');
+      if (sizeError) return badRequest(sizeError);
+    }
 
     const projectRoot = process.cwd();
+    let videoThumbnail: { url: string } | null = null;
+    if (videoCount === 1 && thumbnails[0]) {
+      const mime = resolveUploadMime(thumbnails[0].type, thumbnails[0].name);
+      const savedThumb = await saveUploadedFile(thumbnails[0], 'image', projectRoot, {
+        prefix: 'feed/thumbnails',
+        contentType: mime,
+      });
+      videoThumbnail = { url: savedThumb.relativeUrl };
+    }
     for (const { file, kind, mime } of validated) {
       order += 1;
       const saved = await saveUploadedFile(file, kind, projectRoot, {
@@ -164,6 +186,7 @@ export async function POST(request: NextRequest) {
         media_url: saved.relativeUrl,
         media_order: order,
         storageKey: saved.storageKey,
+        ...(kind === 'video' && videoThumbnail ? { thumbnail_url: videoThumbnail.url } : {}),
       });
     }
 
@@ -178,6 +201,7 @@ export async function POST(request: NextRequest) {
       mediaItems.map((item) => ({
         media_type: item.media_type,
         media_url: item.media_url,
+        thumbnail_url: item.thumbnail_url ?? null,
         media_order: item.media_order,
       }))
     );

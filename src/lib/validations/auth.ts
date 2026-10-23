@@ -6,7 +6,7 @@ const optionalText = (max: number) =>
     z.string().trim().min(1).max(max).optional()
   );
 
-/** Auth request – mobile and/or email. Event code logs into that event. */
+/** Auth request. One identity: mobile, email, or event code. */
 export const authRequestSchema = z
   .object({
     country_code: optionalText(20),
@@ -27,10 +27,10 @@ export const authRequestSchema = z
     device_id: optionalText(255),
   })
   .superRefine((data, ctx) => {
-    if (!data.mobile_number && !data.email) {
+    if (!data.mobile_number && !data.email && !data.event_code) {
       ctx.addIssue({
         code: 'custom',
-        message: 'Provide mobile_number or email',
+        message: 'Provide mobile_number, email, or event_code',
         path: ['mobile_number'],
       });
     }

@@ -152,7 +152,7 @@ export function getOpenApiSpec(serverUrl: string) {
           summary: 'Request OTP (login/register)',
           security: [],
           description:
-            'Send `mobile_number` and/or `email`. Email only is valid. If the email suffix matches one corporate event, OTP is sent for that event. If it matches several, the list is returned (`event_code`, `cover_image`, `event_count`, `event_type`). Mobile only lists previously joined events. `event_code` + mobile or email logs into that event. Each event includes `event_type` / `event_category` and `show_wedding_side` so the app hides bride/groom unless the category is wedding. If mobile is sent with email, it is stored on the user. Device fields are optional.',
+            'Send one identity: mobile_number, email, or event_code. Empty fields should be omitted. First login with a mobile or email requires event_code; if it is missing the response is 400 with message "Enter an event code to continue". A later login for that same mobile or email can omit event_code. Several matches return requires_event_selection and events, and no OTP, until the app posts again with event_id. One match sends OTP. event_code alone confirms the event and does not send OTP. event_code with mobile or email sends OTP for that event. Email does not require a mobile number. Corporate events are included for a returning email. show_wedding_side is true only for weddings.',
           tags: ['Auth'],
           requestBody: {
             required: true,
@@ -162,10 +162,10 @@ export function getOpenApiSpec(serverUrl: string) {
                   type: 'object',
                   properties: {
                     country_code: { type: 'string', minLength: 1, maxLength: 20, example: '+91' },
-                    mobile_number: { type: 'string', minLength: 1, maxLength: 20, example: '9876543210', description: 'Required unless email is sent.' },
-                    event_code: { type: 'string', minLength: 1, maxLength: 20, example: 'EVNT1001', description: 'When sent with mobile or email, logs into that event and sends OTP.' },
-                    event_id: { type: 'string', format: 'uuid', description: 'Pick from a previous events list instead of event_code.' },
-                    email: { type: 'string', format: 'email', example: 'jane@company.com', description: 'Required unless mobile_number is sent. Alone, logs into the matching corporate event when there is one, or lists them when there are several.' },
+                    mobile_number: { type: 'string', minLength: 1, maxLength: 20, example: '9876543210', description: 'Omit when logging in with email or event_code only. First use also requires event_code.' },
+                    event_code: { type: 'string', minLength: 1, maxLength: 20, example: 'EVNT1001', description: 'Required on the first mobile or email login. Optional for a returning identity. Alone, confirms the event without OTP.' },
+                    event_id: { type: 'string', format: 'uuid', description: 'Returning user pick when several events were returned. Sends OTP for that event.' },
+                    email: { type: 'string', format: 'email', example: 'jane@company.com', description: 'Corporate login. No mobile number is required. First use also requires event_code.' },
                     device_type: {
                       type: 'string',
                       enum: ['android', 'ios', 'web'],
@@ -827,7 +827,7 @@ export function getOpenApiSpec(serverUrl: string) {
         post: {
           summary: 'Create feed post (with optional image/video upload)',
           description:
-            'Creates a feed post. Use multipart/form-data. Media: either max 1 video OR max 6 images (no mixing). Send `height` as the tallest media height in pixels (one value for the post). Files are uploaded to S3 and returned as a stored URL (CloudFront public URL if configured, otherwise /api/upload/signed?t=...). Allowed: images (JPEG, PNG, GIF, WebP), videos (MP4, WebM, MOV). Size limits: images max 10MB, videos max 50MB; videos max 120 seconds (provide `video_duration_sec` from client-side metadata). Empty files rejected.',
+            'Creates a feed post. Use multipart/form-data. Media: either max 1 video OR max 6 images (no mixing). Send `height` as the tallest media height in pixels (one value for the post). Files are uploaded to S3 and returned as a stored URL (CloudFront public URL if configured, otherwise /api/upload/signed?t=...). Allowed: images (JPEG, PNG, GIF, WebP), videos (MP4, WebM, MOV). Size limits: images max 10MB, videos max 50MB; videos max 120 seconds (provide `video_duration_sec` from client-side metadata). For a video, send one image field `thumbnail`; it is stored as post_media.thumbnail_url. Empty files rejected.',
           tags: ['Feed'],
           requestBody: {
             required: true,
@@ -862,6 +862,11 @@ export function getOpenApiSpec(serverUrl: string) {
                       items: { type: 'string', format: 'binary' },
                       description:
                         'Image(s) or video. Max 1 video OR max 6 images (no mixing). Allowed: JPEG, PNG, GIF, WebP; MP4, WebM, MOV. Size: images max 10MB, videos max 50MB; video length max 120s (see video_duration_sec).',
+                    },
+                    thumbnail: {
+                      type: 'string',
+                      format: 'binary',
+                      description: 'One poster image for the video. JPEG, PNG, GIF, or WebP, max 10MB.',
                     },
                   },
                 },
@@ -1531,6 +1536,7 @@ export function getOpenApiSpec(serverUrl: string) {
           description:
             'Multipart upload for a guest who was added as a session uploader. Authorization: user Bearer JWT for this event_id. ' +
             'Repeat the `media` field, maximum 10 files (images and/or videos). Images max 10MB. Videos max 50MB and 120 seconds; send `video_duration_sec` once per video in the same order. ' +
+            'For each video, send a JPEG/PNG/WebP `thumbnail` in the same video order. The stored poster is returned as `thumbnail_url`. ' +
             'Returns 403 when this user cannot upload to the session.',
           tags: ['Events'],
           security: [{ BearerAuth: [] }],
@@ -1557,6 +1563,11 @@ export function getOpenApiSpec(serverUrl: string) {
                       items: { type: 'number' },
                       description: 'One value per video file, same order, seconds',
                     },
+                    thumbnail: {
+                      type: 'array',
+                      items: { type: 'string', format: 'binary' },
+                      description: 'One image per video, same order as the video files. Max 10MB each.',
+                    },
                   },
                 },
               },
@@ -1568,6 +1579,44 @@ export function getOpenApiSpec(serverUrl: string) {
             '403': { description: 'Not allowed to upload to this session, or JWT is for another event' },
             '404': { description: 'Session not found on this event' },
             '500': { description: 'Server error' },
+          },
+        },
+      },
+      '/api/events/{event_id}/session-media': {
+        get: {
+          summary: 'List all session gallery media (paginated)',
+          description:
+            'Every session gallery item for the event, newest first, 15 per page. Optional event_session_id limits the list to one session. ' +
+            'Videos include thumbnail_url when a poster was uploaded. Pass viewer_user_id to get is_favorite, can_upload, and can_delete (true only for media that user uploaded to a session they can upload to).',
+          tags: ['Events'],
+          parameters: [
+            { name: 'event_id', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } },
+            { name: 'page', in: 'query', schema: { type: 'integer', minimum: 1, default: 1 } },
+            { name: 'event_session_id', in: 'query', schema: { type: 'string', format: 'uuid' } },
+            { name: 'viewer_user_id', in: 'query', schema: { type: 'string', format: 'uuid' } },
+          ],
+          responses: {
+            '200': { description: 'Page of session media. meta.limit is always 15.' },
+            '400': { description: 'Invalid event id, page, or session id' },
+          },
+        },
+      },
+      '/api/events/{event_id}/sessions/{session_id}/media/{media_id}': {
+        delete: {
+          summary: 'Delete own session media',
+          description:
+            'Deletes one gallery item the signed-in user uploaded, only if they still have upload permission for that session. Authorization: user Bearer JWT whose event_id matches the path.',
+          tags: ['Events'],
+          security: [{ BearerAuth: [] }],
+          parameters: [
+            { name: 'event_id', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } },
+            { name: 'session_id', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } },
+            { name: 'media_id', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } },
+          ],
+          responses: {
+            '200': { description: 'Media deleted' },
+            '403': { description: 'Not the uploader, or this user cannot upload to the session' },
+            '404': { description: 'Media not found on this session' },
           },
         },
       },
@@ -1612,6 +1661,11 @@ export function getOpenApiSpec(serverUrl: string) {
                             },
                             media_url: { type: 'string' },
                             media_type: { type: 'string', enum: ['image', 'video'] },
+                            thumbnail_url: {
+                              type: 'string',
+                              nullable: true,
+                              description: 'Poster for a video. Null for images and for videos uploaded without a thumbnail.',
+                            },
                             display_order: { type: 'integer', nullable: true },
                             created_at: { type: 'string', format: 'date-time', nullable: true },
                             is_favorite: {
@@ -1660,7 +1714,7 @@ export function getOpenApiSpec(serverUrl: string) {
         get: {
           summary: 'Photos and posts where this user was recognized',
           description:
-            'Returns this event\'s photos for the signed-in user: (1) image posts they created, and (2) other guests\' or photographer photos where their face matched. Face matching uses Amazon Rekognition CompareFaces when AWS keys are set.',
+            'Returns this event\'s media for the signed-in user: (1) image and video posts they created, and (2) other guests\' or photographer photos where their face matched. Each item includes thumbnail_url for videos that have a poster. Face matching uses Amazon Rekognition CompareFaces when AWS keys are set.',
           tags: ['Events'],
           security: [{ BearerAuth: [] }],
           parameters: [

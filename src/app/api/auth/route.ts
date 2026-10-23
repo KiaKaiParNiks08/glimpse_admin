@@ -1,5 +1,5 @@
 import { authRequestSchema, parseBody } from '@/lib/validations';
-import { ok, serverError, notFound, forbidden, conflict } from '@/lib/api-response';
+import { ok, serverError, notFound, forbidden, conflict, badRequest } from '@/lib/api-response';
 import {
   getRoleByName,
   getVenueContactForEvent,
@@ -30,6 +30,24 @@ export async function POST(request: Request) {
       return serverError('User role not found in system');
     }
 
+    if (event_code && !mobile_number && !email) {
+      if (!eventByCode) return notFound('Invalid or unknown event code');
+      return ok(
+        {
+          user_id: null,
+          country_code: null,
+          mobile_number: null,
+          email: null,
+          event_id: eventByCode.id,
+          event_code: eventByCode.event_code,
+          requires_event_selection: false,
+          event_count: 1,
+          ...toAuthCategoryFields(eventByCode.event_categories),
+        },
+        'Event code is valid'
+      );
+    }
+
     const resolved = event_code
       ? eventByCode
         ? ({ ok: true as const, event: eventByCode })
@@ -43,9 +61,9 @@ export async function POST(request: Request) {
         });
 
     if (!resolved.ok) {
+      if (resolved.status === 'needs_code') return badRequest(resolved.message);
       if (resolved.status === 'choose') {
         const events = resolved.events.map(toPublicEventChoice);
-        const isReturning = events.length > 0;
         return ok(
           {
             user_id: null,
@@ -53,15 +71,13 @@ export async function POST(request: Request) {
             mobile_number: mobile_number ?? null,
             email: email ?? null,
             event_id: null,
-            is_returning: isReturning,
-            requires_event_selection: isReturning,
+            is_returning: true,
+            requires_event_selection: true,
             allow_new_event_login: true,
             event_count: events.length,
             events,
           },
-          isReturning
-            ? 'Select a previous event or join a new one'
-            : 'Enter an event code to join a new event'
+          'Select an event to continue'
         );
       }
       if (resolved.status === 'forbidden') return forbidden(resolved.message);
