@@ -13,7 +13,7 @@ const paramsSchema = z.object({ event_id: uuidSchema });
 
 /**
  * GET /api/events/:eventId/my-media?user_id=&page=&limit=
- * This user's feed images for the event, plus photos where their face matched.
+ * Recognised media for this user. source is user_post (with the feed post) or session_media (with session ids).
  */
 export async function GET(request: Request, context: { params: Promise<{ event_id: string }> }) {
   const user = getUserFromAuthorizationHeader(request);

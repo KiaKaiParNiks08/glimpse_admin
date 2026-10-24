@@ -2,19 +2,47 @@ import prisma from '@/server/prisma';
 
 export type SessionUploader = {
   id: string;
-  event_session_id: string;
+  event_id: string | null;
+  event_session_id: string | null;
+  all_sessions: boolean;
   mobile_number: string | null;
   country_code: string | null;
   email: string | null;
+  session_title: string | null;
 };
 
 const uploaderSelect = {
   id: true,
+  event_id: true,
   event_session_id: true,
+  all_sessions: true,
   mobile_number: true,
   country_code: true,
   email: true,
+  event_sessions: { select: { title: true } },
 } as const;
+
+function toUploader(row: {
+  id: string;
+  event_id: string | null;
+  event_session_id: string | null;
+  all_sessions: boolean;
+  mobile_number: string | null;
+  country_code: string | null;
+  email: string | null;
+  event_sessions: { title: string } | null;
+}): SessionUploader {
+  return {
+    id: row.id,
+    event_id: row.event_id,
+    event_session_id: row.event_session_id,
+    all_sessions: row.all_sessions,
+    mobile_number: row.mobile_number,
+    country_code: row.country_code,
+    email: row.email,
+    session_title: row.event_sessions?.title ?? null,
+  };
+}
 
 export function normalizeMobile(value: string | null | undefined): string {
   return (value ?? '').replace(/\D/g, '');
@@ -50,19 +78,26 @@ export function uploaderMatchesUser(
 }
 
 export async function listUploadersForEvent(eventId: string): Promise<SessionUploader[]> {
-  return prisma.event_session_uploaders.findMany({
-    where: { event_sessions: { event_days: { event_id: eventId } } },
+  const rows = await prisma.event_session_uploaders.findMany({
+    where: {
+      OR: [
+        { all_sessions: true, event_id: eventId },
+        { event_sessions: { event_days: { event_id: eventId } } },
+      ],
+    },
     select: uploaderSelect,
     orderBy: { created_at: 'asc' },
   });
+  return rows.map(toUploader);
 }
 
 export async function listUploadersForSessions(sessionIds: string[]): Promise<SessionUploader[]> {
   if (sessionIds.length === 0) return [];
-  return prisma.event_session_uploaders.findMany({
+  const rows = await prisma.event_session_uploaders.findMany({
     where: { event_session_id: { in: sessionIds } },
     select: uploaderSelect,
   });
+  return rows.map(toUploader);
 }
 
 export async function addSessionUploader(input: {
@@ -95,17 +130,78 @@ export async function addSessionUploader(input: {
     },
     select: uploaderSelect,
   });
-  if (existing) return existing;
+  if (existing) return toUploader(existing);
 
-  return prisma.event_session_uploaders.create({
+  const created = await prisma.event_session_uploaders.create({
     data: {
       event_session_id: session.id,
+      all_sessions: false,
       mobile_number,
       country_code: mobile_number ? country_code : null,
       email,
     },
     select: uploaderSelect,
   });
+  return toUploader(created);
+}
+
+function contactWhere(mobile_number: string | null, email: string | null) {
+  return mobile_number ? { mobile_number } : { email: email ?? undefined };
+}
+
+/** Grant upload on every session of the event, or add the chosen sessions. */
+export async function grantSessionUpload(input: {
+  eventId: string;
+  allSessions: boolean;
+  eventSessionIds?: string[];
+  mobile_number?: string | null;
+  country_code?: string | null;
+  email?: string | null;
+}): Promise<SessionUploader[]> {
+  const mobile_number = input.mobile_number?.trim() || null;
+  const email = normalizeEmail(input.email) || null;
+  if (!mobile_number && !email) throw new Error('CONTACT_REQUIRED');
+  if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new Error('INVALID_EMAIL');
+  if (mobile_number && normalizeMobile(mobile_number).length < 8) throw new Error('INVALID_MOBILE');
+  const contact = contactWhere(mobile_number, email);
+  const onThisEvent = {
+    OR: [
+      { event_id: input.eventId },
+      { event_sessions: { event_days: { event_id: input.eventId } } },
+    ],
+  };
+
+  if (input.allSessions) {
+    await prisma.event_session_uploaders.deleteMany({
+      where: { AND: [contact, onThisEvent] },
+    });
+    await prisma.event_session_uploaders.create({
+      data: {
+        event_id: input.eventId,
+        all_sessions: true,
+        mobile_number,
+        country_code: mobile_number ? input.country_code?.trim() || null : null,
+        email,
+      },
+    });
+    return listUploadersForEvent(input.eventId);
+  }
+
+  const sessionIds = [...new Set(input.eventSessionIds ?? [])];
+  if (sessionIds.length === 0) throw new Error('SESSION_REQUIRED');
+  await prisma.event_session_uploaders.deleteMany({
+    where: { AND: [contact, { all_sessions: true, event_id: input.eventId }] },
+  });
+  for (const eventSessionId of sessionIds) {
+    await addSessionUploader({
+      eventId: input.eventId,
+      eventSessionId,
+      mobile_number,
+      country_code: input.country_code,
+      email,
+    });
+  }
+  return listUploadersForEvent(input.eventId);
 }
 
 export async function removeSessionUploader(input: {
@@ -137,13 +233,33 @@ export async function sessionIdsViewerCanUpload(
 ): Promise<Set<string>> {
   const allowed = new Set<string>();
   if (!viewerUserId || sessionIds.length === 0) return allowed;
+  const sessions = await prisma.event_sessions.findMany({
+    where: { id: { in: sessionIds } },
+    select: { id: true, event_days: { select: { event_id: true } } },
+  });
+  const eventIds = [...new Set(sessions.map((session) => session.event_days.event_id))];
   const [user, uploaders] = await Promise.all([
     getViewerContact(viewerUserId),
-    listUploadersForSessions(sessionIds),
+    prisma.event_session_uploaders.findMany({
+      where: {
+        OR: [
+          { event_session_id: { in: sessionIds } },
+          ...(eventIds.length > 0 ? [{ all_sessions: true, event_id: { in: eventIds } }] : []),
+        ],
+      },
+      select: uploaderSelect,
+    }),
   ]);
   if (!user) return allowed;
-  for (const uploader of uploaders) {
-    if (uploaderMatchesUser(uploader, user)) allowed.add(uploader.event_session_id);
+  for (const uploader of uploaders.map(toUploader)) {
+    if (!uploaderMatchesUser(uploader, user)) continue;
+    if (uploader.all_sessions && uploader.event_id) {
+      for (const session of sessions) {
+        if (session.event_days.event_id === uploader.event_id) allowed.add(session.id);
+      }
+    } else if (uploader.event_session_id) {
+      allowed.add(uploader.event_session_id);
+    }
   }
   return allowed;
 }

@@ -1,6 +1,8 @@
 import prisma from '@/server/prisma';
 import { isEventAdminAssigned } from '@/server/events';
 import { isEventGuest } from '@/server/event-guests';
+import { getFavoritedItemIds } from '@/server/favorites';
+import { postSelect, type PostWithMedia } from '@/server/posts';
 import type { AdminSessionUser } from '@/lib/admin-session';
 
 export async function adminCanManageEvent(admin: AdminSessionUser, eventId: string): Promise<boolean> {
@@ -16,10 +18,47 @@ type MyMediaRow = {
   thumbnail_url: string | null;
   created_at: Date | null;
   event_day_media_id: string | null;
+  event_session_id: string | null;
+  event_day_id: string | null;
   post_id: string | null;
   caption: string | null;
   similarity: number;
 };
+
+type FeedPost = PostWithMedia & { liked_by_viewer: boolean; is_favorite: boolean };
+
+async function loadFeedPosts(
+  postIds: string[],
+  viewerUserId: string,
+  eventId: string
+): Promise<Map<string, FeedPost>> {
+  if (postIds.length === 0) return new Map();
+  const rows = await prisma.posts.findMany({
+    where: { id: { in: postIds }, status: 'active' },
+    select: {
+      ...postSelect,
+      post_likes: { where: { user_id: viewerUserId }, select: { id: true } },
+    },
+  });
+  const favorited = await getFavoritedItemIds(
+    viewerUserId,
+    'post',
+    rows.map((row) => row.id),
+    eventId
+  );
+  const posts = new Map<string, FeedPost>();
+  for (const row of rows) {
+    const { post_likes, ...post } = row;
+    const feedPost = post as PostWithMedia;
+    posts.set(row.id, {
+      ...feedPost,
+      post_media: [...feedPost.post_media].sort((a, b) => (a.media_order ?? 0) - (b.media_order ?? 0)),
+      liked_by_viewer: post_likes.length > 0,
+      is_favorite: favorited.has(row.id),
+    });
+  }
+  return posts;
+}
 
 function mergeMyMedia(rows: MyMediaRow[]): MyMediaRow[] {
   const byUrl = new Map<string, MyMediaRow>();
@@ -44,12 +83,14 @@ export async function listMyMedia(input: { userId: string; eventId: string; page
   try {
     const matched = await prisma.$queryRaw<MyMediaRow[]>`
       SELECT ma.id AS media_asset_id,
-             ma.source,
+             CASE WHEN pm.post_id IS NOT NULL THEN 'user_post' ELSE 'session_media' END AS source,
              ma.media_type::text AS media_type,
              ma.media_url,
              COALESCE(edm.thumbnail_url, pm.thumbnail_url) AS thumbnail_url,
              ma.created_at,
              ma.event_day_media_id,
+             edm.event_session_id,
+             edm.event_day_id,
              pm.post_id,
              p.caption,
              MAX(mm.similarity) AS similarity
@@ -57,10 +98,15 @@ export async function listMyMedia(input: { userId: string; eventId: string; page
       JOIN media_assets ma ON ma.id = mm.media_asset_id
       LEFT JOIN event_day_media edm ON edm.id = ma.event_day_media_id
       LEFT JOIN post_media pm ON pm.id = ma.post_media_id
-      LEFT JOIN posts p ON p.id = pm.post_id
+      LEFT JOIN posts p ON p.id = pm.post_id AND p.status = 'active'
       WHERE mm.user_id = ${input.userId}::uuid
         AND ma.event_id = ${input.eventId}::uuid
-      GROUP BY ma.id, ma.source, ma.media_type, ma.media_url, edm.thumbnail_url, pm.thumbnail_url, ma.created_at, ma.event_day_media_id, pm.post_id, p.caption
+        AND (
+          (pm.post_id IS NOT NULL AND p.id IS NOT NULL)
+          OR (pm.post_id IS NULL AND edm.id IS NOT NULL)
+        )
+      GROUP BY ma.id, ma.media_type, ma.media_url, edm.thumbnail_url, pm.thumbnail_url, ma.created_at,
+               ma.event_day_media_id, edm.event_session_id, edm.event_day_id, pm.post_id, p.caption
     `;
     rows.push(...matched);
   } catch (error) {
@@ -76,6 +122,8 @@ export async function listMyMedia(input: { userId: string; eventId: string; page
              pm.thumbnail_url,
              pm.created_at,
              NULL::uuid AS event_day_media_id,
+             NULL::uuid AS event_session_id,
+             NULL::uuid AS event_day_id,
              p.id AS post_id,
              p.caption,
              1::float AS similarity
@@ -93,10 +141,75 @@ export async function listMyMedia(input: { userId: string; eventId: string; page
 
   const items = mergeMyMedia(rows);
   const total = items.length;
-  return {
-    items: items.slice(offset, offset + input.limit),
-    total,
-  };
+  const pageItems = items.slice(offset, offset + input.limit);
+  const posts = await loadFeedPosts(
+    [...new Set(pageItems.map((row) => row.post_id).filter((id): id is string => !!id))],
+    input.userId,
+    input.eventId
+  );
+
+  const data: Array<
+    | {
+        media_asset_id: string;
+        source: 'user_post';
+        media_type: string;
+        media_url: string;
+        thumbnail_url: string | null;
+        created_at: Date | null;
+        post_id: string;
+        post: FeedPost;
+        caption: string | null;
+        similarity: number;
+      }
+    | {
+        media_asset_id: string;
+        source: 'session_media';
+        id: string;
+        event_day_media_id: string;
+        event_session_id: string | null;
+        event_day_id: string | null;
+        media_type: string;
+        media_url: string;
+        thumbnail_url: string | null;
+        created_at: Date | null;
+        similarity: number;
+      }
+  > = [];
+  for (const row of pageItems) {
+    if (row.post_id) {
+      const post = posts.get(row.post_id);
+      if (!post) continue;
+      data.push({
+        media_asset_id: row.media_asset_id,
+        source: 'user_post',
+        media_type: row.media_type,
+        media_url: row.media_url,
+        thumbnail_url: row.thumbnail_url,
+        created_at: row.created_at,
+        post_id: row.post_id,
+        post,
+        caption: post.caption,
+        similarity: row.similarity,
+      });
+      continue;
+    }
+    if (!row.event_day_media_id) continue;
+    data.push({
+      media_asset_id: row.media_asset_id,
+      source: 'session_media',
+      id: row.event_day_media_id,
+      event_day_media_id: row.event_day_media_id,
+      event_session_id: row.event_session_id,
+      event_day_id: row.event_day_id,
+      media_type: row.media_type,
+      media_url: row.media_url,
+      thumbnail_url: row.thumbnail_url,
+      created_at: row.created_at,
+      similarity: row.similarity,
+    });
+  }
+
+  return { items: data, total };
 }
 
 const statusSelect = {

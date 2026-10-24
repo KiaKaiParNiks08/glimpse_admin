@@ -11,7 +11,7 @@ export const maxDuration = 60;
 
 /**
  * POST /api/users/[user_id]/profile-picture
- * Uploads the profile picture and uses that same photo as the face reference.
+ * First photo with one face becomes the account person. Later photos must be that person.
  * Body: multipart/form-data with field "file".
  */
 export async function POST(
@@ -57,16 +57,18 @@ export async function POST(
     if (!user) return notFound('User not found');
 
     let face_reference = null;
-    try {
-      face_reference = await enrollStoredFaceReference(user.id, saved.storageKey);
-    } catch (error) {
-      console.error('[profile-picture] face reference was not enrolled', error);
-      face_reference = {
-        consent: false,
-        processing_status: 'failed',
-        last_error: error instanceof Error ? error.message : 'Face reference was not enrolled',
-        has_embedding: false,
-      };
+    if (faceCheck.first) {
+      try {
+        face_reference = await enrollStoredFaceReference(user.id, saved.storageKey);
+      } catch (error) {
+        console.error('[profile-picture] face reference was not enrolled', error);
+        face_reference = {
+          consent: false,
+          processing_status: 'failed',
+          last_error: error instanceof Error ? error.message : 'Face reference was not enrolled',
+          has_embedding: false,
+        };
+      }
     }
 
     return ok(

@@ -10,6 +10,7 @@ import {
   deleteEventDayMediaBulkAction,
   getEventDaysForMediaAction,
   removeSessionUploaderAction,
+  saveMediaPanelSessionAction,
   uploadSessionMediaFileAction,
 } from '@/app/actions/event-day-media';
 import {
@@ -26,6 +27,7 @@ type DayMedia = {
   media_key?: string | null;
   media_url: string;
   media_type: string;
+  thumbnail_url?: string | null;
   display_order: number | null;
 };
 
@@ -33,6 +35,8 @@ type DaySession = {
   id: string;
   title: string;
   start_time: string | Date | null;
+  end_time?: string | Date | null;
+  media_panel_only?: boolean;
 };
 
 type EventDay = {
@@ -52,10 +56,13 @@ type EventDetails = {
 
 type SessionUploader = {
   id: string;
-  event_session_id: string;
+  event_id: string | null;
+  event_session_id: string | null;
+  all_sessions: boolean;
   mobile_number: string | null;
   country_code: string | null;
   email: string | null;
+  session_title: string | null;
 };
 
 /** A gallery the admin can pick: one session, or the older day-wise uploads that have no session. */
@@ -65,6 +72,7 @@ type GalleryTarget = {
   sessionId: string | null;
   label: string;
   dayLabel: string;
+  mediaPanelOnly: boolean;
 };
 
 function formatDayLabel(day: EventDay): string {
@@ -93,7 +101,14 @@ function buildGalleryTargets(days: EventDay[]): GalleryTarget[] {
     );
     const targets: GalleryTarget[] = sessions.map((s) => {
       const time = sessionTimeHHmm(s.start_time);
-      return { key: s.id, dayId: day.id, sessionId: s.id, label: time ? `${s.title} (${time})` : s.title, dayLabel };
+      return {
+        key: s.id,
+        dayId: day.id,
+        sessionId: s.id,
+        label: time ? `${s.title} (${time})` : s.title,
+        dayLabel,
+        mediaPanelOnly: s.media_panel_only === true,
+      };
     });
     if ((day.event_day_media ?? []).some((m) => !m.event_session_id)) {
       targets.push({
@@ -102,6 +117,7 @@ function buildGalleryTargets(days: EventDay[]): GalleryTarget[] {
         sessionId: null,
         label: 'Without session (older uploads)',
         dayLabel,
+        mediaPanelOnly: false,
       });
     }
     return targets;
@@ -121,6 +137,17 @@ export default function EventDayMediaPage({
   const [uploaders, setUploaders] = useState<SessionUploader[]>([]);
   const [selectedKey, setSelectedKey] = useState<string>('');
   const [uploaderDraft, setUploaderDraft] = useState('');
+  const [uploadScope, setUploadScope] = useState<'all' | 'specific'>('specific');
+  const [grantSessionIds, setGrantSessionIds] = useState<string[]>([]);
+  const [sessionFormOpen, setSessionFormOpen] = useState(false);
+  const [savingSession, setSavingSession] = useState(false);
+  const [sessionForm, setSessionForm] = useState({
+    id: '' as string,
+    dayId: '',
+    title: '',
+    start_time: '',
+    end_time: '',
+  });
   const [savingUploader, setSavingUploader] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -145,9 +172,9 @@ export default function EventDayMediaPage({
   const selectedTarget = targets.find((t) => t.key === selectedKey) ?? null;
   const selectedTargetLabel = selectedTarget ? `${selectedTarget.dayLabel} — ${selectedTarget.label}` : '';
   const selectedSessionId = selectedTarget?.sessionId ?? null;
-  const sessionUploaders = useMemo(
-    () => uploaders.filter((row) => row.event_session_id === selectedSessionId),
-    [uploaders, selectedSessionId]
+  const sessionChoices = useMemo(
+    () => targets.filter((target) => target.sessionId),
+    [targets]
   );
   const dayMedia = useMemo(() => {
     if (!selectedTarget) return [];
@@ -203,6 +230,12 @@ export default function EventDayMediaPage({
   }, [eventId]);
 
   useEffect(() => {
+    if (selectedSessionId) {
+      setGrantSessionIds((prev) => (prev.length === 0 ? [selectedSessionId] : prev));
+    }
+  }, [selectedSessionId]);
+
+  useEffect(() => {
     if (targets.length > 0 && !targets.some((t) => t.key === selectedKey)) {
       setSelectedKey(targets[0]!.key);
     }
@@ -227,30 +260,92 @@ export default function EventDayMediaPage({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [lightboxIndex, dayMedia.length]);
 
+  function toggleGrantSession(sessionId: string) {
+    setGrantSessionIds((prev) => {
+      const base = prev.length === 0 && selectedSessionId ? [selectedSessionId] : prev;
+      return base.includes(sessionId) ? base.filter((id) => id !== sessionId) : [...base, sessionId];
+    });
+  }
+
   async function handleAddUploader() {
-    if (!selectedSessionId) {
-      alert('Select a session first.');
-      return;
-    }
     const value = uploaderDraft.trim();
     if (!value) return;
+    const sessionIds = uploadScope === 'specific' ? grantSessionIds : [];
+    if (uploadScope === 'specific' && sessionIds.length === 0) {
+      alert('Choose at least one session.');
+      return;
+    }
     setSavingUploader(true);
     setError(null);
     try {
       const isEmail = value.includes('@');
       const res = await addSessionUploaderAction({
         eventId,
-        eventSessionId: selectedSessionId,
+        all_sessions: uploadScope === 'all',
+        event_session_ids: sessionIds,
         email: isEmail ? value : undefined,
         mobile_number: isEmail ? undefined : value,
       });
       if (!res.ok) throw new Error(res.error);
-      setUploaders((prev) => (prev.some((row) => row.id === res.data.id) ? prev : [...prev, res.data]));
+      setUploaders(res.data);
       setUploaderDraft('');
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Unable to add uploader');
     } finally {
       setSavingUploader(false);
+    }
+  }
+
+  function openNewSessionForm() {
+    setSessionForm({
+      id: '',
+      dayId: selectedTarget?.dayId || days[0]?.id || '',
+      title: '',
+      start_time: '',
+      end_time: '',
+    });
+    setSessionFormOpen(true);
+  }
+
+  function openEditSessionForm() {
+    const session = days
+      .flatMap((day) => day.event_sessions.map((item) => ({ ...item, dayId: day.id })))
+      .find((item) => item.id === selectedSessionId);
+    if (!session?.media_panel_only) return;
+    setSessionForm({
+      id: session.id,
+      dayId: session.dayId,
+      title: session.title,
+      start_time: sessionTimeHHmm(session.start_time) ?? '',
+      end_time: sessionTimeHHmm(session.end_time ?? null) ?? '',
+    });
+    setSessionFormOpen(true);
+  }
+
+  async function handleSaveSession() {
+    if (!sessionForm.dayId) {
+      alert('Choose a day.');
+      return;
+    }
+    setSavingSession(true);
+    setError(null);
+    try {
+      const res = await saveMediaPanelSessionAction({
+        eventId,
+        sessionId: sessionForm.id || null,
+        eventDayId: sessionForm.dayId,
+        title: sessionForm.title,
+        start_time: sessionForm.start_time,
+        end_time: sessionForm.end_time,
+      });
+      if (!res.ok) throw new Error(res.error);
+      setSessionFormOpen(false);
+      setSelectedKey(res.sessionId);
+      await load();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Unable to save session');
+    } finally {
+      setSavingSession(false);
     }
   }
 
@@ -408,7 +503,7 @@ export default function EventDayMediaPage({
           aria-label="Session"
         >
           {targets.length === 0 ? (
-            <option value="">No sessions found — add sessions in the event wizard</option>
+            <option value="">No sessions yet</option>
           ) : (
             targetGroups.map((g) => (
               <optgroup key={g.dayId} label={g.dayLabel}>
@@ -422,19 +517,83 @@ export default function EventDayMediaPage({
           )}
         </select>
 
+        <button type="button" className={styles.btnPrimary} onClick={openNewSessionForm}>
+          Add session
+        </button>
+        {selectedTarget?.mediaPanelOnly && (
+          <button type="button" className={styles.btnSecondary} onClick={openEditSessionForm}>
+            Edit session
+          </button>
+        )}
         <Link className={styles.btnSecondary} href={`/dashboard/events`}>
           Events
         </Link>
       </div>
 
-      {selectedSessionId && (
+      {sessionFormOpen && (
+        <div className={styles.uploadCard}>
+          <div style={{ color: '#0f172a', fontWeight: 600 }}>
+            {sessionForm.id ? 'Edit session' : 'Add session'}
+          </div>
+          <div className={styles.hint}>
+            This session belongs only to this event. It can be changed here and does not appear when you edit the event.
+          </div>
+          <div className={styles.uploadRow}>
+            <select
+              className={styles.select}
+              value={sessionForm.dayId}
+              onChange={(e) => setSessionForm((prev) => ({ ...prev, dayId: e.target.value }))}
+              aria-label="Day"
+            >
+              {days.map((day) => (
+                <option key={day.id} value={day.id}>
+                  {formatDayLabel(day)}
+                </option>
+              ))}
+            </select>
+            <input
+              className={styles.uploaderInput}
+              value={sessionForm.title}
+              onChange={(e) => setSessionForm((prev) => ({ ...prev, title: e.target.value }))}
+              placeholder="Session title"
+            />
+            <input
+              className={styles.uploaderInput}
+              type="time"
+              value={sessionForm.start_time}
+              onChange={(e) => setSessionForm((prev) => ({ ...prev, start_time: e.target.value }))}
+              aria-label="Start time"
+            />
+            <input
+              className={styles.uploaderInput}
+              type="time"
+              value={sessionForm.end_time}
+              onChange={(e) => setSessionForm((prev) => ({ ...prev, end_time: e.target.value }))}
+              aria-label="End time"
+            />
+            <button
+              type="button"
+              className={styles.btnPrimary}
+              onClick={() => void handleSaveSession()}
+              disabled={savingSession || !sessionForm.title.trim()}
+            >
+              {savingSession ? 'Saving…' : 'Save session'}
+            </button>
+            <button type="button" className={styles.btnSecondary} onClick={() => setSessionFormOpen(false)}>
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+
+      {sessionChoices.length > 0 && (
         <div className={styles.uploadCard}>
           <div>
             <div style={{ color: '#0f172a', fontWeight: 600 }}>Who can upload from the app</div>
             <div className={styles.hint}>
               {event?.is_corporate
-                ? 'Corporate event: add work emails (and mobiles if you want). The matching logged-in guest sees an upload icon for this session.'
-                : 'Add mobile numbers of guests who may upload media to this session. Corporate events can use email instead.'}
+                ? 'Add a work email or mobile, then choose every session or only specific ones.'
+                : 'Add a mobile number, then choose every session or only specific ones.'}
             </div>
           </div>
           <div className={styles.uploadRow}>
@@ -452,6 +611,29 @@ export default function EventDayMediaPage({
                 }
               }}
             />
+            <label className={styles.hint}>
+              <input
+                type="radio"
+                name="upload-scope"
+                checked={uploadScope === 'all'}
+                onChange={() => setUploadScope('all')}
+              />{' '}
+              All sessions
+            </label>
+            <label className={styles.hint}>
+              <input
+                type="radio"
+                name="upload-scope"
+                checked={uploadScope === 'specific'}
+                onChange={() => {
+                  setUploadScope('specific');
+                  if (grantSessionIds.length === 0 && selectedSessionId) {
+                    setGrantSessionIds([selectedSessionId]);
+                  }
+                }}
+              />{' '}
+              Specific sessions
+            </label>
             <button
               type="button"
               className={styles.btnPrimary}
@@ -461,13 +643,28 @@ export default function EventDayMediaPage({
               {savingUploader ? 'Saving…' : 'Add'}
             </button>
           </div>
-          {sessionUploaders.length > 0 ? (
+          {uploadScope === 'specific' && (
             <div className={styles.chipRow}>
-              {sessionUploaders.map((row) => (
+              {sessionChoices.map((target) => (
+                <label key={target.key} className={styles.chip}>
+                  <input
+                    type="checkbox"
+                    checked={grantSessionIds.includes(target.sessionId ?? '')}
+                    onChange={() => target.sessionId && toggleGrantSession(target.sessionId)}
+                  />{' '}
+                  {target.dayLabel}: {target.label}
+                </label>
+              ))}
+            </div>
+          )}
+          {uploaders.length > 0 ? (
+            <div className={styles.chipRow}>
+              {uploaders.map((row) => (
                 <span key={row.id} className={styles.chip}>
-                  {row.email ||
+                  {(row.email ||
                     [row.country_code, row.mobile_number].filter(Boolean).join(' ') ||
-                    row.mobile_number}
+                    row.mobile_number) +
+                    (row.all_sessions ? ' — All sessions' : ` — ${row.session_title ?? 'Session'}`)}
                   <button
                     type="button"
                     className={styles.chipRemove}
@@ -481,7 +678,7 @@ export default function EventDayMediaPage({
               ))}
             </div>
           ) : (
-            <div className={styles.hint}>No guests can upload to this session yet.</div>
+            <div className={styles.hint}>No guests can upload yet.</div>
           )}
         </div>
       )}
@@ -615,7 +812,12 @@ export default function EventDayMediaPage({
                   aria-label={`Open ${m.media_type} preview`}
                 >
                   {m.media_type === 'video' ? (
-                    <video className={styles.thumb} src={m.media_url} />
+                    m.thumbnail_url ? (
+                      // eslint-disable-next-line @next/next/no-img-element -- dynamic uploaded content
+                      <img className={styles.thumb} src={m.thumbnail_url} alt="" />
+                    ) : (
+                      <video className={styles.thumb} src={m.media_url} preload="metadata" muted playsInline />
+                    )
                   ) : (
                     <>
                       {/* eslint-disable-next-line @next/next/no-img-element -- dynamic uploaded content */}

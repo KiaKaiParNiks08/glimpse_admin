@@ -9,7 +9,14 @@ import {
   upsertUserDevice,
 } from '@/server';
 import { getEventByCode } from '@/server/events';
-import { resolveAuthEvent, toAuthCategoryFields, toPublicEventChoice } from '@/server/auth-login';
+import {
+  findReturningUserByDevice,
+  isReturningGuest,
+  resolveAuthEvent,
+  toAuthCategoryFields,
+  toPublicEventChoice,
+} from '@/server/auth-login';
+import { createUserJwtToken } from '@/lib/jwt';
 
 const USER_ROLE_NAME = 'user';
 
@@ -32,6 +39,38 @@ export async function POST(request: Request) {
 
     if (event_code && !mobile_number && !email) {
       if (!eventByCode) return notFound('Invalid or unknown event code');
+      if (device_id) {
+        const returning = await findReturningUserByDevice(eventByCode.id, device_id, userRole.id);
+        if (returning) {
+          if (device_type) {
+            await upsertUserDevice({
+              user_id: returning.user_id,
+              device_type,
+              device_id,
+            });
+          }
+          const { token, expires_at } = createUserJwtToken({
+            user_id: returning.user_id,
+            event_id: eventByCode.id,
+          });
+          return ok(
+            {
+              user_id: returning.user_id,
+              country_code: returning.country_code,
+              mobile_number: returning.mobile_number,
+              email: returning.email,
+              event_id: eventByCode.id,
+              event_code: eventByCode.event_code,
+              requires_event_selection: false,
+              event_count: 1,
+              token,
+              expires_at,
+              ...toAuthCategoryFields(eventByCode.event_categories),
+            },
+            'Logged in'
+          );
+        }
+      }
       return ok(
         {
           user_id: null,
@@ -99,8 +138,13 @@ export async function POST(request: Request) {
         getVenueContactForEvent(event.main_venue_id),
       ]);
 
-      const [otpResult] = await Promise.all([
-        createOtpForUser({ user_id: createdUser.user_id, expiry_minutes: 10 }),
+      const alreadyGuest = await isReturningGuest({
+        eventId: event.id,
+        mobileNumber: mobile_number,
+        email,
+        roleId: userRole.id,
+      });
+      await Promise.all([
         device_id && device_type
           ? upsertUserDevice({ user_id: createdUser.user_id, device_type, device_id })
           : Promise.resolve(),
@@ -110,6 +154,31 @@ export async function POST(request: Request) {
           venue_contact_id,
         }),
       ]);
+
+      if (alreadyGuest) {
+        const { token, expires_at } = createUserJwtToken({
+          user_id: createdUser.user_id,
+          event_id: event.id,
+        });
+        return ok(
+          {
+            user_id: createdUser.user_id,
+            country_code: country_code ?? null,
+            mobile_number: mobile_number ?? null,
+            email: email ?? null,
+            event_id: event.id,
+            event_code: event.event_code ?? event_code ?? null,
+            requires_event_selection: false,
+            event_count: 1,
+            token,
+            expires_at,
+            ...category,
+          },
+          'Logged in'
+        );
+      }
+
+      const otpResult = await createOtpForUser({ user_id: createdUser.user_id, expiry_minutes: 10 });
 
       return ok(
         {

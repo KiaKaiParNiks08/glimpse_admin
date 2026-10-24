@@ -724,7 +724,7 @@ export async function getEventDaysAction(
     const data: EventDayInput[] = days.map((day) => ({
       date: day.date instanceof Date ? day.date.toISOString().slice(0, 10) : String(day.date),
       title: day.title ?? null,
-      sessions: (day.event_sessions ?? []).map((s) => ({
+      sessions: (day.event_sessions ?? []).filter((s) => !s.media_panel_only).map((s) => ({
         id: s.id,
         title: s.title ?? '',
         description: (s.description ?? '').trim() || '',

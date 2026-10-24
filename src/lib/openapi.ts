@@ -152,7 +152,7 @@ export function getOpenApiSpec(serverUrl: string) {
           summary: 'Request OTP (login/register)',
           security: [],
           description:
-            'Send one identity: mobile_number, email, or event_code. Empty fields should be omitted. First login with a mobile or email requires event_code; if it is missing the response is 400 with message "Enter an event code to continue". A later login for that same mobile or email can omit event_code. Several matches return requires_event_selection and events, and no OTP, until the app posts again with event_id. One match sends OTP. event_code alone confirms the event and does not send OTP. event_code with mobile or email sends OTP for that event. Email does not require a mobile number. Corporate events are included for a returning email. show_wedding_side is true only for weddings.',
+            'Send one identity: mobile_number, email, or event_code. Empty fields should be omitted. First login with a mobile or email requires event_code; if it is missing the response is 400 with message "Enter an event code to continue", then OTP. A guest who already joined skips OTP: one event returns token and expires_at (no otp); several events return requires_event_selection and events, and the next call with event_id returns token. event_code alone logs in the guest already on this device_id for that event (token, no otp). If this device has not joined, event_code alone only confirms the code. Email does not require a mobile number. show_wedding_side is true only for weddings.',
           tags: ['Auth'],
           requestBody: {
             required: true,
@@ -1714,7 +1714,9 @@ export function getOpenApiSpec(serverUrl: string) {
         get: {
           summary: 'Photos and posts where this user was recognized',
           description:
-            'Returns this event\'s media for the signed-in user: (1) image and video posts they created, and (2) other guests\' or photographer photos where their face matched. Each item includes thumbnail_url for videos that have a poster. Face matching uses Amazon Rekognition CompareFaces when AWS keys are set.',
+            'Returns this event\'s media for the signed-in user: image and video posts they created, plus photos where their face matched. ' +
+            'source is user_post or session_media. A user_post item includes post_id and post (the same object as GET /api/feed, including users, caption, like_count, comment_count, liked_by_viewer, is_favorite, and post_media). ' +
+            'A session_media item includes id (event_day_media id), event_session_id, event_day_id, media_url, media_type, and thumbnail_url. Face matching uses Amazon Rekognition CompareFaces when AWS keys are set.',
           tags: ['Events'],
           security: [{ BearerAuth: [] }],
           parameters: [
@@ -1741,13 +1743,15 @@ export function getOpenApiSpec(serverUrl: string) {
                     data: [
                       {
                         media_asset_id: 'a1a2a3a4-1111-4222-8333-444455556666',
-                        source: 'photographer',
+                        source: 'session_media',
+                        id: 'm1m2m3m4-1111-4222-8333-444455556666',
+                        event_day_media_id: 'm1m2m3m4-1111-4222-8333-444455556666',
+                        event_session_id: 's1s2s3s4-1111-4222-8333-444455556666',
+                        event_day_id: 'd1d2d3d4-1111-4222-8333-444455556666',
                         media_type: 'image',
                         media_url: '/api/upload/signed?t=session-photo',
+                        thumbnail_url: null,
                         created_at: '2026-10-10T10:00:00.000Z',
-                        event_day_media_id: 'm1m2m3m4-1111-4222-8333-444455556666',
-                        post_id: null,
-                        caption: null,
                         similarity: 1,
                       },
                       {
@@ -1755,11 +1759,35 @@ export function getOpenApiSpec(serverUrl: string) {
                         source: 'user_post',
                         media_type: 'image',
                         media_url: '/api/upload/signed?t=feed-photo',
+                        thumbnail_url: null,
                         created_at: '2026-10-10T11:00:00.000Z',
-                        event_day_media_id: null,
                         post_id: 'c1f1b7de-9bce-4255-bca7-b4a183eea1dd',
                         caption: 'From another guest',
                         similarity: 1,
+                        post: {
+                          id: 'c1f1b7de-9bce-4255-bca7-b4a183eea1dd',
+                          user_id: '8b270387-dbff-4cfa-9801-ebd30252350f',
+                          event_id: '181656dd-af20-4303-9b4b-a7c6eaf4517b',
+                          caption: 'From another guest',
+                          height: 1920,
+                          status: 'active',
+                          like_count: 0,
+                          comment_count: 0,
+                          liked_by_viewer: false,
+                          is_favorite: false,
+                          created_at: '2026-10-10T11:00:00.000Z',
+                          updated_at: '2026-10-10T11:00:00.000Z',
+                          users: { full_name: 'Rohan', avatar_url: null },
+                          post_media: [
+                            {
+                              id: 'f1f2f3f4-1111-4222-8333-444455556666',
+                              media_type: 'image',
+                              media_url: '/api/upload/signed?t=feed-photo',
+                              thumbnail_url: null,
+                              media_order: 1,
+                            },
+                          ],
+                        },
                       },
                     ],
                     meta: { total: 2, page: 1, limit: 20, totalPages: 1 },
@@ -1931,7 +1959,7 @@ export function getOpenApiSpec(serverUrl: string) {
         post: {
           summary: 'Upload user profile picture',
           description:
-            'Uploads a single image and updates only the user avatar_url. Body must be multipart/form-data with field `file`.',
+            'Uploads a single image and updates avatar_url. Body must be multipart/form-data with field `file`. The first photo that contains one face is stored as this account\'s person and is kept for later checks. A later photo is saved only when Amazon Rekognition matches that same person. A different person, a photo with no face, or a photo that cannot be checked returns 400 and does not change the picture. The request field does not change.',
           tags: ['Users'],
           parameters: [
             { name: 'user_id', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } },
@@ -1980,7 +2008,10 @@ export function getOpenApiSpec(serverUrl: string) {
                 },
               },
             },
-            '400': { description: 'Invalid or missing file' },
+            '400': {
+              description:
+                'Missing file, or the new photo is not the same person as the first profile picture. Show message to the user. avatar_url is unchanged.',
+            },
             '404': { description: 'User not found' },
             '500': { description: 'Server error' },
           },

@@ -120,7 +120,7 @@ function toResolvedEvent(event: AuthEventListRow): AuthEvent {
   };
 }
 
-async function isReturningGuest(input: {
+export async function isReturningGuest(input: {
   eventId: string;
   mobileNumber?: string | null;
   email?: string | null;
@@ -225,6 +225,38 @@ async function listJoinedEventsByEmail(email: string, roleId: number): Promise<A
       row.event_type && row.event_category ? { slug: row.event_type, name: row.event_category } : null
     ),
   }));
+}
+
+/** A guest who already joined this event on this device. Used when the app sends only an event code. */
+export async function findReturningUserByDevice(
+  eventId: string,
+  deviceId: string,
+  roleId: number
+): Promise<{
+  user_id: string;
+  country_code: string | null;
+  mobile_number: string | null;
+  email: string | null;
+} | null> {
+  const rows = await prisma.$queryRaw<
+    Array<{
+      user_id: string;
+      country_code: string | null;
+      mobile_number: string | null;
+      email: string | null;
+    }>
+  >`
+    SELECT u.id AS user_id, u.country_code, u.mobile_number, u.email
+    FROM user_devices d
+    JOIN users u ON u.id = d.user_id
+    JOIN event_guests eg ON eg.user_id = u.id AND eg.event_id = ${eventId}::uuid
+    WHERE d.device_id = ${deviceId}
+      AND d.is_active = true
+      AND u.role_id = ${roleId}
+    ORDER BY d.last_seen_at DESC NULLS LAST
+    LIMIT 1
+  `;
+  return rows[0] ?? null;
 }
 
 function chooseOrLogin(events: AuthEventListRow[], hasJoinedBefore: boolean): ResolveAuthEventResult {

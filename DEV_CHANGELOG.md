@@ -815,6 +815,70 @@ Vercel still returned `data: []` after profile enroll because `media_matches` st
 
 ---
 
+## 2026-10-23 — Profile picture stays the first person
+
+`POST /api/users/{user_id}/profile-picture` still takes multipart field `file`. The first photo with one face is saved as the face reference and is not replaced. A later photo is stored as the avatar only when Rekognition matches that first person. A different person returns 400 and the avatar is left as it was.
+
+**Modified files**
+- `src/server/people-media/profile-verify.ts` — compare later photos to the first reference and reject mismatches
+- `src/server/people-media/rekognition.ts` — detect a single face on the first photo
+- `src/app/api/users/[user_id]/profile-picture/route.ts` — enroll the face only on the first photo
+- `src/lib/openapi.ts`
+
+---
+
+## 2026-10-23 — Returning login without OTP, media-page sessions, upload scope
+
+A guest who already joined an event gets `token` and `expires_at` from `POST /api/auth` and no OTP. One mobile or email match logs in. Several matches still return the event list, and the follow-up with `event_id` logs in. `event_code` alone logs in the guest already stored on that `device_id`. A first visit still needs an event code and OTP.
+
+The event media page can add and edit sessions that stay off the event edit form (`event_sessions.media_panel_only`). Upload permission can be every session of that event, or only the sessions that are checked.
+
+Old videos still have no stored poster. The media page shows the video file itself when `thumbnail_url` is null.
+
+**New files**
+- `prisma/migrations/20261023120000_media_sessions_and_upload_scope/migration.sql`
+
+**Modified files**
+- `prisma/schema.prisma` — `media_panel_only`, `all_sessions`, optional session on an uploader
+- `src/app/api/auth/route.ts` — skip OTP for a returning guest
+- `src/server/auth-login.ts` — device match for event-code login
+- `src/server/session-uploaders.ts` — all-sessions or specific sessions
+- `src/server/events.ts` — event save does not delete media-page sessions
+- `src/server/event-days.ts` — session flag and video thumbnail on the media load
+- `src/app/actions/events.ts` — event edit form hides media-page sessions
+- `src/app/actions/event-day-media.ts` — save session and grant upload scope
+- `src/app/dashboard/events/[event_id]/media/page.tsx`
+- `src/types/events.ts`
+- `src/lib/openapi.ts`
+
+Local DB: applied with `npx prisma db execute` because `prisma migrate deploy` is still blocked by failed migration `20261004120000_people_in_media`. Run the same SQL on the hosted database before deploy.
+
+Undo the DB part:
+
+```sql
+ALTER TABLE event_session_uploaders DROP CONSTRAINT IF EXISTS fk_session_uploader_event;
+DROP INDEX IF EXISTS idx_event_session_uploaders_event_id;
+ALTER TABLE event_session_uploaders DROP COLUMN IF EXISTS all_sessions;
+ALTER TABLE event_session_uploaders DROP COLUMN IF EXISTS event_id;
+ALTER TABLE event_sessions DROP COLUMN IF EXISTS media_panel_only;
+DELETE FROM "_prisma_migrations" WHERE migration_name = '20261023120000_media_sessions_and_upload_scope';
+```
+
+Do not drop `event_session_id` nullability in a hurry: existing rows still have a session id. Restoring `NOT NULL` is safe only when every row has `event_session_id`.
+
+---
+
+## 2026-10-23 — My media items open a post or a session
+
+`GET /api/events/{event_id}/my-media` still lists recognised media. `source` is now `user_post` or `session_media`. A post item includes `post_id` and `post` in the same shape as `GET /api/feed`. A session item includes `id`, `event_session_id`, `event_day_id`, `media_url`, `media_type`, and `thumbnail_url`.
+
+**Modified files**
+- `src/server/people-media/queries.ts` — classify matches and attach the feed post
+- `src/app/api/events/[event_id]/my-media/route.ts` — comment
+- `src/lib/openapi.ts` — my-media example
+
+---
+
 ## 2026-10-21 — Paginated session media, video thumbnails, delete own upload
 
 Session gallery had no paged list and no video poster. `GET /api/events/{event_id}/session-media` returns 15 items per page. Videos store `thumbnail_url` when the app sends a `thumbnail` image (session upload and feed post). Favorites, day-media, and my-media (AI matches and the user's own posts, including videos) return that poster. `DELETE /api/events/{event_id}/sessions/{session_id}/media/{media_id}` removes only media that same user uploaded, and only if they can still upload to the session.

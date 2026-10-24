@@ -55,6 +55,7 @@ export async function getEventDaysByEventId(
         media_key: true,
         media_url: true,
         media_type: true,
+        thumbnail_url: true,
         display_order: true,
       },
     },
@@ -72,6 +73,7 @@ export async function getEventDaysByEventId(
     venue_id: true,
     venue_subvenue_id: true,
     status: true,
+    media_panel_only: true,
     event_session_bg_url: true,
     event_organizers: {
       select: { id: true, name: true },
@@ -107,6 +109,7 @@ export async function getEventDaysByEventId(
     end_time: true,
     venue_id: true,
     status: true,
+    media_panel_only: true,
     event_session_bg_url: true,
     event_organizers: {
       select: { id: true, name: true },

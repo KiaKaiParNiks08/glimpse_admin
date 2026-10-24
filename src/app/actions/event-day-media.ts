@@ -16,7 +16,7 @@ import { createEventDayMedia, deleteEventDayMediaById } from '@/server/event-day
 import { buildEventWatermark, type EventWatermark } from '@/lib/watermark';
 import { isCorporateCategory } from '@/lib/event-categories';
 import {
-  addSessionUploader,
+  grantSessionUpload,
   listUploadersForEvent,
   removeSessionUploader,
   type SessionUploader,
@@ -108,21 +108,30 @@ export async function getEventDaysForMediaAction(eventId: string): Promise<GetEv
 
 export async function addSessionUploaderAction(input: {
   eventId: string;
-  eventSessionId: string;
+  all_sessions?: boolean;
+  event_session_ids?: string[];
   mobile_number?: string;
   country_code?: string;
   email?: string;
-}): Promise<{ ok: true; data: SessionUploader } | { ok: false; error: string }> {
+}): Promise<{ ok: true; data: SessionUploader[] } | { ok: false; error: string }> {
   const auth = await requireAdmin();
   if (!auth.ok) return { ok: false, error: auth.error };
   const allowed = await canAccessEvent(input.eventId, auth.admin);
   if (!allowed) return { ok: false, error: 'Event not found' };
   try {
-    const data = await addSessionUploader(input);
+    const data = await grantSessionUpload({
+      eventId: input.eventId,
+      allSessions: input.all_sessions === true,
+      eventSessionIds: input.event_session_ids,
+      mobile_number: input.mobile_number,
+      country_code: input.country_code,
+      email: input.email,
+    });
     return { ok: true, data };
   } catch (error) {
     const message = error instanceof Error ? error.message : '';
     if (message === 'SESSION_NOT_FOUND') return { ok: false, error: 'Session not found' };
+    if (message === 'SESSION_REQUIRED') return { ok: false, error: 'Choose at least one session' };
     if (message === 'CONTACT_REQUIRED') return { ok: false, error: 'Enter a mobile number or email' };
     if (message === 'INVALID_EMAIL') return { ok: false, error: 'Enter a valid email' };
     if (message === 'INVALID_MOBILE') return { ok: false, error: 'Enter a valid mobile number' };
@@ -353,5 +362,90 @@ export async function deleteEventDayMediaBulkAction(input: {
   }
 
   return { ok: true, deletedCount: ids.length };
+}
+
+function parseSessionTime(value: string | null | undefined): Date | null {
+  const trimmed = value?.trim() ?? '';
+  if (!trimmed) return null;
+  const parts = trimmed.split(':');
+  const h = Number.parseInt(parts[0] ?? '', 10);
+  const m = Number.parseInt(parts[1] ?? '', 10);
+  if (!Number.isFinite(h) || !Number.isFinite(m) || h < 0 || h > 23 || m < 0 || m > 59) {
+    throw new Error('INVALID_TIME');
+  }
+  return new Date(Date.UTC(1970, 0, 1, h, m, 0, 0));
+}
+
+export async function saveMediaPanelSessionAction(input: {
+  eventId: string;
+  sessionId?: string | null;
+  eventDayId: string;
+  title: string;
+  start_time?: string | null;
+  end_time?: string | null;
+}): Promise<{ ok: true; sessionId: string } | { ok: false; error: string }> {
+  const auth = await requireAdmin();
+  if (!auth.ok) return { ok: false, error: auth.error };
+  const allowed = await canAccessEvent(input.eventId, auth.admin);
+  if (!allowed) return { ok: false, error: 'Event not found' };
+
+  const title = input.title.trim();
+  if (!title) return { ok: false, error: 'Enter a session title' };
+  if (title.length > 150) return { ok: false, error: 'Session title is too long' };
+
+  const day = await prisma.event_days.findFirst({
+    where: { id: input.eventDayId, event_id: input.eventId },
+    select: { id: true },
+  });
+  if (!day) return { ok: false, error: 'Choose a day of this event' };
+
+  let startTime: Date | null;
+  let endTime: Date | null;
+  try {
+    startTime = parseSessionTime(input.start_time);
+    endTime = parseSessionTime(input.end_time);
+  } catch {
+    return { ok: false, error: 'Enter times as HH:mm' };
+  }
+
+  try {
+    if (input.sessionId) {
+      const existing = await prisma.event_sessions.findFirst({
+        where: { id: input.sessionId, event_days: { event_id: input.eventId }, media_panel_only: true },
+        select: { id: true },
+      });
+      if (!existing) return { ok: false, error: 'Only sessions added on this page can be edited here' };
+      await prisma.event_sessions.update({
+        where: { id: existing.id },
+        data: {
+          event_day_id: day.id,
+          title,
+          start_time: startTime,
+          end_time: endTime,
+          updated_at: new Date(),
+        },
+      });
+      return { ok: true, sessionId: existing.id };
+    }
+
+    const created = await prisma.event_sessions.create({
+      data: {
+        event_day_id: day.id,
+        title,
+        description: '',
+        start_time: startTime,
+        end_time: endTime,
+        status: 'upcoming',
+        media_panel_only: true,
+      },
+      select: { id: true },
+    });
+    return { ok: true, sessionId: created.id };
+  } catch (error) {
+    const code = (error as { code?: string }).code;
+    if (code === 'P2002') return { ok: false, error: 'This day already has a session with that title' };
+    console.error(error);
+    return { ok: false, error: 'Unable to save session' };
+  }
 }
 

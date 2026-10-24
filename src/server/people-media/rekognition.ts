@@ -1,4 +1,4 @@
-import { CompareFacesCommand, RekognitionClient } from '@aws-sdk/client-rekognition';
+import { CompareFacesCommand, DetectFacesCommand, RekognitionClient } from '@aws-sdk/client-rekognition';
 import { Prisma } from '@prisma/client';
 import prisma from '@/server/prisma';
 import { FACE_EMBEDDING_DIM } from './config';
@@ -35,6 +35,32 @@ export function rekognitionProfileMinSimilarity(): number {
 export type FaceCompareResult =
   | { ok: true; similarity: number }
   | { ok: false; reason: 'no_face' | 'below_threshold' | 'too_large' | 'unavailable' | 'error' };
+
+/** First profile photo must contain exactly one face so that face stays the account. */
+export async function detectSingleProfileFace(
+  bytes: Buffer
+): Promise<'one' | 'none' | 'many' | 'too_large' | 'unavailable' | 'error'> {
+  const client = rekognitionClient();
+  if (!client) return 'unavailable';
+  if (bytes.length > REKOGNITION_MAX_BYTES) return 'too_large';
+  try {
+    const result = await client.send(
+      new DetectFacesCommand({
+        Image: { Bytes: new Uint8Array(bytes) },
+        Attributes: ['DEFAULT'],
+      })
+    );
+    const count = result.FaceDetails?.length ?? 0;
+    if (count === 1) return 'one';
+    if (count === 0) return 'none';
+    return 'many';
+  } catch (error) {
+    const name = error instanceof Error ? error.name : '';
+    if (name === 'InvalidParameterException') return 'none';
+    console.error('[people-media] Rekognition detect faces failed', error);
+    return 'error';
+  }
+}
 
 /**
  * Compare two face photos. Source is the enrolled profile; target is the post or gallery image.

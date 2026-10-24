@@ -819,7 +819,7 @@ export async function upsertEventDaysWithSessions(
       select: {
         id: true,
         date: true,
-        event_sessions: { select: { id: true, title: true } },
+        event_sessions: { select: { id: true, title: true, media_panel_only: true } },
         _count: { select: { event_day_media: true } },
       },
     });
@@ -844,7 +844,7 @@ export async function upsertEventDaysWithSessions(
       keptDayIds.add(dayRow.id);
 
       const sessions = (day.sessions ?? []).filter((s) => s.title?.trim());
-      const existingSessions = existingDay?.event_sessions ?? [];
+      const existingSessions = (existingDay?.event_sessions ?? []).filter((session) => !session.media_panel_only);
       const existingById = new Map(existingSessions.map((s) => [s.id, s]));
       const sentIds = new Set(sessions.map((s) => s.id).filter((id): id is string => !!id));
       const matchedIds = new Set<string>();

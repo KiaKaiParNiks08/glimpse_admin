@@ -279,6 +279,8 @@ model event_sessions {
   event_organizer_id      String?                   @db.Uuid
   session_theme           String?                   @db.VarChar(200)
   venue_subvenue_id       String?                   @db.Uuid
+  /// Created on the event media page. Hidden from the event edit form.
+  media_panel_only        Boolean                   @default(false)
   event_day_media           event_day_media[]
   event_session_offerings   event_session_offerings[]
   event_session_uploaders   event_session_uploaders[]
@@ -296,15 +298,20 @@ model event_sessions {
 
 /// Guests allowed to upload gallery media for a session. Match by mobile (most events) or email (corporate).
 model event_session_uploaders {
-  id               String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  event_session_id String         @db.Uuid
-  mobile_number    String?        @db.VarChar(20)
-  country_code     String?        @db.VarChar(20)
-  email            String?        @db.VarChar(150)
-  created_at       DateTime?      @default(now()) @db.Timestamptz(6)
-  event_sessions   event_sessions @relation(fields: [event_session_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_session_uploader_session")
+  id               String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  event_id         String?         @db.Uuid
+  event_session_id String?         @db.Uuid
+  /// When true, this guest may upload to every session of event_id, including sessions added later.
+  all_sessions     Boolean         @default(false)
+  mobile_number    String?         @db.VarChar(20)
+  country_code     String?         @db.VarChar(20)
+  email            String?         @db.VarChar(150)
+  created_at       DateTime?       @default(now()) @db.Timestamptz(6)
+  events           events?         @relation(fields: [event_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_session_uploader_event")
+  event_sessions   event_sessions? @relation(fields: [event_session_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_session_uploader_session")
 
   @@index([event_session_id], map: "idx_event_session_uploaders_session_id")
+  @@index([event_id], map: "idx_event_session_uploaders_event_id")
 }
 
 /// Master list of app color themes (app + button) for events.
@@ -377,6 +384,7 @@ model events {
   event_highlights                     event_highlights[]
   event_offerings                      event_offerings[]
   event_organizers                     event_organizers[]
+  event_session_uploaders              event_session_uploaders[]
   event_team                           event_team[]
   app_themes                           app_themes?           @relation(fields: [app_theme_id], references: [id], onUpdate: NoAction, map: "fk_event_app_theme")
   event_categories                     event_categories      @relation(fields: [category_id], references: [id], onUpdate: NoAction, map: "fk_event_category")

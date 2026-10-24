@@ -37,6 +37,7 @@ export interface EventDetailsDayMedia {
   media_key?: string | null;
   media_url: string;
   media_type: string;
+  thumbnail_url?: string | null;
   display_order: number | null;
 }
 
@@ -71,6 +72,7 @@ export interface EventDetailsSession {
   venue_id: string | null;
   venue_subvenue_id: string | null;
   status: string | null;
+  media_panel_only?: boolean;
   event_session_bg_url: string | null;
   venues: EventDetailsSessionVenue | null;
   venue_subvenues: EventDetailsSessionSubvenue | null;
