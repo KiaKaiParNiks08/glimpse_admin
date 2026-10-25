@@ -12,7 +12,7 @@ async function runQueue(request: Request) {
     });
   }
   try {
-    const result = await processFaceQueue();
+    const result = await processFaceQueue({ timeBudgetMs: 45_000 });
     return ok(result, 'Processed');
   } catch (error) {
     console.error('/api/internal/media/process', error);

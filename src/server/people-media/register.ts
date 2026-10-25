@@ -12,6 +12,8 @@ export type RegisterMediaInput = {
   mediaType: 'image' | 'video';
   storageKey: string;
   mediaUrl: string;
+  thumbnailUrl?: string | null;
+  thumbnailStorageKey?: string | null;
   idempotencyKey?: string | null;
   eventDayMediaId?: string | null;
   postMediaId?: string | null;
@@ -27,6 +29,9 @@ export type RegisteredMediaAsset = {
 const assetSelect = {
   id: true,
   processing_status: true,
+  thumbnail_storage_key: true,
+  media_type: true,
+  match_complete: true,
 } as const;
 
 async function findExisting(input: RegisterMediaInput) {
@@ -65,6 +70,25 @@ export async function registerMediaAsset(input: RegisterMediaInput): Promise<Reg
   await ensurePeopleMediaSchema();
   const existing = await findExisting(input);
   if (existing) {
+    const thumbnailStorageKey = input.thumbnailStorageKey ?? null;
+    if (
+      existing.media_type === 'video' &&
+      thumbnailStorageKey &&
+      !existing.thumbnail_storage_key
+    ) {
+      await prisma.media_assets.update({
+        where: { id: existing.id },
+        data: {
+          thumbnail_url: input.thumbnailUrl ?? null,
+          thumbnail_storage_key: thumbnailStorageKey,
+          processing_status: 'pending',
+          match_complete: false,
+          guest_scan_cursor: null,
+          last_error: null,
+        },
+      });
+      return { id: existing.id, processing_status: 'pending', created: false };
+    }
     return { id: existing.id, processing_status: existing.processing_status, created: false };
   }
 
@@ -76,12 +100,15 @@ export async function registerMediaAsset(input: RegisterMediaInput): Promise<Reg
         media_type: input.mediaType,
         storage_key: input.storageKey,
         media_url: input.mediaUrl,
+        thumbnail_url: input.thumbnailUrl ?? null,
+        thumbnail_storage_key: input.thumbnailStorageKey ?? null,
         content_sha256: sha256Hex(input.storageKey),
         idempotency_key: input.idempotencyKey?.trim() || null,
         event_day_media_id: input.eventDayMediaId ?? null,
         post_media_id: input.postMediaId ?? null,
         uploaded_by: input.uploadedBy ?? null,
         processing_status: 'pending',
+        match_complete: false,
       },
       select: assetSelect,
     });
@@ -101,6 +128,8 @@ type GalleryRow = {
   media_key: string | null;
   media_url: string;
   media_type: string;
+  thumbnail_url?: string | null;
+  thumbnail_key?: string | null;
 };
 
 /** Register photographer gallery rows as pending assets. Failures are logged and do not fail the upload. */
@@ -130,6 +159,8 @@ export async function registerPhotographerGalleryItems(items: GalleryRow[]): Pro
         mediaType: item.media_type,
         storageKey,
         mediaUrl: item.media_url,
+        thumbnailUrl: item.thumbnail_url ?? null,
+        thumbnailStorageKey: storageKeyFromMediaUrl(item.thumbnail_url, item.thumbnail_key),
         idempotencyKey: `day-media:${item.id}`,
         eventDayMediaId: item.id,
         uploadedBy: ownerById.get(item.id) ?? null,
@@ -146,6 +177,8 @@ type FeedMediaRow = {
   media_type: string;
   media_url: string;
   storageKey: string | null;
+  thumbnailUrl?: string | null;
+  thumbnailStorageKey?: string | null;
 };
 
 /** Register media from POST /api/feed. Failures are logged and do not fail post creation. */
@@ -166,6 +199,8 @@ export async function registerFeedPostMedia(input: {
         mediaType: item.media_type,
         storageKey,
         mediaUrl: item.media_url,
+        thumbnailUrl: item.thumbnailUrl ?? null,
+        thumbnailStorageKey: item.thumbnailStorageKey ?? storageKeyFromMediaUrl(item.thumbnailUrl),
         idempotencyKey: `post-media:${item.id}`,
         postMediaId: item.id,
         uploadedBy: input.userId,
@@ -183,15 +218,21 @@ export async function backfillEventMedia(eventId: string): Promise<number> {
   let created = 0;
 
   const posts = await prisma.$queryRaw<
-    { id: string; media_type: string; media_url: string; user_id: string }[]
+    {
+      id: string;
+      media_type: string;
+      media_url: string;
+      thumbnail_url: string | null;
+      user_id: string;
+    }[]
   >`
-    SELECT pm.id, pm.media_type::text AS media_type, pm.media_url, p.user_id
+    SELECT pm.id, pm.media_type::text AS media_type, pm.media_url, pm.thumbnail_url, p.user_id
     FROM post_media pm
     JOIN posts p ON p.id = pm.post_id
     LEFT JOIN media_assets ma ON ma.post_media_id = pm.id
     WHERE p.event_id = ${eventId}::uuid
       AND p.status = 'active'
-      AND pm.media_type = 'image'
+      AND pm.media_type IN ('image', 'video')
       AND ma.id IS NULL
   `;
   for (const item of posts) {
@@ -200,12 +241,15 @@ export async function backfillEventMedia(eventId: string): Promise<number> {
       console.error('[people-media] backfill skipped post_media with no storage key', item.id);
       continue;
     }
+    const mediaType = item.media_type === 'video' ? 'video' : 'image';
     const result = await registerMediaAsset({
       eventId,
       source: 'user_post',
-      mediaType: 'image',
+      mediaType,
       storageKey,
       mediaUrl: item.media_url,
+      thumbnailUrl: item.thumbnail_url,
+      thumbnailStorageKey: storageKeyFromMediaUrl(item.thumbnail_url),
       idempotencyKey: `post-media:${item.id}`,
       postMediaId: item.id,
       uploadedBy: item.user_id,
@@ -219,15 +263,18 @@ export async function backfillEventMedia(eventId: string): Promise<number> {
       media_type: string;
       media_url: string;
       media_key: string | null;
+      thumbnail_url: string | null;
+      thumbnail_key: string | null;
       uploaded_by: string | null;
     }[]
   >`
-    SELECT edm.id, edm.media_type, edm.media_url, edm.media_key, edm.uploaded_by
+    SELECT edm.id, edm.media_type, edm.media_url, edm.media_key,
+           edm.thumbnail_url, edm.thumbnail_key, edm.uploaded_by
     FROM event_day_media edm
     JOIN event_days ed ON ed.id = edm.event_day_id
     LEFT JOIN media_assets ma ON ma.event_day_media_id = edm.id
     WHERE ed.event_id = ${eventId}::uuid
-      AND edm.media_type = 'image'
+      AND edm.media_type IN ('image', 'video')
       AND ma.id IS NULL
   `;
   for (const item of gallery) {
@@ -236,12 +283,15 @@ export async function backfillEventMedia(eventId: string): Promise<number> {
       console.error('[people-media] backfill skipped gallery item with no storage key', item.id);
       continue;
     }
+    const mediaType = item.media_type === 'video' ? 'video' : 'image';
     const result = await registerMediaAsset({
       eventId,
       source: 'photographer',
-      mediaType: 'image',
+      mediaType,
       storageKey,
       mediaUrl: item.media_url,
+      thumbnailUrl: item.thumbnail_url,
+      thumbnailStorageKey: storageKeyFromMediaUrl(item.thumbnail_url, item.thumbnail_key),
       idempotencyKey: `day-media:${item.id}`,
       eventDayMediaId: item.id,
       uploadedBy: item.uploaded_by,

@@ -7,6 +7,7 @@ import { FACE_CONSENT_VERSION } from './config';
 import { ensurePeopleMediaSchema } from './ensure-schema';
 import { clearFaceEmbedding, deleteMatchesForUser } from './match';
 import { backfillUserEventMedia } from './register';
+import { resetUserEventScans } from './scans';
 import { scheduleFaceProcessing } from './schedule';
 import { sha256Hex } from './storage';
 
@@ -113,11 +114,12 @@ export async function enrollStoredFaceReference(
   await prisma.$executeRaw`
     INSERT INTO user_face_references (
       id, user_id, consent, consent_version, consented_at, revoked_at,
-      storage_key, content_sha256, processing_status, attempt_count, last_error, embedding, updated_at
+      storage_key, content_sha256, processing_status, attempt_count, last_error, embedding,
+      reference_version, updated_at
     )
     VALUES (
       gen_random_uuid(), ${userId}::uuid, true, ${FACE_CONSENT_VERSION}, now(), NULL,
-      ${storageKey}, ${contentSha}, 'pending', 0, NULL, NULL, now()
+      ${storageKey}, ${contentSha}, 'pending', 0, NULL, NULL, 1, now()
     )
     ON CONFLICT (user_id) DO UPDATE SET
       consent = true,
@@ -131,6 +133,7 @@ export async function enrollStoredFaceReference(
       last_error = NULL,
       next_retry_at = NULL,
       embedding = NULL,
+      reference_version = user_face_references.reference_version + 1,
       updated_at = now()
   `;
   if (previous?.storage_key && previous.storage_key !== storageKey) {
@@ -141,7 +144,12 @@ export async function enrollStoredFaceReference(
   } catch (error) {
     console.error('[people-media] event media backfill failed', error);
   }
-  await scheduleFaceProcessing();
+  try {
+    await resetUserEventScans(userId, contentSha);
+  } catch (error) {
+    console.error('[people-media] user event scans were not queued', error);
+  }
+  scheduleFaceProcessing();
   const status = await getFaceReferenceStatus(userId);
   if (!status) throw new Error('Face reference was not saved');
   return status;

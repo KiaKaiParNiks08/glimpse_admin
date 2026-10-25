@@ -1,8 +1,7 @@
+import { Prisma } from '@prisma/client';
 import prisma from '@/server/prisma';
 import { isEventAdminAssigned } from '@/server/events';
 import { isEventGuest } from '@/server/event-guests';
-import { getFavoritedItemIds } from '@/server/favorites';
-import { postSelect, type PostWithMedia } from '@/server/posts';
 import type { AdminSessionUser } from '@/lib/admin-session';
 
 export async function adminCanManageEvent(admin: AdminSessionUser, eventId: string): Promise<boolean> {
@@ -12,204 +11,156 @@ export async function adminCanManageEvent(admin: AdminSessionUser, eventId: stri
 
 type MyMediaRow = {
   media_asset_id: string;
+  source_id: string;
+  post_id: string | null;
   source: string;
   media_type: string;
   media_url: string;
   thumbnail_url: string | null;
-  created_at: Date | null;
-  event_day_media_id: string | null;
   event_session_id: string | null;
   event_day_id: string | null;
-  post_id: string | null;
-  caption: string | null;
+  media_width: number | null;
+  media_height: number | null;
+  aspect_ratio: number | null;
   similarity: number;
+  evidence: unknown;
+  created_at: Date | null;
 };
 
-type FeedPost = PostWithMedia & { liked_by_viewer: boolean; is_favorite: boolean };
+export type RecognitionMeta = {
+  status: string;
+  processing_complete: boolean;
+  scanned_count: number;
+  matched_count: number;
+};
 
-async function loadFeedPosts(
-  postIds: string[],
-  viewerUserId: string,
-  eventId: string
-): Promise<Map<string, FeedPost>> {
-  if (postIds.length === 0) return new Map();
-  const rows = await prisma.posts.findMany({
-    where: { id: { in: postIds }, status: 'active' },
-    select: {
-      ...postSelect,
-      post_likes: { where: { user_id: viewerUserId }, select: { id: true } },
-    },
-  });
-  const favorited = await getFavoritedItemIds(
-    viewerUserId,
-    'post',
-    rows.map((row) => row.id),
-    eventId
-  );
-  const posts = new Map<string, FeedPost>();
-  for (const row of rows) {
-    const { post_likes, ...post } = row;
-    const feedPost = post as PostWithMedia;
-    posts.set(row.id, {
-      ...feedPost,
-      post_media: [...feedPost.post_media].sort((a, b) => (a.media_order ?? 0) - (b.media_order ?? 0)),
-      liked_by_viewer: post_likes.length > 0,
-      is_favorite: favorited.has(row.id),
-    });
-  }
-  return posts;
-}
-
-function mergeMyMedia(rows: MyMediaRow[]): MyMediaRow[] {
-  const byUrl = new Map<string, MyMediaRow>();
-  for (const row of rows) {
-    const key = row.media_url || row.media_asset_id;
-    const existing = byUrl.get(key);
-    if (!existing || (row.similarity ?? 0) > (existing.similarity ?? 0)) {
-      byUrl.set(key, row);
-    }
-  }
-  return [...byUrl.values()].sort((a, b) => {
-    const aTime = a.created_at ? new Date(a.created_at).getTime() : 0;
-    const bTime = b.created_at ? new Date(b.created_at).getTime() : 0;
-    return bTime - aTime;
-  });
-}
-
-export async function listMyMedia(input: { userId: string; eventId: string; page: number; limit: number }) {
+export async function listMyMedia(input: {
+  userId: string;
+  eventId: string;
+  eventSessionId?: string;
+  page: number;
+  limit: number;
+}): Promise<{ items: ReturnType<typeof mapMyMediaItem>[]; total: number; recognition: RecognitionMeta }> {
   const offset = (input.page - 1) * input.limit;
-  const rows: MyMediaRow[] = [];
+  const sessionFilter = input.eventSessionId
+    ? Prisma.sql`AND (
+        (ma.source = 'photographer' AND edm.event_session_id = ${input.eventSessionId}::uuid)
+        OR ma.source = 'user_post'
+      )`
+    : Prisma.empty;
 
-  try {
-    const matched = await prisma.$queryRaw<MyMediaRow[]>`
+  const [countRows, rows, recognition] = await Promise.all([
+    prisma.$queryRaw<{ total: number }[]>`
+      SELECT COUNT(*)::int AS total
+      FROM (
+        SELECT mm.media_asset_id
+        FROM media_matches mm
+        JOIN media_assets ma ON ma.id = mm.media_asset_id
+        LEFT JOIN event_day_media edm ON edm.id = ma.event_day_media_id
+        LEFT JOIN post_media pm ON pm.id = ma.post_media_id
+        LEFT JOIN posts p ON p.id = pm.post_id
+        WHERE mm.user_id = ${input.userId}::uuid
+          AND ma.event_id = ${input.eventId}::uuid
+          AND mm.match_source = 'rekognition'
+          AND (ma.source <> 'user_post' OR p.status = 'active')
+          ${sessionFilter}
+        GROUP BY mm.media_asset_id
+      ) matched
+    `,
+    prisma.$queryRaw<MyMediaRow[]>`
       SELECT ma.id AS media_asset_id,
-             CASE WHEN pm.post_id IS NOT NULL THEN 'user_post' ELSE 'session_media' END AS source,
+             COALESCE(edm.id, pm.id)::text AS source_id,
+             pm.post_id,
+             ma.source,
              ma.media_type::text AS media_type,
              ma.media_url,
-             COALESCE(edm.thumbnail_url, pm.thumbnail_url) AS thumbnail_url,
-             ma.created_at,
-             ma.event_day_media_id,
+             COALESCE(edm.thumbnail_url, pm.thumbnail_url, ma.thumbnail_url) AS thumbnail_url,
              edm.event_session_id,
              edm.event_day_id,
-             pm.post_id,
-             p.caption,
-             MAX(mm.similarity) AS similarity
+             pm.media_width,
+             pm.media_height,
+             pm.aspect_ratio,
+             MAX(mm.similarity) AS similarity,
+             (ARRAY_AGG(mm.evidence ORDER BY mm.similarity DESC))[1] AS evidence,
+             MAX(ma.created_at) AS created_at
       FROM media_matches mm
       JOIN media_assets ma ON ma.id = mm.media_asset_id
       LEFT JOIN event_day_media edm ON edm.id = ma.event_day_media_id
       LEFT JOIN post_media pm ON pm.id = ma.post_media_id
-      LEFT JOIN posts p ON p.id = pm.post_id AND p.status = 'active'
+      LEFT JOIN posts p ON p.id = pm.post_id
       WHERE mm.user_id = ${input.userId}::uuid
         AND ma.event_id = ${input.eventId}::uuid
-        AND (
-          (pm.post_id IS NOT NULL AND p.id IS NOT NULL)
-          OR (pm.post_id IS NULL AND edm.id IS NOT NULL)
-        )
-      GROUP BY ma.id, ma.media_type, ma.media_url, edm.thumbnail_url, pm.thumbnail_url, ma.created_at,
-               ma.event_day_media_id, edm.event_session_id, edm.event_day_id, pm.post_id, p.caption
-    `;
-    rows.push(...matched);
-  } catch (error) {
-    console.error('[people-media] listMyMedia match query failed', error);
-  }
+        AND mm.match_source = 'rekognition'
+        AND (ma.source <> 'user_post' OR p.status = 'active')
+        ${sessionFilter}
+      GROUP BY ma.id, edm.id, pm.id, pm.post_id, ma.source, ma.media_type, ma.media_url,
+               edm.thumbnail_url, pm.thumbnail_url, ma.thumbnail_url,
+               edm.event_session_id, edm.event_day_id, pm.media_width, pm.media_height, pm.aspect_ratio
+      ORDER BY MAX(ma.created_at) DESC NULLS LAST, ma.id DESC
+      LIMIT ${input.limit} OFFSET ${offset}
+    `,
+    getRecognitionMeta(input.userId, input.eventId),
+  ]);
 
+  return {
+    items: rows.map(mapMyMediaItem),
+    total: countRows[0]?.total ?? 0,
+    recognition,
+  };
+}
+
+function mapMyMediaItem(row: MyMediaRow) {
+  return {
+    id: row.source_id || row.media_asset_id,
+    media_asset_id: row.media_asset_id,
+    media_url: row.media_url,
+    thumbnail_url: row.thumbnail_url,
+    media_type: row.media_type,
+    source: row.source === 'user_post' ? ('user_post' as const) : ('session_media' as const),
+    source_id: row.source_id,
+    post_id: row.post_id,
+    event_session_id: row.event_session_id,
+    event_day_id: row.event_day_id,
+    media_width: row.media_width,
+    media_height: row.media_height,
+    aspect_ratio: row.aspect_ratio,
+    similarity: row.similarity,
+    evidence: row.evidence,
+  };
+}
+
+async function getRecognitionMeta(userId: string, eventId: string): Promise<RecognitionMeta> {
   try {
-    const ownPosts = await prisma.$queryRaw<MyMediaRow[]>`
-      SELECT pm.id AS media_asset_id,
-             'user_post' AS source,
-             pm.media_type::text AS media_type,
-             pm.media_url,
-             pm.thumbnail_url,
-             pm.created_at,
-             NULL::uuid AS event_day_media_id,
-             NULL::uuid AS event_session_id,
-             NULL::uuid AS event_day_id,
-             p.id AS post_id,
-             p.caption,
-             1::float AS similarity
-      FROM post_media pm
-      JOIN posts p ON p.id = pm.post_id
-      WHERE p.event_id = ${input.eventId}::uuid
-        AND p.user_id = ${input.userId}::uuid
-        AND p.status = 'active'
-        AND pm.media_type IN ('image', 'video')
-    `;
-    rows.push(...ownPosts);
+  const [ref, scan, pending] = await Promise.all([
+    prisma.user_face_references.findUnique({
+      where: { user_id: userId },
+      select: { processing_status: true },
+    }),
+    prisma.user_event_face_scans.findUnique({
+      where: { user_id_event_id: { user_id: userId, event_id: eventId } },
+      select: { status: true, scanned_count: true, matched_count: true },
+    }),
+    prisma.media_assets.count({
+      where: {
+        event_id: eventId,
+        match_complete: false,
+        processing_status: { in: ['pending', 'processing', 'failed'] },
+      },
+    }),
+  ]);
+  const status = scan?.status ?? ref?.processing_status ?? 'pending';
+  const processing_complete =
+    ref?.processing_status === 'ready' && (scan?.status === 'complete' || !scan) && pending === 0;
+  return {
+    status: processing_complete ? 'ready' : status,
+    processing_complete,
+    scanned_count: scan?.scanned_count ?? 0,
+    matched_count: scan?.matched_count ?? 0,
+  };
   } catch (error) {
-    console.error('[people-media] listMyMedia own-post query failed', error);
+    console.error('[people-media] recognition meta skipped', error);
+    return { status: 'pending', processing_complete: false, scanned_count: 0, matched_count: 0 };
   }
-
-  const items = mergeMyMedia(rows);
-  const total = items.length;
-  const pageItems = items.slice(offset, offset + input.limit);
-  const posts = await loadFeedPosts(
-    [...new Set(pageItems.map((row) => row.post_id).filter((id): id is string => !!id))],
-    input.userId,
-    input.eventId
-  );
-
-  const data: Array<
-    | {
-        media_asset_id: string;
-        source: 'user_post';
-        media_type: string;
-        media_url: string;
-        thumbnail_url: string | null;
-        created_at: Date | null;
-        post_id: string;
-        post: FeedPost;
-        caption: string | null;
-        similarity: number;
-      }
-    | {
-        media_asset_id: string;
-        source: 'session_media';
-        id: string;
-        event_day_media_id: string;
-        event_session_id: string | null;
-        event_day_id: string | null;
-        media_type: string;
-        media_url: string;
-        thumbnail_url: string | null;
-        created_at: Date | null;
-        similarity: number;
-      }
-  > = [];
-  for (const row of pageItems) {
-    if (row.post_id) {
-      const post = posts.get(row.post_id);
-      if (!post) continue;
-      data.push({
-        media_asset_id: row.media_asset_id,
-        source: 'user_post',
-        media_type: row.media_type,
-        media_url: row.media_url,
-        thumbnail_url: row.thumbnail_url,
-        created_at: row.created_at,
-        post_id: row.post_id,
-        post,
-        caption: post.caption,
-        similarity: row.similarity,
-      });
-      continue;
-    }
-    if (!row.event_day_media_id) continue;
-    data.push({
-      media_asset_id: row.media_asset_id,
-      source: 'session_media',
-      id: row.event_day_media_id,
-      event_day_media_id: row.event_day_media_id,
-      event_session_id: row.event_session_id,
-      event_day_id: row.event_day_id,
-      media_type: row.media_type,
-      media_url: row.media_url,
-      thumbnail_url: row.thumbnail_url,
-      created_at: row.created_at,
-      similarity: row.similarity,
-    });
-  }
-
-  return { items: data, total };
 }
 
 const statusSelect = {

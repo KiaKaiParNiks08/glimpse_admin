@@ -26,6 +26,11 @@ export const postSelect = {
       media_type: true,
       media_url: true,
       thumbnail_url: true,
+      media_width: true,
+      media_height: true,
+      aspect_ratio: true,
+      thumbnail_width: true,
+      thumbnail_height: true,
       media_order: true,
     },
   },
@@ -53,6 +58,11 @@ export type PostWithMedia = {
     media_type: string;
     media_url: string;
     thumbnail_url: string | null;
+    media_width: number | null;
+    media_height: number | null;
+    aspect_ratio: number | null;
+    thumbnail_width: number | null;
+    thumbnail_height: number | null;
     media_order: number | null;
   }>;
 };
@@ -65,6 +75,11 @@ export interface CreatePostMediaItem {
   media_type: 'image' | 'video';
   media_url: string;
   thumbnail_url?: string | null;
+  media_width?: number | null;
+  media_height?: number | null;
+  aspect_ratio?: number | null;
+  thumbnail_width?: number | null;
+  thumbnail_height?: number | null;
   media_order?: number;
 }
 
@@ -89,6 +104,11 @@ export async function createPost(
                 media_type: m.media_type,
                 media_url: m.media_url,
                 thumbnail_url: m.thumbnail_url ?? null,
+                media_width: m.media_width ?? null,
+                media_height: m.media_height ?? null,
+                aspect_ratio: m.aspect_ratio ?? null,
+                thumbnail_width: m.thumbnail_width ?? null,
+                thumbnail_height: m.thumbnail_height ?? null,
                 media_order: m.media_order ?? i + 1,
               })),
             }

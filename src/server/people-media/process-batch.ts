@@ -1,30 +1,34 @@
 import { Prisma } from '@prisma/client';
 import prisma from '@/server/prisma';
-import { assertEmbeddingConfig, faceMaxAttempts, faceWorkerBatchSize } from './config';
-import { ensurePeopleMediaSchema } from './ensure-schema';
-import { getFaceProvider } from './face-provider';
-import { clearFaceEmbedding, deleteMatchesForUser, matchFaceToEventGuests, matchUserToGuestMedia, toVectorLiteral } from './match';
 import {
+  FACE_EMBEDDING_DIM,
+  assertEmbeddingConfig,
+  faceMaxAttempts,
+  faceWorkerBatchSize,
+  faceWorkerTimeBudgetMs,
+} from './config';
+import { ensurePeopleMediaSchema } from './ensure-schema';
+import { clearFaceEmbedding, deleteMatchesForUser, toVectorLiteral } from './match';
+import {
+  detectRekognitionFaces,
   ensureMediaFace,
-  matchMediaWithRekognition,
-  matchUserWithRekognition,
-  recordUploaderMatch,
   rekognitionClient,
 } from './rekognition';
+import {
+  claimUserEventScans,
+  failUserEventScan,
+  matchGuestsForAssetPage,
+  processUserEventScan,
+  resetUserEventScans,
+} from './scans';
 import { readStoredMedia } from './storage';
 import type { DetectedFace } from './types';
 
 class PermanentFaceError extends Error {}
 
-const MAX_FACES = 20;
-
 function errorText(error: unknown): string {
   const message = error instanceof Error ? error.message : 'Face processing failed';
   return message.slice(0, 500);
-}
-
-function topFaces(faces: DetectedFace[]): DetectedFace[] {
-  return [...faces].sort((a, b) => b.confidence - a.confidence).slice(0, MAX_FACES);
 }
 
 async function insertMediaFace(
@@ -45,6 +49,9 @@ async function insertMediaFace(
         ${box}::jsonb,
         ${vectorSql}
       )
+      ON CONFLICT (media_asset_id, face_index) DO UPDATE SET
+        confidence = EXCLUDED.confidence,
+        box = EXCLUDED.box
       RETURNING id
     `;
     return inserted[0]?.id ?? null;
@@ -60,6 +67,7 @@ async function insertMediaFace(
         ${box}::jsonb,
         ${JSON.stringify(face.embedding)}::jsonb
       )
+      ON CONFLICT (media_asset_id, face_index) DO UPDATE SET confidence = EXCLUDED.confidence
       RETURNING id
     `;
     return inserted[0]?.id ?? null;
@@ -85,17 +93,22 @@ async function claimMediaIds(batch: number, maxAttempts: number): Promise<string
   const rows = await prisma.$queryRaw<{ id: string }[]>`
     UPDATE media_assets
     SET processing_status = 'processing',
-        attempt_count = attempt_count + 1,
-        last_error = NULL,
         updated_at = now()
     WHERE id IN (
       SELECT id FROM media_assets
-      WHERE processing_status = 'pending'
-         OR (
-           processing_status = 'failed'
-           AND attempt_count < ${maxAttempts}
-           AND (next_retry_at IS NULL OR next_retry_at <= now())
-         )
+      WHERE match_complete = false
+        AND (
+          processing_status = 'pending'
+          OR (
+            processing_status = 'failed'
+            AND attempt_count < ${maxAttempts}
+            AND (next_retry_at IS NULL OR next_retry_at <= now())
+          )
+          OR (
+            processing_status = 'processing'
+            AND updated_at < now() - interval '15 minutes'
+          )
+        )
       ORDER BY created_at ASC
       LIMIT ${batch}
       FOR UPDATE SKIP LOCKED
@@ -109,7 +122,7 @@ async function claimReferenceIds(batch: number, maxAttempts: number): Promise<st
   const rows = await prisma.$queryRaw<{ id: string }[]>`
     UPDATE user_face_references
     SET processing_status = 'processing',
-        attempt_count = attempt_count + 1,
+        attempt_count = CASE WHEN processing_status = 'failed' THEN attempt_count + 1 ELSE attempt_count END,
         last_error = NULL,
         updated_at = now()
     WHERE id IN (
@@ -138,8 +151,9 @@ async function failMedia(id: string, message: string): Promise<void> {
   await prisma.$executeRaw`
     UPDATE media_assets
     SET processing_status = 'failed',
+        attempt_count = attempt_count + 1,
         last_error = ${message},
-        next_retry_at = now() + (attempt_count * interval '30 seconds'),
+        next_retry_at = now() + (GREATEST(attempt_count, 1) * interval '30 seconds'),
         updated_at = now()
     WHERE id = ${id}::uuid
   `;
@@ -162,13 +176,47 @@ async function failReference(id: string, message: string, stopRetrying = false):
     UPDATE user_face_references
     SET processing_status = 'failed',
         last_error = ${message},
-        next_retry_at = now() + (attempt_count * interval '30 seconds'),
+        next_retry_at = now() + (GREATEST(attempt_count, 1) * interval '30 seconds'),
         updated_at = now()
     WHERE id = ${id}::uuid
   `;
 }
 
-async function processMedia(id: string): Promise<void> {
+async function loadAssetCompareBytes(asset: {
+  media_type: string;
+  storage_key: string;
+  thumbnail_storage_key: string | null;
+}): Promise<{ bytes: Buffer; mediaType: 'image' | 'video' } | 'no_frame'> {
+  if (asset.media_type === 'video') {
+    if (!asset.thumbnail_storage_key) return 'no_frame';
+    const stored = await readStoredMedia(asset.thumbnail_storage_key);
+    return { bytes: stored.bytes, mediaType: 'video' };
+  }
+  const stored = await readStoredMedia(asset.storage_key);
+  return { bytes: stored.bytes, mediaType: 'image' };
+}
+
+async function persistDetectedFaces(
+  assetId: string,
+  faces: { confidence: number; box: { width: number; height: number; left: number; top: number } }[]
+): Promise<string | null> {
+  await prisma.media_faces.deleteMany({ where: { media_asset_id: assetId } });
+  let primary: string | null = null;
+  for (let index = 0; index < faces.length; index += 1) {
+    const face = faces[index];
+    const detected: DetectedFace = {
+      confidence: face.confidence,
+      box: { x: face.box.left, y: face.box.top, width: face.box.width, height: face.box.height },
+      embedding: new Array(FACE_EMBEDDING_DIM).fill(0),
+    };
+    detected.embedding[0] = 1;
+    const faceId = await insertMediaFace(assetId, index, detected);
+    if (faceId && index === 0) primary = faceId;
+  }
+  return primary ?? (await ensureMediaFace(assetId));
+}
+
+async function processMedia(id: string, deadline: number): Promise<void> {
   const asset = await prisma.media_assets.findUnique({
     where: { id },
     select: {
@@ -176,75 +224,120 @@ async function processMedia(id: string): Promise<void> {
       event_id: true,
       storage_key: true,
       media_type: true,
-      uploaded_by: true,
+      guest_scan_cursor: true,
+      match_complete: true,
+      face_count: true,
+      thumbnail_storage_key: true,
     },
   });
   if (!asset) return;
 
-  const stored = await readStoredMedia(asset.storage_key);
-  const faces = topFaces(
-    await getFaceProvider().detectFaces({
-      bytes: stored.bytes,
-      contentType: stored.contentType,
-      mediaType: asset.media_type,
-    })
-  );
-
-  await prisma.media_faces.deleteMany({ where: { media_asset_id: asset.id } });
-
-  let primaryFaceId: string | null = null;
-  for (let index = 0; index < faces.length; index += 1) {
-    const face = faces[index];
-    const faceId = await insertMediaFace(asset.id, index, face);
-    if (!faceId) continue;
-    if (index === 0) primaryFaceId = faceId;
-    try {
-      await matchFaceToEventGuests({
-        eventId: asset.event_id,
-        mediaAssetId: asset.id,
-        mediaFaceId: faceId,
-        embedding: face.embedding,
-      });
-    } catch (error) {
-      console.error('[people-media] vector match skipped', error);
-    }
+  if (!rekognitionClient()) {
+    throw new Error('Rekognition is not configured');
   }
 
-  if (asset.media_type === 'image') {
-    primaryFaceId = primaryFaceId ?? (await ensureMediaFace(asset.id));
-    if (primaryFaceId) {
-      if (asset.uploaded_by) {
-        await recordUploaderMatch(asset.id, primaryFaceId, asset.uploaded_by);
-      }
-      const matched = await matchMediaWithRekognition({
-        eventId: asset.event_id,
-        mediaAssetId: asset.id,
-        mediaFaceId: primaryFaceId,
-        mediaBytes: stored.bytes,
+  const loaded = await loadAssetCompareBytes(asset);
+  if (loaded === 'no_frame') {
+    await prisma.media_assets.update({
+      where: { id: asset.id },
+      data: {
+        processing_status: 'ready',
+        match_complete: true,
+        face_count: 0,
+        last_error: null,
+        processed_at: new Date(),
+      },
+    });
+    return;
+  }
+
+  let primaryFaceId: string | null = null;
+  let faceCount = asset.face_count;
+  if (!asset.guest_scan_cursor) {
+    const detected = await detectRekognitionFaces(loaded.bytes);
+    if (detected === 'too_large') throw new PermanentFaceError('Image is larger than Rekognition allows');
+    if (detected === 'unavailable') throw new Error('Rekognition is not configured');
+    if (detected === 'error') throw new Error('Rekognition DetectFaces failed');
+    faceCount = detected.length;
+    if (detected.length === 0) {
+      await prisma.media_faces.deleteMany({ where: { media_asset_id: asset.id } });
+      await prisma.media_assets.update({
+        where: { id: asset.id },
+        data: {
+          processing_status: 'ready',
+          match_complete: true,
+          face_count: 0,
+          last_error: null,
+          processed_at: new Date(),
+        },
       });
-      if (!rekognitionClient()) {
-        console.error('[people-media] Rekognition is not configured; gallery matches need CompareFaces');
-      } else if (matched === 0) {
-        console.error('[people-media] Rekognition found no match for media', asset.id);
-      }
+      return;
     }
+    primaryFaceId = await persistDetectedFaces(asset.id, detected);
+  } else {
+    primaryFaceId = await ensureMediaFace(asset.id);
+  }
+
+  if (!primaryFaceId) throw new Error('Unable to store media face');
+
+  const page = await matchGuestsForAssetPage({
+    eventId: asset.event_id,
+    mediaAssetId: asset.id,
+    mediaFaceId: primaryFaceId,
+    targetBytes: loaded.bytes,
+    mediaType: loaded.mediaType,
+    cursor: asset.guest_scan_cursor,
+    deadline,
+  });
+
+  if (page.throttled) {
+    await prisma.media_assets.update({
+      where: { id: asset.id },
+      data: {
+        processing_status: 'pending',
+        guest_scan_cursor: page.lastUserId,
+        match_complete: false,
+        face_count: faceCount,
+        last_error: 'throttled',
+        next_retry_at: new Date(Date.now() + 20_000),
+      },
+    });
+    return;
+  }
+
+  if (page.done) {
+    await prisma.media_assets.update({
+      where: { id: asset.id },
+      data: {
+        processing_status: 'ready',
+        match_complete: true,
+        guest_scan_cursor: page.lastUserId,
+        face_count: faceCount,
+        last_error: null,
+        next_retry_at: null,
+        processed_at: new Date(),
+      },
+    });
+    return;
   }
 
   await prisma.media_assets.update({
     where: { id: asset.id },
     data: {
-      processing_status: 'ready',
-      face_count: faces.length,
+      processing_status: 'pending',
+      match_complete: false,
+      guest_scan_cursor: page.lastUserId,
+      face_count: faceCount,
       last_error: null,
-      next_retry_at: null,
-      processed_at: new Date(),
     },
   });
 }
 
 async function processReference(id: string): Promise<void> {
-  const rows = await prisma.$queryRaw<{ user_id: string; storage_key: string }[]>`
-    SELECT user_id, storage_key
+  const rows = await prisma.$queryRaw<
+    { user_id: string; storage_key: string; content_sha256: string | null }[]
+  >`
+    SELECT user_id, storage_key, content_sha256
     FROM user_face_references
     WHERE id = ${id}::uuid
       AND consent = true
@@ -255,24 +348,23 @@ async function processReference(id: string): Promise<void> {
   if (!row?.storage_key) return;
 
   const stored = await readStoredMedia(row.storage_key);
-  const faces = topFaces(
-    await getFaceProvider().detectFaces({
-      bytes: stored.bytes,
-      contentType: stored.contentType,
-      mediaType: 'image',
-    })
-  );
-  const best = faces[0];
-  if (!best) {
+  const detected = await detectRekognitionFaces(stored.bytes);
+  if (detected === 'too_large') throw new PermanentFaceError('Profile photo is larger than Rekognition allows');
+  if (detected === 'unavailable') throw new Error('Rekognition is not configured');
+  if (detected === 'error') throw new Error('Rekognition DetectFaces failed');
+  if (detected.length !== 1) {
     await clearFaceEmbedding(row.user_id);
     await deleteMatchesForUser(row.user_id);
-    throw new PermanentFaceError('No face detected in the reference photo');
+    throw new PermanentFaceError(
+      detected.length === 0 ? 'No face detected in the reference photo' : 'Profile photo must contain exactly one face'
+    );
   }
 
-  let updated = 0;
+  const embedding = new Array(FACE_EMBEDDING_DIM).fill(0);
+  embedding[0] = 1;
   try {
-    const vectorSql = Prisma.raw(`'${toVectorLiteral(best.embedding)}'::vector`);
-    updated = await prisma.$executeRaw`
+    const vectorSql = Prisma.raw(`'${toVectorLiteral(embedding)}'::vector`);
+    await prisma.$executeRaw`
       UPDATE user_face_references
       SET embedding = ${vectorSql},
           processing_status = 'ready',
@@ -283,9 +375,8 @@ async function processReference(id: string): Promise<void> {
         AND consent = true
         AND revoked_at IS NULL
     `;
-  } catch (error) {
-    console.error('[people-media] embedding store failed, marking ready without vector', error);
-    updated = await prisma.$executeRaw`
+  } catch {
+    await prisma.$executeRaw`
       UPDATE user_face_references
       SET processing_status = 'ready',
           last_error = NULL,
@@ -296,23 +387,9 @@ async function processReference(id: string): Promise<void> {
         AND revoked_at IS NULL
     `;
   }
-  if (updated > 0) {
-    await deleteMatchesForUser(row.user_id);
-    try {
-      await matchUserToGuestMedia(row.user_id, best.embedding);
-    } catch (error) {
-      console.error('[people-media] vector user match skipped', error);
-    }
-    const matched = await matchUserWithRekognition({
-      userId: row.user_id,
-      referenceBytes: stored.bytes,
-    });
-    if (!rekognitionClient()) {
-      console.error('[people-media] Rekognition is not configured; my-media will stay empty');
-    } else if (matched === 0) {
-      console.error('[people-media] Rekognition found no existing media for user', row.user_id);
-    }
-  }
+
+  await deleteMatchesForUser(row.user_id);
+  await resetUserEventScans(row.user_id, row.content_sha256 ?? '');
 }
 
 export type ProcessBatchResult = {
@@ -320,13 +397,16 @@ export type ProcessBatchResult = {
   media_failed: number;
   references_processed: number;
   references_failed: number;
+  scans_processed: number;
+  scans_failed: number;
 };
 
-export async function processFaceQueue(): Promise<ProcessBatchResult> {
+export async function processFaceQueue(options?: { timeBudgetMs?: number }): Promise<ProcessBatchResult> {
   await ensurePeopleMediaSchema();
   assertEmbeddingConfig();
   const batch = faceWorkerBatchSize();
   const maxAttempts = faceMaxAttempts();
+  const deadline = Date.now() + (options?.timeBudgetMs ?? faceWorkerTimeBudgetMs());
   await reclaimStuckJobs();
 
   const result: ProcessBatchResult = {
@@ -334,29 +414,57 @@ export async function processFaceQueue(): Promise<ProcessBatchResult> {
     media_failed: 0,
     references_processed: 0,
     references_failed: 0,
+    scans_processed: 0,
+    scans_failed: 0,
   };
-
-  const mediaIds = await claimMediaIds(batch, maxAttempts);
-  for (const id of mediaIds) {
-    try {
-      await processMedia(id);
-      result.media_processed += 1;
-    } catch (error) {
-      result.media_failed += 1;
-      await failMedia(id, errorText(error));
-    }
-  }
 
   const referenceIds = await claimReferenceIds(batch, maxAttempts);
   for (const id of referenceIds) {
+    if (Date.now() >= deadline) break;
     try {
       await processReference(id);
+      result.references_processed += 1;
     } catch (error) {
       result.references_failed += 1;
       await failReference(id, errorText(error), error instanceof PermanentFaceError);
     }
   }
 
-  result.references_processed = referenceIds.length - result.references_failed;
+  const mediaIds = await claimMediaIds(batch, maxAttempts);
+  for (const id of mediaIds) {
+    if (Date.now() >= deadline) break;
+    try {
+      await processMedia(id, deadline);
+      result.media_processed += 1;
+    } catch (error) {
+      result.media_failed += 1;
+      if (error instanceof PermanentFaceError) {
+        await prisma.media_assets.update({
+          where: { id },
+          data: {
+            processing_status: 'failed',
+            attempt_count: faceMaxAttempts(),
+            last_error: errorText(error),
+            match_complete: true,
+          },
+        });
+      } else {
+        await failMedia(id, errorText(error));
+      }
+    }
+  }
+
+  const scans = await claimUserEventScans(batch, maxAttempts);
+  for (const scan of scans) {
+    if (Date.now() >= deadline) break;
+    try {
+      await processUserEventScan(scan.user_id, scan.event_id, deadline);
+      result.scans_processed += 1;
+    } catch (error) {
+      result.scans_failed += 1;
+      await failUserEventScan(scan.user_id, scan.event_id, errorText(error));
+    }
+  }
+
   return result;
 }

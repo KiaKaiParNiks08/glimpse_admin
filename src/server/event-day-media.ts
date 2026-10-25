@@ -60,6 +60,7 @@ export async function createEventDayMedia(items: EventDayMediaCreateInput[]) {
           media_url: true,
           media_type: true,
           thumbnail_url: true,
+          thumbnail_key: true,
           display_order: true,
           created_at: true,
         },

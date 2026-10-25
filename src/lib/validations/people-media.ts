@@ -24,4 +24,6 @@ export const peopleMediaRetrySchema = z
 
 export const myMediaQuerySchema = paginationSchema.extend({
   user_id: uuidSchema,
+  /** When set, only face matches from this session. Omit for every session in the event. */
+  event_session_id: uuidSchema.optional(),
 });

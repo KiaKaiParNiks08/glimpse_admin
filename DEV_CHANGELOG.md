@@ -21,6 +21,51 @@ Local DB: `glimp_dev_db` on `127.0.0.1:5432`, user `glimp_db_admin` (password in
 
 ---
 
+## 2026-10-24 — Event-wide face recognition (no uploader false matches)
+
+Root causes: `recordUploaderMatch` wrote similarity 1 for whoever uploaded the file; CompareFaces used the whole image at threshold 80, so graphics could match; matching capped at 25 guests / 50 photos; GET my-media listed only session files; profile enroll tried to finish matching inside the request.
+
+**New files**
+- `prisma/migrations/20261024190000_event_wide_recognition/migration.sql` — match_source/evidence, user_event_face_scans, delete uploader-attributed rows, requeue assets
+- `src/server/people-media/recognition-policy.ts` — genuine-match rules
+- `src/server/people-media/recognition-policy.test.ts`
+- `src/server/people-media/scans.ts` — paginated guest and user-event CompareFaces
+
+**Modified files**
+- `prisma/schema.prisma` — scan table, match audit columns, thumbnail keys on media_assets
+- `src/server/people-media/rekognition.ts` — DetectFaces gate, retries, no uploader match, default gallery threshold 90
+- `src/server/people-media/process-batch.ts` — async pages, videos via poster frame only
+- `src/server/people-media/schedule.ts` — `after()` kick, does not block the API
+- `src/server/people-media/register.ts` / `queries.ts` / `face-reference.ts` / `match.ts` / `ensure-schema.ts` / `config.ts`
+- `src/app/api/events/[event_id]/my-media/route.ts` — session + feed, recognition meta
+- `src/app/api/users/[user_id]/profile-picture/route.ts` — enroll/queue on every accepted photo
+- `src/app/api/internal/media/process/route.ts` — 45s worker budget
+- `src/app/api/feed/route.ts` / `src/server/event-day-media.ts` — pass video posters into assets
+- `src/lib/openapi.ts` / `.env.example` / `package.json`
+
+**Undo the DB part**
+```sql
+DROP TABLE IF EXISTS user_event_face_scans;
+DROP INDEX IF EXISTS media_matches_asset_user_key;
+DROP INDEX IF EXISTS idx_media_matches_source;
+ALTER TABLE media_matches
+  DROP COLUMN IF EXISTS match_source,
+  DROP COLUMN IF EXISTS algorithm_version,
+  DROP COLUMN IF EXISTS evidence,
+  DROP COLUMN IF EXISTS reference_sha256;
+ALTER TABLE media_assets
+  DROP COLUMN IF EXISTS guest_scan_cursor,
+  DROP COLUMN IF EXISTS match_complete,
+  DROP COLUMN IF EXISTS thumbnail_url,
+  DROP COLUMN IF EXISTS thumbnail_storage_key;
+ALTER TABLE user_face_references DROP COLUMN IF EXISTS reference_version;
+DELETE FROM _prisma_migrations WHERE migration_name = '20261024190000_event_wide_recognition';
+```
+
+Apply with `npx prisma db execute --file prisma/migrations/20261024190000_event_wide_recognition/migration.sql` if `migrate deploy` is still blocked by `20261004120000_people_in_media`. Then `npx prisma generate` and restart `npm run dev`. Drain the queue with `npm run faces:process` (needs `FACE_WORKER_SECRET` and Rekognition IAM). Gallery threshold: `FACE_REKOGNITION_MIN_SIMILARITY` (default 90). Profile lock stays `PROFILE_FACE_MIN_SIMILARITY` (95).
+
+---
+
 ## 2026-09-22 / 2026-09-23 — Local setup
 
 | File | Change |
@@ -815,6 +860,50 @@ Vercel still returned `data: []` after profile enroll because `media_matches` st
 
 ---
 
+## 2026-10-24 — My media is recognized session files only
+
+`GET /api/events/{event_id}/my-media` no longer returns feed posts. It returns session uploads where this user's face matched. Optional `event_session_id` limits that list to one session. Each item is `source: session_media` with `id`, `media_url`, `thumbnail_url`, `media_type`, `event_session_id`, and `event_day_id`. `meta` includes `page`, `total_pages`, and `has_more`.
+
+**Modified files**
+- `src/server/people-media/queries.ts` — session face matches only
+- `src/app/api/events/[event_id]/my-media/route.ts` — optional session filter and paging meta
+- `src/lib/validations/people-media.ts` — `event_session_id`
+- `src/lib/openapi.ts`
+
+---
+
+## 2026-10-24 — Feed media width, height, and aspect ratio
+
+`posts.height` was one client-sent number, and the app used it as the on-screen height, so portrait photos could fill more than a screen. Each `post_media` row now stores `media_width`, `media_height`, and `aspect_ratio` read from the uploaded bytes (JPEG EXIF orientation and MP4/MOV rotation included). `height` is still accepted and returned for older apps. Older posts keep null dimensions and the feed still loads. Thumbnail width and height are stored when a video poster is sent.
+
+**New files**
+- `prisma/migrations/20261024140000_post_media_dimensions/migration.sql`
+- `src/lib/media-dimensions.ts`
+- `src/lib/media-dimensions.test.ts`
+
+**Modified files**
+- `prisma/schema.prisma`
+- `src/server/posts.ts`
+- `src/app/api/feed/route.ts`
+- `src/lib/validations/posts.ts`
+- `src/lib/openapi.ts`
+- `package.json` — test script includes the dimension tests
+
+Local DB: apply with `npx prisma db execute --file prisma/migrations/20261024140000_post_media_dimensions/migration.sql` if `prisma migrate deploy` is still blocked by `20261004120000_people_in_media`. Run the same SQL on the hosted database before this code is deployed. Existing rows are not backfilled.
+
+Undo the DB part:
+
+```sql
+ALTER TABLE post_media DROP COLUMN IF EXISTS media_width;
+ALTER TABLE post_media DROP COLUMN IF EXISTS media_height;
+ALTER TABLE post_media DROP COLUMN IF EXISTS aspect_ratio;
+ALTER TABLE post_media DROP COLUMN IF EXISTS thumbnail_width;
+ALTER TABLE post_media DROP COLUMN IF EXISTS thumbnail_height;
+DELETE FROM "_prisma_migrations" WHERE migration_name = '20261024140000_post_media_dimensions';
+```
+
+---
+
 ## 2026-10-23 — Profile picture stays the first person
 
 `POST /api/users/{user_id}/profile-picture` still takes multipart field `file`. The first photo with one face is saved as the face reference and is not replaced. A later photo is stored as the avatar only when Rekognition matches that first person. A different person returns 400 and the avatar is left as it was.
@@ -1117,7 +1206,7 @@ After deploy: `npx prisma migrate deploy` on the hosted DB. Existing corporate e
 - Security issues found during review, not fixed yet: legacy admin cookie forgeable with the default secret; any token can edit/delete users; OTP returned in `/api/auth` responses; venue/explore/upload server actions without auth; feed/like/favorites trust `user_id` from the request.
 - No admin UI for event categories (seeded by migration since 2026-10-02; add/rename others directly in `event_categories`).
 - Other environments still need `npm run prisma:deploy` for `20260927140000_add_user_favorites`, `20260929160000_session_media_and_watermark`, `20261001120000_happening_and_report_settings`, `20261002150000_seed_event_categories`, `20261002170000_watermark_size`, `20261002190000_event_cover_images`, `20261003000000_event_linkedin_url`, `20261004120000_people_in_media`, `20261004210000_event_team`, `20261011120000_posts_height` and `20261018140000_session_uploaders`. Install pgvector before the people-in-media migration, or `prisma migrate deploy` stops before `event_team`. If an environment already applied `20260928180000_add_session_phase_tags`, run its undo SQL (2026-09-28 section) first.
-- People in media: tables are created on first upload if the pgvector migration never ran. Matching uses Rekognition CompareFaces. The AWS IAM user needs `rekognition:CompareFaces`. Profile photos should be JPEG or PNG (Rekognition rejects WebP).
+- People in media: tables are created on first upload if the pgvector migration never ran. Matching uses Rekognition DetectFaces + CompareFaces (gallery default 90). The AWS IAM user needs `rekognition:DetectFaces` and `rekognition:CompareFaces`. Profile photos should be JPEG or PNG (Rekognition rejects WebP). Videos are matched from the uploaded poster frame only (no ffmpeg on Vercel). Run `npm run faces:process` or wait for cron; GET my-media does not compare faces. Apply `20261024190000_event_wide_recognition` on hosted/local Postgres.
 - Before deploying: go through the production checklist in the 2026-10-03 "/login ⇄ /dashboard redirect loop" section (`ADMIN_JWT_SECRET`, `X-Forwarded-Proto`, post-deploy login test).
 - Swapping two session titles on the same day in one save (A↔B) hits the unique (day, title) constraint; rename in two saves.
 - Watermark is an overlay: the mobile app must draw it (see `watermark` in `GET /api/events/{event_id}`); downloaded original files have no watermark.

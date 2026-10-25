@@ -57,20 +57,17 @@ export async function POST(
     if (!user) return notFound('User not found');
 
     let face_reference = null;
-    if (faceCheck.first) {
-      try {
-        face_reference = await enrollStoredFaceReference(user.id, saved.storageKey);
-      } catch (error) {
-        console.error('[profile-picture] face reference was not enrolled', error);
-        face_reference = {
-          consent: false,
-          processing_status: 'failed',
-          last_error: error instanceof Error ? error.message : 'Face reference was not enrolled',
-          has_embedding: false,
-        };
-      }
+    try {
+      face_reference = await enrollStoredFaceReference(user.id, saved.storageKey);
+    } catch (error) {
+      console.error('[profile-picture] face reference was not enrolled', error);
+      face_reference = {
+        consent: false,
+        processing_status: 'failed',
+        last_error: error instanceof Error ? error.message : 'Face reference was not enrolled',
+        has_embedding: false,
+      };
     }
-
     return ok(
       {
         user_id: user.id,

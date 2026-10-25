@@ -18,7 +18,25 @@ export function faceMaxAttempts(): number {
 export function faceWorkerBatchSize(): number {
   const n = Number(process.env.FACE_WORKER_BATCH ?? '2');
   if (!Number.isFinite(n) || n < 1) return 2;
-  return Math.min(10, Math.floor(n));
+  return Math.min(20, Math.floor(n));
+}
+
+export function faceComparePageSize(): number {
+  const n = Number(process.env.FACE_COMPARE_PAGE ?? '8');
+  if (!Number.isFinite(n) || n < 1) return 8;
+  return Math.min(25, Math.floor(n));
+}
+
+export function faceWorkerTimeBudgetMs(): number {
+  const n = Number(process.env.FACE_WORKER_TIME_BUDGET_MS ?? '20000');
+  if (!Number.isFinite(n) || n < 1000) return 20_000;
+  return Math.min(50_000, Math.floor(n));
+}
+
+export function rekognitionDetectMinConfidence(): number {
+  const n = Number(process.env.FACE_DETECT_MIN_CONFIDENCE ?? '90');
+  if (!Number.isFinite(n) || n < 50 || n > 100) return 90;
+  return n;
 }
 
 export function faceProviderKind(): 'local' | 'http' {

@@ -1,0 +1,379 @@
+import prisma from '@/server/prisma';
+import { faceComparePageSize, faceMaxAttempts } from './config';
+import {
+  compareReferenceToAsset,
+  ensureMediaFace,
+  rekognitionClient,
+  upsertRekognitionMatch,
+  evidenceForCompare,
+} from './rekognition';
+import { readStoredMedia } from './storage';
+
+type GuestRow = { user_id: string; storage_key: string; content_sha256: string | null };
+type AssetRow = {
+  id: string;
+  storage_key: string;
+  media_type: string;
+  thumbnail_storage_key: string | null;
+  created_at: Date | null;
+};
+
+export async function resetUserEventScans(userId: string, referenceSha256: string): Promise<void> {
+  await prisma.$executeRaw`
+    INSERT INTO user_event_face_scans (
+      user_id, event_id, reference_sha256, status, last_asset_id, last_asset_created_at,
+      attempt_count, last_error, scanned_count, matched_count, next_retry_at, updated_at
+    )
+    SELECT ${userId}::uuid,
+           e.event_id,
+           ${referenceSha256},
+           'pending',
+           NULL,
+           NULL,
+           0,
+           NULL,
+           0,
+           0,
+           NULL,
+           now()
+    FROM (
+      SELECT event_id FROM event_guests WHERE user_id = ${userId}::uuid
+      UNION
+      SELECT event_id FROM posts WHERE user_id = ${userId}::uuid AND event_id IS NOT NULL
+    ) e
+    ON CONFLICT (user_id, event_id) DO UPDATE SET
+      reference_sha256 = EXCLUDED.reference_sha256,
+      status = 'pending',
+      last_asset_id = NULL,
+      last_asset_created_at = NULL,
+      attempt_count = 0,
+      last_error = NULL,
+      scanned_count = 0,
+      matched_count = 0,
+      next_retry_at = NULL,
+      updated_at = now()
+  `;
+}
+
+async function loadCompareBytes(asset: AssetRow): Promise<{ bytes: Buffer; mediaType: 'image' | 'video' } | null> {
+  if (asset.media_type === 'video') {
+    if (!asset.thumbnail_storage_key) return null;
+    const stored = await readStoredMedia(asset.thumbnail_storage_key);
+    return { bytes: stored.bytes, mediaType: 'video' };
+  }
+  const stored = await readStoredMedia(asset.storage_key);
+  return { bytes: stored.bytes, mediaType: 'image' };
+}
+
+export async function matchGuestsForAssetPage(input: {
+  eventId: string;
+  mediaAssetId: string;
+  mediaFaceId: string;
+  targetBytes: Buffer;
+  mediaType: 'image' | 'video';
+  cursor: string | null;
+  deadline: number;
+}): Promise<{ lastUserId: string | null; matched: number; scanned: number; done: boolean; throttled: boolean }> {
+  if (!rekognitionClient()) {
+    return { lastUserId: input.cursor, matched: 0, scanned: 0, done: false, throttled: false };
+  }
+  const pageSize = faceComparePageSize();
+  let cursor = input.cursor;
+  let matched = 0;
+  let scanned = 0;
+  let lastUserId = cursor;
+  let throttled = false;
+
+  while (Date.now() < input.deadline) {
+    const cursorSql = cursor;
+    const guests = cursorSql
+      ? await prisma.$queryRaw<GuestRow[]>`
+          SELECT ufr.user_id, ufr.storage_key, ufr.content_sha256
+          FROM user_face_references ufr
+          JOIN event_guests eg ON eg.user_id = ufr.user_id AND eg.event_id = ${input.eventId}::uuid
+          WHERE ufr.consent = true
+            AND ufr.revoked_at IS NULL
+            AND ufr.storage_key IS NOT NULL
+            AND ufr.user_id > ${cursorSql}::uuid
+          ORDER BY ufr.user_id ASC
+          LIMIT ${pageSize}
+        `
+      : await prisma.$queryRaw<GuestRow[]>`
+          SELECT ufr.user_id, ufr.storage_key, ufr.content_sha256
+          FROM user_face_references ufr
+          JOIN event_guests eg ON eg.user_id = ufr.user_id AND eg.event_id = ${input.eventId}::uuid
+          WHERE ufr.consent = true
+            AND ufr.revoked_at IS NULL
+            AND ufr.storage_key IS NOT NULL
+          ORDER BY ufr.user_id ASC
+          LIMIT ${pageSize}
+        `;
+    if (guests.length === 0) {
+      return { lastUserId, matched, scanned, done: true, throttled };
+    }
+    for (const guest of guests) {
+      if (Date.now() >= input.deadline) {
+        return { lastUserId, matched, scanned, done: false, throttled };
+      }
+      lastUserId = guest.user_id;
+      scanned += 1;
+      let source: Buffer;
+      try {
+        source = (await readStoredMedia(guest.storage_key)).bytes;
+      } catch {
+        console.error('[people-media] guest reference could not be read', guest.user_id);
+        continue;
+      }
+      const compared = await compareReferenceToAsset({
+        referenceBytes: source,
+        targetBytes: input.targetBytes,
+        mediaType: input.mediaType,
+      });
+      if (!compared.ok) {
+        if (compared.reason === 'throttled') {
+          throttled = true;
+          return { lastUserId, matched, scanned, done: false, throttled };
+        }
+        continue;
+      }
+      await upsertRekognitionMatch({
+        mediaAssetId: input.mediaAssetId,
+        mediaFaceId: input.mediaFaceId,
+        userId: guest.user_id,
+        similarity: compared.similarity / 100,
+        referenceSha256: guest.content_sha256,
+        evidence: evidenceForCompare(input.mediaType, compared),
+      });
+      matched += 1;
+    }
+    cursor = lastUserId;
+    if (guests.length < pageSize) {
+      return { lastUserId, matched, scanned, done: true, throttled };
+    }
+  }
+  return { lastUserId, matched, scanned, done: false, throttled };
+}
+
+export async function claimUserEventScans(batch: number, maxAttempts: number): Promise<{ user_id: string; event_id: string }[]> {
+  return prisma.$queryRaw<{ user_id: string; event_id: string }[]>`
+    UPDATE user_event_face_scans
+    SET status = 'processing',
+        attempt_count = CASE WHEN status = 'failed' THEN attempt_count + 1 ELSE attempt_count END,
+        last_error = NULL,
+        updated_at = now()
+    WHERE (user_id, event_id) IN (
+      SELECT user_id, event_id FROM user_event_face_scans
+      WHERE status = 'pending'
+         OR (
+           status = 'failed'
+           AND attempt_count < ${maxAttempts}
+           AND (next_retry_at IS NULL OR next_retry_at <= now())
+         )
+         OR (
+           status = 'processing'
+           AND updated_at < now() - interval '15 minutes'
+         )
+      ORDER BY updated_at ASC
+      LIMIT ${batch}
+      FOR UPDATE SKIP LOCKED
+    )
+    RETURNING user_id, event_id
+  `;
+}
+
+export async function processUserEventScan(
+  userId: string,
+  eventId: string,
+  deadline: number
+): Promise<{ scanned: number; matched: number; complete: boolean }> {
+  const scan = await prisma.user_event_face_scans.findUnique({
+    where: { user_id_event_id: { user_id: userId, event_id: eventId } },
+  });
+  if (!scan) return { scanned: 0, matched: 0, complete: true };
+
+  const refs = await prisma.$queryRaw<{ storage_key: string; content_sha256: string | null }[]>`
+    SELECT storage_key, content_sha256
+    FROM user_face_references
+    WHERE user_id = ${userId}::uuid
+      AND consent = true
+      AND revoked_at IS NULL
+      AND storage_key IS NOT NULL
+    LIMIT 1
+  `;
+  const ref = refs[0];
+  if (!ref?.storage_key) {
+    await prisma.user_event_face_scans.update({
+      where: { user_id_event_id: { user_id: userId, event_id: eventId } },
+      data: { status: 'failed', last_error: 'No face reference', updated_at: new Date() },
+    });
+    return { scanned: 0, matched: 0, complete: true };
+  }
+  if (!rekognitionClient()) {
+    await prisma.user_event_face_scans.update({
+      where: { user_id_event_id: { user_id: userId, event_id: eventId } },
+      data: {
+        status: 'failed',
+        last_error: 'Rekognition is not configured',
+        next_retry_at: new Date(Date.now() + 60_000),
+        updated_at: new Date(),
+      },
+    });
+    return { scanned: 0, matched: 0, complete: false };
+  }
+
+  const referenceBytes = (await readStoredMedia(ref.storage_key)).bytes;
+  const pageSize = faceComparePageSize();
+  let lastCreated = scan.last_asset_created_at;
+  let lastId = scan.last_asset_id;
+  let scanned = 0;
+  let matched = 0;
+
+  while (Date.now() < deadline) {
+    const assets =
+      lastCreated && lastId
+        ? await prisma.$queryRaw<AssetRow[]>`
+            SELECT ma.id, ma.storage_key, ma.media_type::text AS media_type, ma.thumbnail_storage_key, ma.created_at
+            FROM media_assets ma
+            WHERE ma.event_id = ${eventId}::uuid
+              AND (
+                ma.created_at > ${lastCreated}
+                OR (ma.created_at = ${lastCreated} AND ma.id > ${lastId}::uuid)
+              )
+            ORDER BY ma.created_at ASC NULLS LAST, ma.id ASC
+            LIMIT ${pageSize}
+          `
+        : lastCreated
+          ? await prisma.$queryRaw<AssetRow[]>`
+              SELECT ma.id, ma.storage_key, ma.media_type::text AS media_type, ma.thumbnail_storage_key, ma.created_at
+              FROM media_assets ma
+              WHERE ma.event_id = ${eventId}::uuid
+                AND ma.created_at > ${lastCreated}
+              ORDER BY ma.created_at ASC NULLS LAST, ma.id ASC
+              LIMIT ${pageSize}
+            `
+          : await prisma.$queryRaw<AssetRow[]>`
+              SELECT ma.id, ma.storage_key, ma.media_type::text AS media_type, ma.thumbnail_storage_key, ma.created_at
+              FROM media_assets ma
+              WHERE ma.event_id = ${eventId}::uuid
+              ORDER BY ma.created_at ASC NULLS LAST, ma.id ASC
+              LIMIT ${pageSize}
+            `;
+
+    if (assets.length === 0) {
+      await prisma.$executeRaw`
+        UPDATE user_event_face_scans
+        SET status = 'complete',
+            scanned_count = scanned_count + ${scanned},
+            matched_count = matched_count + ${matched},
+            last_error = NULL,
+            updated_at = now()
+        WHERE user_id = ${userId}::uuid AND event_id = ${eventId}::uuid
+      `;
+      return { scanned, matched, complete: true };
+    }
+
+    for (const asset of assets) {
+      if (Date.now() >= deadline) break;
+      lastCreated = asset.created_at;
+      lastId = asset.id;
+      scanned += 1;
+      const existing = await prisma.$queryRaw<{ id: string }[]>`
+        SELECT id FROM media_matches
+        WHERE media_asset_id = ${asset.id}::uuid
+          AND user_id = ${userId}::uuid
+          AND match_source = 'rekognition'
+          AND (reference_sha256 = ${ref.content_sha256} OR ${ref.content_sha256} IS NULL)
+        LIMIT 1
+      `;
+      if (existing[0]) continue;
+
+      let loaded: { bytes: Buffer; mediaType: 'image' | 'video' } | null;
+      try {
+        loaded = await loadCompareBytes(asset);
+      } catch {
+        console.error('[people-media] media could not be read', asset.id);
+        continue;
+      }
+      if (!loaded) continue;
+
+      const compared = await compareReferenceToAsset({
+        referenceBytes,
+        targetBytes: loaded.bytes,
+        mediaType: loaded.mediaType,
+      });
+      if (!compared.ok) {
+        if (compared.reason === 'throttled') {
+          await prisma.$executeRaw`
+            UPDATE user_event_face_scans
+            SET status = 'pending',
+                last_asset_id = ${lastId}::uuid,
+                last_asset_created_at = ${lastCreated},
+                scanned_count = scanned_count + ${scanned},
+                matched_count = matched_count + ${matched},
+                last_error = 'throttled',
+                next_retry_at = now() + interval '20 seconds',
+                updated_at = now()
+            WHERE user_id = ${userId}::uuid AND event_id = ${eventId}::uuid
+          `;
+          return { scanned, matched, complete: false };
+        }
+        continue;
+      }
+      const mediaFaceId = await ensureMediaFace(asset.id);
+      if (!mediaFaceId) continue;
+      await upsertRekognitionMatch({
+        mediaAssetId: asset.id,
+        mediaFaceId,
+        userId,
+        similarity: compared.similarity / 100,
+        referenceSha256: ref.content_sha256,
+        evidence: evidenceForCompare(loaded.mediaType, compared),
+      });
+      matched += 1;
+    }
+
+    await prisma.$executeRaw`
+      UPDATE user_event_face_scans
+      SET last_asset_id = ${lastId}::uuid,
+          last_asset_created_at = ${lastCreated},
+          scanned_count = scanned_count + ${scanned},
+          matched_count = matched_count + ${matched},
+          updated_at = now()
+      WHERE user_id = ${userId}::uuid AND event_id = ${eventId}::uuid
+    `;
+    scanned = 0;
+    matched = 0;
+    if (assets.length < pageSize && Date.now() < deadline) {
+      await prisma.$executeRaw`
+        UPDATE user_event_face_scans
+        SET status = 'complete', last_error = NULL, updated_at = now()
+        WHERE user_id = ${userId}::uuid AND event_id = ${eventId}::uuid
+      `;
+      return { scanned: 0, matched: 0, complete: true };
+    }
+  }
+
+  await prisma.$executeRaw`
+    UPDATE user_event_face_scans
+    SET status = 'pending',
+        last_asset_id = ${lastId}::uuid,
+        last_asset_created_at = ${lastCreated},
+        updated_at = now()
+    WHERE user_id = ${userId}::uuid AND event_id = ${eventId}::uuid
+  `;
+  return { scanned, matched, complete: false };
+}
+
+export async function failUserEventScan(userId: string, eventId: string, message: string): Promise<void> {
+  const maxAttempts = faceMaxAttempts();
+  await prisma.$executeRaw`
+    UPDATE user_event_face_scans
+    SET status = 'failed',
+        last_error = ${message},
+        next_retry_at = now() + (GREATEST(attempt_count, 1) * interval '30 seconds'),
+        updated_at = now()
+    WHERE user_id = ${userId}::uuid
+      AND event_id = ${eventId}::uuid
+      AND attempt_count < ${maxAttempts}
+  `;
+}

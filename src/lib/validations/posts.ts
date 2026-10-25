@@ -60,7 +60,7 @@ export const createFeedPostFormSchema = z.object({
   caption: z.string().optional(),
   /** Event this post belongs to. Omit to keep the post out of every event feed. */
   event_id: uuidSchema.optional(),
-  /** Tallest media height in pixels. One value for the whole post. */
+  /** Legacy whole-post height from older apps. Per-file size is read from the upload. */
   height: z.preprocess((value) => {
     if (value === undefined || value === null || value === '') return undefined;
     const n = Number(value);

@@ -12,6 +12,7 @@ export async function ensurePeopleMediaSchema(): Promise<void> {
     SELECT to_regclass('public.media_matches')::text AS name
   `;
   if (existing[0]?.name) {
+    await ensureRecognitionV2Columns();
     ensured = true;
     return;
   }
@@ -139,5 +140,45 @@ export async function ensurePeopleMediaSchema(): Promise<void> {
     END
     $ensure$;
   `);
+  await ensureRecognitionV2Columns();
   ensured = true;
+}
+
+async function ensureRecognitionV2Columns(): Promise<void> {
+  await prisma.$executeRawUnsafe(`
+    ALTER TABLE media_assets
+      ADD COLUMN IF NOT EXISTS guest_scan_cursor UUID,
+      ADD COLUMN IF NOT EXISTS match_complete BOOLEAN NOT NULL DEFAULT false,
+      ADD COLUMN IF NOT EXISTS thumbnail_url TEXT,
+      ADD COLUMN IF NOT EXISTS thumbnail_storage_key TEXT;
+    ALTER TABLE media_matches
+      ADD COLUMN IF NOT EXISTS match_source VARCHAR(20) NOT NULL DEFAULT 'legacy',
+      ADD COLUMN IF NOT EXISTS algorithm_version VARCHAR(20),
+      ADD COLUMN IF NOT EXISTS evidence JSONB,
+      ADD COLUMN IF NOT EXISTS reference_sha256 VARCHAR(64);
+    ALTER TABLE user_face_references
+      ADD COLUMN IF NOT EXISTS reference_version INTEGER NOT NULL DEFAULT 1;
+    DELETE FROM media_matches a
+    USING media_matches b
+    WHERE a.media_asset_id = b.media_asset_id
+      AND a.user_id = b.user_id
+      AND a.ctid < b.ctid;
+    CREATE UNIQUE INDEX IF NOT EXISTS media_matches_asset_user_key ON media_matches (media_asset_id, user_id);
+    CREATE TABLE IF NOT EXISTS user_event_face_scans (
+      user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      event_id UUID NOT NULL REFERENCES events(id) ON DELETE CASCADE,
+      reference_sha256 VARCHAR(64) NOT NULL,
+      last_asset_created_at TIMESTAMPTZ(6),
+      last_asset_id UUID,
+      status VARCHAR(20) NOT NULL DEFAULT 'pending',
+      attempt_count INTEGER NOT NULL DEFAULT 0,
+      last_error TEXT,
+      scanned_count INTEGER NOT NULL DEFAULT 0,
+      matched_count INTEGER NOT NULL DEFAULT 0,
+      next_retry_at TIMESTAMPTZ(6),
+      created_at TIMESTAMPTZ(6) DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMPTZ(6) DEFAULT CURRENT_TIMESTAMP,
+      PRIMARY KEY (user_id, event_id)
+    );
+  `);
 }

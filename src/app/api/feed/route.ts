@@ -9,9 +9,10 @@ import {
   IncompleteUploadError,
   getMediaKind,
   resolveUploadMime,
-  saveUploadedFile,
+  saveUploadedBuffer,
   validateMediaFile,
 } from '@/lib/upload';
+import { aspectRatio, readMediaDimensions } from '@/lib/media-dimensions';
 import { validateDeclaredVideoDuration } from '@/lib/upload-rules';
 import { getUserFromAuthorizationHeader } from '@/lib/jwt';
 import { createPost, listPosts } from '@/server/posts';
@@ -94,10 +95,15 @@ export async function POST(request: NextRequest) {
       await ensureEventGuest({ event_id: eventId, user_id: parsed.data.user_id });
     }
 
-    const       mediaItems: Array<{
+    const mediaItems: Array<{
       media_type: 'image' | 'video';
       media_url: string;
       thumbnail_url?: string;
+      media_width: number | null;
+      media_height: number | null;
+      aspect_ratio: number | null;
+      thumbnail_width: number | null;
+      thumbnail_height: number | null;
       media_order: number;
       storageKey: string;
     }> = [];
@@ -166,24 +172,49 @@ export async function POST(request: NextRequest) {
     }
 
     const projectRoot = process.cwd();
-    let videoThumbnail: { url: string } | null = null;
+    let videoThumbnail: {
+      url: string;
+      storageKey: string;
+      width: number | null;
+      height: number | null;
+    } | null = null;
     if (videoCount === 1 && thumbnails[0]) {
       const mime = resolveUploadMime(thumbnails[0].type, thumbnails[0].name);
-      const savedThumb = await saveUploadedFile(thumbnails[0], 'image', projectRoot, {
+      const thumbBytes = Buffer.from(await thumbnails[0].arrayBuffer());
+      const thumbSize = readMediaDimensions(thumbBytes, 'image');
+      const savedThumb = await saveUploadedBuffer(thumbBytes, 'image', projectRoot, {
         prefix: 'feed/thumbnails',
         contentType: mime,
+        fileName: thumbnails[0].name,
       });
-      videoThumbnail = { url: savedThumb.relativeUrl };
+      videoThumbnail = {
+        url: savedThumb.relativeUrl,
+        storageKey: savedThumb.storageKey,
+        width: thumbSize?.width ?? null,
+        height: thumbSize?.height ?? null,
+      };
     }
     for (const { file, kind, mime } of validated) {
       order += 1;
-      const saved = await saveUploadedFile(file, kind, projectRoot, {
+      const bytes = Buffer.from(await file.arrayBuffer());
+      if (bytes.length === 0 || bytes.length !== file.size) {
+        return badRequest('The media file was missing or did not finish uploading. Please try again.');
+      }
+      const size = readMediaDimensions(bytes, kind);
+      const ratio = size ? aspectRatio(size.width, size.height) : null;
+      const saved = await saveUploadedBuffer(bytes, kind, projectRoot, {
         prefix: 'feed',
         contentType: mime,
+        fileName: file.name,
       });
       mediaItems.push({
         media_type: kind,
         media_url: saved.relativeUrl,
+        media_width: size?.width ?? null,
+        media_height: size?.height ?? null,
+        aspect_ratio: ratio,
+        thumbnail_width: kind === 'video' ? videoThumbnail?.width ?? null : null,
+        thumbnail_height: kind === 'video' ? videoThumbnail?.height ?? null : null,
         media_order: order,
         storageKey: saved.storageKey,
         ...(kind === 'video' && videoThumbnail ? { thumbnail_url: videoThumbnail.url } : {}),
@@ -202,6 +233,11 @@ export async function POST(request: NextRequest) {
         media_type: item.media_type,
         media_url: item.media_url,
         thumbnail_url: item.thumbnail_url ?? null,
+        media_width: item.media_width,
+        media_height: item.media_height,
+        aspect_ratio: item.aspect_ratio,
+        thumbnail_width: item.thumbnail_width,
+        thumbnail_height: item.thumbnail_height,
         media_order: item.media_order,
       }))
     );
@@ -216,6 +252,8 @@ export async function POST(request: NextRequest) {
           media_type: item.media_type,
           media_url: item.media_url,
           storageKey: storageByOrder.get(item.media_order ?? 0) ?? null,
+          thumbnailUrl: item.thumbnail_url,
+          thumbnailStorageKey: item.media_type === 'video' ? videoThumbnail?.storageKey ?? null : null,
         })),
       });
     }
