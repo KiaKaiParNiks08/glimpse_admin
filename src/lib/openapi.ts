@@ -400,6 +400,78 @@ export function getOpenApiSpec(serverUrl: string) {
           },
         },
       },
+      '/api/auth/join-event': {
+        post: {
+          summary: 'Join another event while logged in',
+          description:
+            'Requires the current app-user Bearer JWT. Resolves the event by event_code (trim, case-insensitive) or event_id. ' +
+            'If the user is already a guest, issues a new JWT for that event (same as switch-event). ' +
+            'If not, creates membership with the same guest upsert as an event-code login, without sending a new OTP. ' +
+            'device_type and device_id are stored on user_devices when both are sent. Extra JSON fields are ignored. ' +
+            'Theme colors are included so the client can apply the event theme without waiting on GET /api/app-info.',
+          tags: ['Auth'],
+          security: [{ BearerAuth: [] }],
+          requestBody: {
+            required: true,
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    event_code: {
+                      type: 'string',
+                      example: 'BIRTHDAY123',
+                      description: 'Raw code or a join/store URL that contains event_code. Optional if event_id is sent.',
+                    },
+                    event_id: {
+                      type: 'string',
+                      format: 'uuid',
+                      description: 'Optional if event_code is sent.',
+                    },
+                    device_type: { type: 'string', enum: ['android', 'ios', 'web'] },
+                    device_id: { type: 'string', maxLength: 255 },
+                  },
+                },
+              },
+            },
+          },
+          responses: {
+            '200': {
+              description: 'Joined or already a member; new JWT for this event',
+              content: {
+                'application/json': {
+                  schema: {
+                    type: 'object',
+                    properties: {
+                      message: { type: 'string', example: 'Joined event' },
+                      data: {
+                        type: 'object',
+                        properties: {
+                          user_id: { type: 'string', format: 'uuid' },
+                          event_id: { type: 'string', format: 'uuid' },
+                          token: { type: 'string' },
+                          expires_at: { type: 'string', format: 'date-time' },
+                          event_type: { type: 'string', nullable: true, example: 'wedding' },
+                          show_wedding_side: { type: 'boolean' },
+                          primary_color: { type: 'string', nullable: true, example: '#0F172A' },
+                          secondary_color: { type: 'string', nullable: true, example: '#F97316' },
+                          button_primary_color: { type: 'string', nullable: true, example: '#4338CA' },
+                          button_secondary_color: { type: 'string', nullable: true, example: '#0369A1' },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+            '400': { description: 'event_code and event_id both missing' },
+            '401': { description: 'Missing or invalid JWT' },
+            '404': { description: 'Event not found or not joinable' },
+            '409': { description: 'Event is closed' },
+            '500': { description: 'Server error' },
+          },
+        },
+      },
       '/api/auth/refresh': {
         post: {
           summary: 'Refresh user JWT (mobile)',
@@ -2089,7 +2161,7 @@ export function getOpenApiSpec(serverUrl: string) {
         get: {
           summary: 'Get app info for event, user, and/or device',
           description:
-            'Returns event app theme colors and app configuration rows. Send device_id on launch (including after reinstall) to get previous_events this device has logged into. event_id and user_id are still used together after login for theme colors.',
+            'Returns event app theme colors (primary_color, secondary_color, button_primary_color, button_secondary_color) and app configuration rows. Send event_id alone after joining to load that event theme. Send device_id on launch (including after reinstall) to get previous_events this device has logged into. event_id and user_id together still work after login.',
           tags: ['App configurations'],
           parameters: [
             { name: 'event_id', in: 'query', required: false, schema: { type: 'string', format: 'uuid' } },

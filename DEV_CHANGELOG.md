@@ -21,6 +21,25 @@ Local DB: `glimp_dev_db` on `127.0.0.1:5432`, user `glimp_db_admin` (password in
 
 ---
 
+## 2026-10-25 — Join another event while logged in
+
+Logged-in guests can join from the in-app sheet or QR without a new OTP. `POST /api/auth`, `/api/auth/verify`, and `/api/auth/switch-event` are unchanged.
+
+**New files**
+- `src/app/api/auth/join-event/route.ts` — JWT required (401 if missing)
+- `src/server/auth-join.ts` — resolve by code or id, upsert guest, issue JWT
+
+**Modified files**
+- `src/lib/validations/auth.ts` — join-event body
+- `src/lib/app-share.ts` — parse event_code from join/store URLs
+- `src/lib/api-response.ts` — `unauthorized()` 401
+- `src/lib/validations/app-info.ts` / `src/server/app-info.ts` — theme colors with `event_id` alone
+- `src/lib/openapi.ts` / `src/lib/app-share.test.ts`
+
+No DB migration.
+
+---
+
 ## 2026-10-24 — Event-wide face recognition (no uploader false matches)
 
 Root causes: `recordUploaderMatch` wrote similarity 1 for whoever uploaded the file; CompareFaces used the whole image at threshold 80, so graphics could match; matching capped at 25 guests / 50 photos; GET my-media listed only session files; profile enroll tried to finish matching inside the request.

@@ -8,6 +8,7 @@ import {
   buildAppleAppSiteAssociation,
   buildAssetLinks,
   customSchemeUrl,
+  extractJoinEventCode,
   iosStoreUrl,
   iosUniversalLinksReady,
   joinPageAccess,
@@ -146,6 +147,31 @@ describe('event share links', () => {
     assert.equal(response.status, 200);
     assert.equal(response.headers.get('content-type'), 'application/json');
     assert.deepEqual(await response.json(), body);
+  });
+
+  it('reads the event code from a raw code, join URL, app scheme, or store referrer', () => {
+    assert.deepEqual(extractJoinEventCode('BIRTHDAY123'), { event_code: 'BIRTHDAY123' });
+    assert.deepEqual(extractJoinEventCode('  BIRTHDAY123  '), { event_code: 'BIRTHDAY123' });
+    assert.deepEqual(
+      extractJoinEventCode('https://glimpse-admin-ecru.vercel.app/join/BIRTHDAY123'),
+      { event_code: 'BIRTHDAY123', event_id: undefined }
+    );
+    assert.deepEqual(extractJoinEventCode('glimps://join?event_code=BIRTHDAY123'), {
+      event_code: 'BIRTHDAY123',
+      event_id: undefined,
+    });
+    const eventId = '11111111-1111-4111-8111-111111111111';
+    assert.deepEqual(
+      extractJoinEventCode(
+        `https://play.google.com/store/apps/details?id=app.glimps&referrer=event_code%3DBIRTHDAY123%26event_id%3D${eventId}`
+      ),
+      { event_code: 'BIRTHDAY123', event_id: eventId }
+    );
+    assert.deepEqual(
+      extractJoinEventCode(`https://apps.apple.com/app/id0000000000?event_code=BIRTHDAY123&event_id=${eventId}`),
+      { event_code: 'BIRTHDAY123', event_id: eventId }
+    );
+    assert.deepEqual(extractJoinEventCode(''), {});
   });
 
   it('uses a verified Apple Team ID when configured', () => {

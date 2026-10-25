@@ -80,6 +80,13 @@ export function badRequest(message: string, details?: Record<string, unknown>): 
 }
 
 /**
+ * 401 Unauthorized
+ */
+export function unauthorized(message: string = 'Not authenticated'): NextResponse {
+  return NextResponse.json({ message, data: null } satisfies ApiBody, { status: 401 });
+}
+
+/**
  * 403 Forbidden
  */
 export function forbidden(message: string): NextResponse {

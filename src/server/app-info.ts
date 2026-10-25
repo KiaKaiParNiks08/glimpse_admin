@@ -79,7 +79,8 @@ export async function getAppInfo(query: AppInfoQuery): Promise<AppInfoResult | n
     }),
   ]);
 
-  if (query.event_id && query.user_id && (!user || !event)) return null;
+  if (query.event_id && !event) return null;
+  if (query.user_id && !user) return null;
 
   let previous_events: AppInfoResult['previous_events'] = [];
   if (query.device_id) {

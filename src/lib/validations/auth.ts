@@ -59,6 +59,22 @@ export const authSwitchEventRequestSchema = z.object({
   event_id: z.string().uuid(),
 });
 
+/** Logged-in user joining another event from the in-app sheet or QR. */
+export const authJoinEventRequestSchema = z.object({
+  event_code: optionalText(500),
+  event_id: z.preprocess(
+    (value) => (value === '' || value === null ? undefined : value),
+    z.string().uuid().optional()
+  ),
+  device_type: z.preprocess(
+    (value) => (value === '' || value === null ? undefined : value),
+    z.enum(['android', 'ios', 'web']).optional()
+  ),
+  device_id: optionalText(255),
+});
+
+export type AuthJoinEventRequestInput = z.infer<typeof authJoinEventRequestSchema>;
+
 export type AuthSwitchEventRequestInput = z.infer<typeof authSwitchEventRequestSchema>;
 
 /** Admin login (SuperAdmin / Event Admin) – email and password */

@@ -156,6 +156,47 @@ export function customSchemeUrl(eventCode: string): string {
   return `${appUrlScheme()}://join?event_code=${encodeURIComponent(eventCode)}`;
 }
 
+function firstQueryValue(params: URLSearchParams, name: string): string | null {
+  const direct = params.get(name)?.trim();
+  if (direct) return direct;
+  const referrer = params.get('referrer');
+  if (!referrer) return null;
+  try {
+    return new URLSearchParams(referrer).get(name)?.trim() || null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Pull event_code (and event_id when present) out of a typed code, join URL, app scheme, or store URL.
+ */
+export function extractJoinEventCode(raw: string): { event_code?: string; event_id?: string } {
+  const trimmed = raw.trim();
+  if (!trimmed) return {};
+  if (isShareEventCode(trimmed)) return { event_code: trimmed };
+
+  const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+  try {
+    const parsed = new URL(trimmed);
+    const fromQuery = firstQueryValue(parsed.searchParams, 'event_code');
+    const fromId = firstQueryValue(parsed.searchParams, 'event_id');
+    const pathMatch = parsed.pathname.match(/\/join\/([^/]+)/i);
+    const fromPath = pathMatch?.[1] ? decodeURIComponent(pathMatch[1]).trim() : '';
+    const event_code = fromQuery && isShareEventCode(fromQuery) ? fromQuery : fromPath && isShareEventCode(fromPath) ? fromPath : undefined;
+    const event_id = fromId && uuid.test(fromId) ? fromId : undefined;
+    return { event_code, event_id };
+  } catch {
+    try {
+      const decoded = decodeURIComponent(trimmed);
+      if (isShareEventCode(decoded)) return { event_code: decoded };
+    } catch {
+      return {};
+    }
+    return {};
+  }
+}
+
 function storeUrl(envName: 'ANDROID_PLAY_STORE_URL' | 'IOS_APP_STORE_URL', fallback: string): string {
   const value = process.env[envName]?.trim();
   return value || fallback;
