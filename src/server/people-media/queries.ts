@@ -61,7 +61,14 @@ export async function listMyMedia(input: {
         LEFT JOIN posts p ON p.id = pm.post_id
         WHERE mm.user_id = ${input.userId}::uuid
           AND ma.event_id = ${input.eventId}::uuid
-          AND mm.match_source = 'rekognition'
+          AND (
+            mm.match_source = 'rekognition'
+            OR (
+              mm.match_source = 'legacy'
+              AND mm.similarity >= 0.8
+              AND mm.similarity < 0.999
+            )
+          )
           AND (ma.source <> 'user_post' OR p.status = 'active')
           ${sessionFilter}
         GROUP BY mm.media_asset_id
@@ -90,7 +97,14 @@ export async function listMyMedia(input: {
       LEFT JOIN posts p ON p.id = pm.post_id
       WHERE mm.user_id = ${input.userId}::uuid
         AND ma.event_id = ${input.eventId}::uuid
-        AND mm.match_source = 'rekognition'
+        AND (
+          mm.match_source = 'rekognition'
+          OR (
+            mm.match_source = 'legacy'
+            AND mm.similarity >= 0.8
+            AND mm.similarity < 0.999
+          )
+        )
         AND (ma.source <> 'user_post' OR p.status = 'active')
         ${sessionFilter}
       GROUP BY ma.id, edm.id, pm.id, pm.post_id, ma.source, ma.media_type, ma.media_url,
@@ -148,9 +162,9 @@ async function getRecognitionMeta(userId: string, eventId: string): Promise<Reco
       },
     }),
   ]);
-  const status = scan?.status ?? ref?.processing_status ?? 'pending';
+  const status = scan?.status ?? (ref?.processing_status === 'ready' ? 'pending' : ref?.processing_status) ?? 'pending';
   const processing_complete =
-    ref?.processing_status === 'ready' && (scan?.status === 'complete' || !scan) && pending === 0;
+    ref?.processing_status === 'ready' && scan?.status === 'complete' && pending === 0;
   return {
     status: processing_complete ? 'ready' : status,
     processing_complete,

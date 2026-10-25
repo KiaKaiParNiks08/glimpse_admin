@@ -4,8 +4,10 @@ import {
   GALLERY_ALGORITHM_VERSION,
   MATCH_SOURCE,
   imageFaceEvidence,
+  isDisplayableRecognitionMatch,
   isGenuineRecognitionSource,
   isLikelyUploaderAttributedMatch,
+  queueHasMore,
   mapAssetSource,
   nextCursor,
   recognitionComplete,
@@ -48,6 +50,53 @@ test('my-media only treats rekognition rows as recognized', () => {
   assert.equal(isGenuineRecognitionSource('vector'), false);
 });
 
+test('legacy CompareFaces scores stay visible; uploader shortcuts do not', () => {
+  assert.equal(isDisplayableRecognitionMatch('rekognition', 0.91), true);
+  assert.equal(isDisplayableRecognitionMatch('legacy', 0.86), true);
+  assert.equal(isDisplayableRecognitionMatch('legacy', 1), false);
+  assert.equal(isDisplayableRecognitionMatch('uploader_attributed', 1), false);
+  assert.equal(isDisplayableRecognitionMatch('vector', 0.92), false);
+  assert.equal(isDisplayableRecognitionMatch('legacy', 0.61), false);
+});
+
+test('worker continue uses has_more or a non-empty batch', () => {
+  assert.equal(
+    queueHasMore({
+      media_processed: 0,
+      media_failed: 0,
+      references_processed: 0,
+      references_failed: 0,
+      scans_processed: 3,
+      scans_failed: 0,
+    }),
+    true
+  );
+  assert.equal(
+    queueHasMore({
+      media_processed: 0,
+      media_failed: 0,
+      references_processed: 0,
+      references_failed: 0,
+      scans_processed: 0,
+      scans_failed: 0,
+      has_more: true,
+    }),
+    true
+  );
+  assert.equal(
+    queueHasMore({
+      media_processed: 0,
+      media_failed: 0,
+      references_processed: 0,
+      references_failed: 0,
+      scans_processed: 0,
+      scans_failed: 0,
+      has_more: false,
+    }),
+    false
+  );
+});
+
 test('photographer gallery maps to session_media and posts stay user_post', () => {
   assert.equal(mapAssetSource('photographer'), 'session_media');
   assert.equal(mapAssetSource('user_post'), 'user_post');
@@ -71,6 +120,10 @@ test('paginated matching advances by the last id in the page', () => {
 test('empty my-media is incomplete until the scan and media queue finish', () => {
   assert.equal(
     recognitionComplete({ referenceStatus: 'pending', scanStatus: 'pending', pendingAssets: 12 }),
+    false
+  );
+  assert.equal(
+    recognitionComplete({ referenceStatus: 'ready', scanStatus: null, pendingAssets: 0 }),
     false
   );
   assert.equal(

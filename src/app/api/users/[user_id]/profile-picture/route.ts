@@ -2,7 +2,7 @@ import { NextRequest } from 'next/server';
 import { parseParams, userIdPathSchema } from '@/lib/validations';
 import { badRequest, notFound, ok, serverError } from '@/lib/api-response';
 import { getMediaKind, resolveUploadMime, saveUploadedBuffer, validateMediaFile } from '@/lib/upload';
-import { enrollStoredFaceReference } from '@/server/people-media/face-reference';
+import { enrollStoredFaceReference, queueExistingFaceReference } from '@/server/people-media/face-reference';
 import { verifyProfileFace } from '@/server/people-media/profile-verify';
 import { updateUser } from '@/server/users';
 
@@ -57,16 +57,24 @@ export async function POST(
     if (!user) return notFound('User not found');
 
     let face_reference = null;
-    try {
-      face_reference = await enrollStoredFaceReference(user.id, saved.storageKey);
-    } catch (error) {
-      console.error('[profile-picture] face reference was not enrolled', error);
-      face_reference = {
-        consent: false,
-        processing_status: 'failed',
-        last_error: error instanceof Error ? error.message : 'Face reference was not enrolled',
-        has_embedding: false,
-      };
+    if (faceCheck.first) {
+      try {
+        face_reference = await enrollStoredFaceReference(user.id, saved.storageKey);
+      } catch (error) {
+        console.error('[profile-picture] face reference was not enrolled', error);
+        face_reference = {
+          consent: false,
+          processing_status: 'failed',
+          last_error: error instanceof Error ? error.message : 'Face reference was not enrolled',
+          has_embedding: false,
+        };
+      }
+    } else {
+      try {
+        face_reference = await queueExistingFaceReference(user.id);
+      } catch (error) {
+        console.error('[profile-picture] existing face reference was not reused', error);
+      }
     }
     return ok(
       {

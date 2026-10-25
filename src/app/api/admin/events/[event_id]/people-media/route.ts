@@ -5,7 +5,9 @@ import { parseBody, parseParams, parseQuery } from '@/lib/validations/parse';
 import { uuidSchema } from '@/lib/validations/common';
 import { z } from 'zod';
 import prisma from '@/server/prisma';
+import { backfillEventRecognition } from '@/server/people-media/event-backfill';
 import { adminCanManageEvent, listEventPeopleMedia, requeueFaceReference, requeueMediaAsset } from '@/server/people-media/queries';
+import { scheduleFaceProcessing } from '@/server/people-media/schedule';
 
 const paramsSchema = z.object({ event_id: uuidSchema });
 
@@ -63,6 +65,12 @@ export async function POST(request: Request, context: { params: Promise<{ event_
     if (auth.error) return auth.error;
     const [body, bodyError] = await parseBody(request, peopleMediaRetrySchema);
     if (bodyError) return bodyError;
+
+    if (body.backfill) {
+      const summary = await backfillEventRecognition(params.event_id, { dryRun: body.dry_run === true });
+      if (!summary.dry_run) scheduleFaceProcessing();
+      return ok(summary, summary.dry_run ? 'Backfill dry run' : 'Backfill queued');
+    }
 
     if (body.media_asset_id) {
       const queued = await requeueMediaAsset(params.event_id, body.media_asset_id);

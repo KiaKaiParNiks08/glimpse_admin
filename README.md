@@ -60,7 +60,7 @@ Do this on every database (local, dev, and production) before using the feature:
 3. Set the variables in `.env.example` (`FACE_PROVIDER`, `FACE_EMBEDDING_DIM`, `FACE_MATCH_MIN_SIMILARITY`, `FACE_MAX_ATTEMPTS`, `FACE_WORKER_BATCH`, `FACE_WORKER_SECRET`). `FACE_EMBEDDING_DIM` must stay `128` until a new migration changes the column.
 4. Keep the existing object-storage variables set (`AWS_REGION`, `S3_BUCKET`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `UPLOAD_TOKEN_SECRET`). Production hosts such as Vercel cannot store uploads on local disk.
 5. Restart the app so it loads the new client and environment.
-6. Processing starts by itself after a gallery upload, a feed post, or a face-reference enrollment. The response is sent first; face detection runs just after it. A daily Vercel cron retries anything that pass did not finish. `npm run faces:process` is only needed when you want to drain the queue from your own machine.
+6. Jobs live in Postgres (`media_assets`, `user_face_references`, `user_event_face_scans`). A user request only kicks the worker (`after()` + chained `POST /api/internal/media/process`). Vercel Hobby cron can run once a day (`GET /api/internal/media/process` with `Authorization: Bearer CRON_SECRET`). Drain a large event with `npm run faces:process` or `POST /api/internal/media/backfill`. A 200 from upload/profile is not proof that matching finished — check `GET /api/internal/media/status` and `meta.recognition.processing_complete` on my-media.
 
 ```bash
 npm run faces:process
@@ -72,7 +72,24 @@ The script reads `FACE_WORKER_SECRET` and posts to `APP_BASE_URL` (default `http
 
 `npm run build` runs `prisma migrate deploy` before the Next.js build, so a deploy applies pending migrations, including people-in-media. The hosted Postgres must allow `CREATE EXTENSION vector` (Prisma Postgres does). Set `DIRECT_URL` to the direct database host when `DATABASE_URL` is the pooled URL; migrations use `DIRECT_URL` when it is set.
 
-Set these project environment variables: `FACE_PROVIDER` (`local` is enough to test the pipeline; it only matches an identical file), `FACE_WORKER_SECRET`, and `CRON_SECRET`. Vercel Cron calls `GET /api/internal/media/process` once a day with `Authorization: Bearer <CRON_SECRET>`. You do not run `npm run faces:process` on Vercel.
+Set these project environment variables: `AWS_REGION`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` (Rekognition + S3), `FACE_WORKER_SECRET`, `CRON_SECRET`, and `APP_BASE_URL` (or rely on `VERCEL_URL`) so the worker can chain invocations. The IAM user needs `rekognition:DetectFaces` and `rekognition:CompareFaces`. After deploy, run a dry-run then apply backfill for each live event:
+
+```bash
+curl -X POST "$APP_BASE_URL/api/internal/media/backfill" \
+  -H "x-face-worker-secret: $FACE_WORKER_SECRET" \
+  -H "content-type: application/json" \
+  -d '{"event_id":"<EVENT_UUID>","dry_run":true}'
+
+curl -X POST "$APP_BASE_URL/api/internal/media/backfill" \
+  -H "x-face-worker-secret: $FACE_WORKER_SECRET" \
+  -H "content-type: application/json" \
+  -d '{"event_id":"<EVENT_UUID>","dry_run":false}'
+
+curl -X POST "$APP_BASE_URL/api/internal/media/process?stats=1" \
+  -H "x-face-worker-secret: $FACE_WORKER_SECRET"
+```
+
+Repeat `process` until `has_more` is false, or run `npm run faces:process` against the deployed `APP_BASE_URL`. `GET /api/internal/media/status` shows pending/failed counts without media URLs or embeddings.
 
 `FACE_PROVIDER=local` still hashes file bytes for the embedding column. On Vercel, when AWS keys are set, people-in-media matching also uses Amazon Rekognition CompareFaces so a profile photo can match a different post or session photo of the same person. Videos are still skipped. For InsightFace embeddings set `FACE_PROVIDER=http`, `FACE_SERVICE_URL`, and optionally `FACE_SERVICE_TOKEN`. That service receives the raw image or video bytes and must return JSON:
 

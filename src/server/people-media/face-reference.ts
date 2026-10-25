@@ -7,7 +7,7 @@ import { FACE_CONSENT_VERSION } from './config';
 import { ensurePeopleMediaSchema } from './ensure-schema';
 import { clearFaceEmbedding, deleteMatchesForUser } from './match';
 import { backfillUserEventMedia } from './register';
-import { resetUserEventScans } from './scans';
+import { ensureUserEventScans, resetUserEventScans } from './scans';
 import { scheduleFaceProcessing } from './schedule';
 import { sha256Hex } from './storage';
 
@@ -91,6 +91,34 @@ export async function revokeFaceReference(userId: string): Promise<FaceReference
   return { ...row, has_embedding: false };
 }
 
+/** Keep a valid enrolled reference and queue event scans. Does not replace the stored photo. */
+export async function queueExistingFaceReference(userId: string): Promise<FaceReferenceStatus | null> {
+  await ensurePeopleMediaSchema();
+  const row = await prisma.user_face_references.findUnique({
+    where: { user_id: userId },
+    select: { storage_key: true, content_sha256: true, consent: true, revoked_at: true, processing_status: true },
+  });
+  if (!row?.storage_key || !row.consent || row.revoked_at) return getFaceReferenceStatus(userId);
+  if (row.processing_status === 'failed') {
+    await prisma.user_face_references.update({
+      where: { user_id: userId },
+      data: { processing_status: 'pending', next_retry_at: null, last_error: null, attempt_count: 0 },
+    });
+  }
+  try {
+    await backfillUserEventMedia(userId);
+  } catch (error) {
+    console.error('[people-media] event media backfill failed', error);
+  }
+  try {
+    await ensureUserEventScans(userId, row.content_sha256 ?? sha256Hex(row.storage_key));
+  } catch (error) {
+    console.error('[people-media] user event scans were not queued', error);
+  }
+  scheduleFaceProcessing();
+  return getFaceReferenceStatus(userId);
+}
+
 export async function enrollFaceReference(userId: string, file: File): Promise<FaceReferenceStatus> {
   const saved = await saveUploadedFile(file, 'image', process.cwd(), { prefix: `face-references/${userId}` });
   return enrollStoredFaceReference(userId, saved.storageKey);
@@ -106,11 +134,33 @@ export async function enrollStoredFaceReference(
 
   const previous = await prisma.user_face_references.findUnique({
     where: { user_id: userId },
-    select: { storage_key: true },
+    select: { storage_key: true, processing_status: true, consent: true, revoked_at: true },
   });
+  const contentSha = sha256Hex(storageKey);
+
+  if (
+    previous?.storage_key === storageKey &&
+    previous.consent &&
+    previous.revoked_at == null &&
+    (previous.processing_status === 'ready' || previous.processing_status === 'pending')
+  ) {
+    try {
+      await backfillUserEventMedia(userId);
+    } catch (error) {
+      console.error('[people-media] event media backfill failed', error);
+    }
+    try {
+      await ensureUserEventScans(userId, contentSha);
+    } catch (error) {
+      console.error('[people-media] user event scans were not queued', error);
+    }
+    scheduleFaceProcessing();
+    const status = await getFaceReferenceStatus(userId);
+    if (!status) throw new Error('Face reference was not saved');
+    return status;
+  }
 
   await deleteMatchesForUser(userId);
-  const contentSha = sha256Hex(storageKey);
   await prisma.$executeRaw`
     INSERT INTO user_face_references (
       id, user_id, consent, consent_version, consented_at, revoked_at,

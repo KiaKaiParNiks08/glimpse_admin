@@ -18,6 +18,59 @@ type AssetRow = {
   created_at: Date | null;
 };
 
+/** Queue scans for a user's events without wiping a completed scan for the same reference. */
+export async function ensureUserEventScans(userId: string, referenceSha256: string): Promise<number> {
+  const result = await prisma.$executeRaw`
+    INSERT INTO user_event_face_scans (
+      user_id, event_id, reference_sha256, status, last_asset_id, last_asset_created_at,
+      attempt_count, last_error, scanned_count, matched_count, next_retry_at, updated_at
+    )
+    SELECT ${userId}::uuid,
+           e.event_id,
+           ${referenceSha256},
+           'pending',
+           NULL,
+           NULL,
+           0,
+           NULL,
+           0,
+           0,
+           NULL,
+           now()
+    FROM (
+      SELECT event_id FROM event_guests WHERE user_id = ${userId}::uuid
+      UNION
+      SELECT event_id FROM posts WHERE user_id = ${userId}::uuid AND event_id IS NOT NULL
+    ) e
+    ON CONFLICT (user_id, event_id) DO UPDATE SET
+      status = CASE
+        WHEN user_event_face_scans.reference_sha256 IS DISTINCT FROM EXCLUDED.reference_sha256 THEN 'pending'
+        WHEN user_event_face_scans.status IN ('failed', 'processing') THEN 'pending'
+        ELSE user_event_face_scans.status
+      END,
+      last_asset_id = CASE
+        WHEN user_event_face_scans.reference_sha256 IS DISTINCT FROM EXCLUDED.reference_sha256 THEN NULL
+        ELSE user_event_face_scans.last_asset_id
+      END,
+      last_asset_created_at = CASE
+        WHEN user_event_face_scans.reference_sha256 IS DISTINCT FROM EXCLUDED.reference_sha256 THEN NULL
+        ELSE user_event_face_scans.last_asset_created_at
+      END,
+      attempt_count = CASE
+        WHEN user_event_face_scans.status = 'failed' THEN 0
+        ELSE user_event_face_scans.attempt_count
+      END,
+      last_error = CASE
+        WHEN user_event_face_scans.status = 'failed' THEN NULL
+        ELSE user_event_face_scans.last_error
+      END,
+      reference_sha256 = EXCLUDED.reference_sha256,
+      next_retry_at = NULL,
+      updated_at = now()
+  `;
+  return Number(result);
+}
+
 export async function resetUserEventScans(userId: string, referenceSha256: string): Promise<void> {
   await prisma.$executeRaw`
     INSERT INTO user_event_face_scans (
@@ -311,7 +364,7 @@ export async function processUserEventScan(
                 scanned_count = scanned_count + ${scanned},
                 matched_count = matched_count + ${matched},
                 last_error = 'throttled',
-                next_retry_at = now() + interval '20 seconds',
+                next_retry_at = now() + interval '20 seconds' * power(2, LEAST(attempt_count, 5)),
                 updated_at = now()
             WHERE user_id = ${userId}::uuid AND event_id = ${eventId}::uuid
           `;
@@ -370,7 +423,7 @@ export async function failUserEventScan(userId: string, eventId: string, message
     UPDATE user_event_face_scans
     SET status = 'failed',
         last_error = ${message},
-        next_retry_at = now() + (GREATEST(attempt_count, 1) * interval '30 seconds'),
+        next_retry_at = now() + (LEAST(600, 15 * power(2, GREATEST(attempt_count, 1))) * interval '1 second'),
         updated_at = now()
     WHERE user_id = ${userId}::uuid
       AND event_id = ${eventId}::uuid

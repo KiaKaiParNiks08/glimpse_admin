@@ -87,6 +87,12 @@ async function reclaimStuckJobs(): Promise<void> {
     WHERE processing_status = 'processing'
       AND updated_at < now() - interval '15 minutes'
   `;
+  await prisma.$executeRaw`
+    UPDATE user_event_face_scans
+    SET status = 'pending', updated_at = now()
+    WHERE status = 'processing'
+      AND updated_at < now() - interval '15 minutes'
+  `;
 }
 
 async function claimMediaIds(batch: number, maxAttempts: number): Promise<string[]> {
@@ -153,7 +159,7 @@ async function failMedia(id: string, message: string): Promise<void> {
     SET processing_status = 'failed',
         attempt_count = attempt_count + 1,
         last_error = ${message},
-        next_retry_at = now() + (GREATEST(attempt_count, 1) * interval '30 seconds'),
+        next_retry_at = now() + (LEAST(600, 15 * power(2, GREATEST(attempt_count, 1))) * interval '1 second'),
         updated_at = now()
     WHERE id = ${id}::uuid
   `;
@@ -176,7 +182,7 @@ async function failReference(id: string, message: string, stopRetrying = false):
     UPDATE user_face_references
     SET processing_status = 'failed',
         last_error = ${message},
-        next_retry_at = now() + (GREATEST(attempt_count, 1) * interval '30 seconds'),
+        next_retry_at = now() + (LEAST(600, 15 * power(2, GREATEST(attempt_count, 1))) * interval '1 second'),
         updated_at = now()
     WHERE id = ${id}::uuid
   `;
@@ -399,6 +405,7 @@ export type ProcessBatchResult = {
   references_failed: number;
   scans_processed: number;
   scans_failed: number;
+  has_more: boolean;
 };
 
 export async function processFaceQueue(options?: { timeBudgetMs?: number }): Promise<ProcessBatchResult> {
@@ -416,7 +423,13 @@ export async function processFaceQueue(options?: { timeBudgetMs?: number }): Pro
     references_failed: 0,
     scans_processed: 0,
     scans_failed: 0,
+    has_more: false,
   };
+
+  console.error(
+    '[people-media] worker start',
+    JSON.stringify({ batch, maxAttempts, budget_ms: options?.timeBudgetMs ?? faceWorkerTimeBudgetMs() })
+  );
 
   const referenceIds = await claimReferenceIds(batch, maxAttempts);
   for (const id of referenceIds) {
@@ -466,5 +479,33 @@ export async function processFaceQueue(options?: { timeBudgetMs?: number }): Pro
     }
   }
 
+  const leftover = await prisma.$queryRaw<{ n: number }[]>`
+    SELECT (
+      (SELECT COUNT(*) FROM media_assets
+        WHERE match_complete = false
+          AND processing_status IN ('pending', 'failed', 'processing')
+          AND (next_retry_at IS NULL OR next_retry_at <= now()))
+      + (SELECT COUNT(*) FROM user_face_references
+        WHERE consent = true AND revoked_at IS NULL AND storage_key IS NOT NULL
+          AND processing_status IN ('pending', 'failed', 'processing')
+          AND (next_retry_at IS NULL OR next_retry_at <= now()))
+      + (SELECT COUNT(*) FROM user_event_face_scans
+        WHERE status IN ('pending', 'failed', 'processing')
+          AND (next_retry_at IS NULL OR next_retry_at <= now()))
+    )::int AS n
+  `;
+  result.has_more = (leftover[0]?.n ?? 0) > 0;
+  console.error(
+    '[people-media] worker done',
+    JSON.stringify({
+      media_processed: result.media_processed,
+      media_failed: result.media_failed,
+      references_processed: result.references_processed,
+      references_failed: result.references_failed,
+      scans_processed: result.scans_processed,
+      scans_failed: result.scans_failed,
+      has_more: result.has_more,
+    })
+  );
   return result;
 }

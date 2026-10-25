@@ -15,6 +15,41 @@ export function isGenuineRecognitionSource(source: string | null | undefined): b
   return source === MATCH_SOURCE.rekognition;
 }
 
+/** Pre-column CompareFaces rows were defaulted to legacy. Uploader shortcuts were similarity 1. */
+export const LEGACY_REKOGNITION_MIN_SIMILARITY = 0.8;
+
+export function isDisplayableRecognitionMatch(source: string | null | undefined, similarity: number): boolean {
+  if (source === MATCH_SOURCE.rekognition) return true;
+  if (source === MATCH_SOURCE.uploaderAttributed || source === MATCH_SOURCE.vector) return false;
+  if (source === MATCH_SOURCE.legacy || source == null || source === '' || source === 'unknown') {
+    return similarity >= LEGACY_REKOGNITION_MIN_SIMILARITY && similarity < 0.999;
+  }
+  return false;
+}
+
+export function queueHasMore(result: {
+  media_processed: number;
+  media_failed: number;
+  references_processed: number;
+  references_failed: number;
+  scans_processed: number;
+  scans_failed: number;
+  has_more?: boolean;
+}): boolean {
+  if (result.has_more) return true;
+  return (
+    result.media_processed +
+      result.media_failed +
+      result.references_processed +
+      result.references_failed +
+      result.scans_processed +
+      result.scans_failed >
+    0
+  );
+}
+
+export const MAX_WORKER_CHAIN = 20;
+
 export function isLikelyUploaderAttributedMatch(input: {
   similarity: number;
   userId: string;
@@ -46,7 +81,7 @@ export function recognitionComplete(input: {
   pendingAssets: number;
 }): boolean {
   if (input.referenceStatus !== 'ready') return false;
-  if (input.scanStatus && input.scanStatus !== 'complete') return false;
+  if (input.scanStatus !== 'complete') return false;
   return input.pendingAssets === 0;
 }
 

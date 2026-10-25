@@ -22,12 +22,21 @@ async function runBatch() {
 }
 
 async function main() {
-  for (let round = 0; round < 50; round += 1) {
+  for (let round = 0; round < 200; round += 1) {
     const data = await runBatch();
-    const done = (data.media_processed ?? 0) + (data.references_processed ?? 0);
-    const failed = (data.media_failed ?? 0) + (data.references_failed ?? 0);
-    console.log(`batch ${round + 1}: processed ${done}, failed ${failed}`);
-    if (done === 0 && failed === 0) return;
+    const done =
+      (data.media_processed ?? 0) +
+      (data.references_processed ?? 0) +
+      (data.scans_processed ?? 0);
+    const failed =
+      (data.media_failed ?? 0) +
+      (data.references_failed ?? 0) +
+      (data.scans_failed ?? 0);
+    console.log(
+      `batch ${round + 1}: processed ${done}, failed ${failed}, has_more=${Boolean(data.has_more)}`
+    );
+    if (!data.has_more && done === 0 && failed === 0) return;
+    if (!data.has_more) return;
   }
 }
 

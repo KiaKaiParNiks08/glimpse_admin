@@ -1901,6 +1901,53 @@ export function getOpenApiSpec(serverUrl: string) {
           },
         },
       },
+      '/api/internal/media/process': {
+        post: {
+          summary: 'Drain the face-recognition queue',
+          description:
+            'Protected by x-face-worker-secret or CRON_SECRET. Processes a bounded batch of pending references, media, and user-event scans. If has_more is true, the handler chains another invocation. GET is used by Vercel Cron. Add ?stats=1 for queue counts. Does not return embeddings or media URLs.',
+          tags: ['Internal'],
+          security: [],
+          responses: {
+            '200': { description: 'Batch processed. data.has_more means more work remains.' },
+            '401': { description: 'Missing worker secret' },
+          },
+        },
+      },
+      '/api/internal/media/status': {
+        get: {
+          summary: 'Recognition queue health',
+          description: 'Pending/processing/failed counts, oldest pending age, truncated errors. Worker secret, cron secret, or admin JWT.',
+          tags: ['Internal'],
+          security: [],
+          responses: { '200': { description: 'Queue health' }, '401': { description: 'Not authenticated' } },
+        },
+      },
+      '/api/internal/media/backfill': {
+        post: {
+          summary: 'Queue event-wide recognition backfill',
+          description:
+            'Body { event_id, dry_run? }. Registers missing session and feed media, reuses valid face references, queues scans, invalidates uploader-attributed matches, and promotes legacy CompareFaces rows. Does not run every comparison in this request.',
+          tags: ['Internal'],
+          security: [],
+          requestBody: {
+            required: true,
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['event_id'],
+                  properties: {
+                    event_id: { type: 'string', format: 'uuid' },
+                    dry_run: { type: 'boolean' },
+                  },
+                },
+              },
+            },
+          },
+          responses: { '200': { description: 'Summary of queued work' }, '401': { description: 'Not authenticated' } },
+        },
+      },
       '/api/users/{user_id}': {
         get: {
           summary: 'Get user by ID',
@@ -2881,6 +2928,7 @@ export function getOpenApiSpec(serverUrl: string) {
       { name: 'App configurations', description: 'App configuration management' },
       { name: 'CMS', description: 'CMS pages' },
       { name: 'Venues', description: 'Venue details' },
+      { name: 'Internal', description: 'Face-recognition worker, queue health, and event backfill' },
     ],
   };
 }

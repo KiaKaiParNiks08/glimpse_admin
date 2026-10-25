@@ -51,8 +51,8 @@ export async function middleware(request: NextRequest) {
 
   if (isPublicApiPath(pathname)) return NextResponse.next();
 
-  if (pathname === '/api/internal/media/process') {
-    if (!isFaceWorkerAuthorized(request) && !isVercelCronAuthorized(request)) {
+  if (pathname.startsWith('/api/internal/media/')) {
+    if (!isFaceWorkerAuthorized(request) && !isVercelCronAuthorized(request) && !getAdminFromAuthorizationHeader(request)) {
       return NextResponse.json({ message: 'Not authenticated', data: null }, { status: 401 });
     }
     return NextResponse.next();

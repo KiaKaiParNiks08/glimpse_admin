@@ -5,8 +5,8 @@ import { parseParams, parseQuery } from '@/lib/validations/parse';
 import { uuidSchema } from '@/lib/validations/common';
 import { z } from 'zod';
 import { listMyMedia } from '@/server/people-media/queries';
+import { queueExistingFaceReference } from '@/server/people-media/face-reference';
 import { backfillEventMedia } from '@/server/people-media/register';
-import { scheduleFaceProcessing } from '@/server/people-media/schedule';
 import { isEventGuest } from '@/server/event-guests';
 
 export const maxDuration = 60;
@@ -33,7 +33,7 @@ export async function GET(request: Request, context: { params: Promise<{ event_i
     const limit = Math.min(query.limit, 50);
     try {
       await backfillEventMedia(params.event_id);
-      scheduleFaceProcessing();
+      await queueExistingFaceReference(query.user_id);
     } catch (error) {
       console.error('[people-media] my-media backfill failed', error);
     }

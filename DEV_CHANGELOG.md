@@ -21,6 +21,39 @@ Local DB: `glimp_dev_db` on `127.0.0.1:5432`, user `glimp_db_admin` (password in
 
 ---
 
+## 2026-10-25 — Restore async face recognition worker
+
+Confirmed empty my-media after the async change: jobs are durable Postgres rows, but Vercel only ran an 8s `after()` kick plus a once-a-day cron, so CompareFaces rarely finished. my-media also required `match_source = rekognition`, so every pre-column match (defaulted to `legacy`) disappeared. Missing `user_event_face_scans` rows were treated as a completed search. The local drain script ignored scan jobs and exited.
+
+**New files**
+- `src/server/people-media/queue.ts` — health + worker chain
+- `src/server/people-media/event-backfill.ts` — event backfill / dry-run
+- `src/app/api/internal/media/status/route.ts`
+- `src/app/api/internal/media/backfill/route.ts`
+- `prisma/migrations/20261025120000_recognition_queue_restore/migration.sql` — promote legacy CompareFaces rows, queue scans, do not delete matches
+
+**Modified files**
+- `src/server/people-media/schedule.ts` — `after()` then chain `/api/internal/media/process`
+- `src/server/people-media/process-batch.ts` — `has_more`, exponential backoff, reclaim stuck scans
+- `src/server/people-media/queries.ts` — show restored legacy scores; missing scan is not complete
+- `src/server/people-media/face-reference.ts` — reuse valid refs; `queueExistingFaceReference`
+- `src/app/api/internal/media/process/route.ts` — chain remaining work
+- `src/app/api/events/[event_id]/my-media/route.ts` — queue this user’s existing reference
+- `src/app/api/admin/events/[event_id]/people-media/route.ts` — `{ backfill: true, dry_run?: true }`
+- `scripts/process-media-faces.mjs` — counts scans and `has_more`
+- `src/middleware.ts` — `/api/internal/media/*` worker/admin auth
+- `README.md` / OpenAPI / tests
+
+**Undo the DB part**
+```sql
+DELETE FROM _prisma_migrations WHERE migration_name = '20261025120000_recognition_queue_restore';
+```
+(Does not undo promoted `match_source` values.)
+
+Apply with `npx prisma db execute --file prisma/migrations/20261025120000_recognition_queue_restore/migration.sql` if migrate deploy is still blocked. Then backfill each event (dry-run first) and drain `POST /api/internal/media/process` until `has_more` is false.
+
+---
+
 ## 2026-10-25 — Join another event while logged in
 
 Logged-in guests can join from the in-app sheet or QR without a new OTP. `POST /api/auth`, `/api/auth/verify`, and `/api/auth/switch-event` are unchanged.
@@ -1225,7 +1258,7 @@ After deploy: `npx prisma migrate deploy` on the hosted DB. Existing corporate e
 - Security issues found during review, not fixed yet: legacy admin cookie forgeable with the default secret; any token can edit/delete users; OTP returned in `/api/auth` responses; venue/explore/upload server actions without auth; feed/like/favorites trust `user_id` from the request.
 - No admin UI for event categories (seeded by migration since 2026-10-02; add/rename others directly in `event_categories`).
 - Other environments still need `npm run prisma:deploy` for `20260927140000_add_user_favorites`, `20260929160000_session_media_and_watermark`, `20261001120000_happening_and_report_settings`, `20261002150000_seed_event_categories`, `20261002170000_watermark_size`, `20261002190000_event_cover_images`, `20261003000000_event_linkedin_url`, `20261004120000_people_in_media`, `20261004210000_event_team`, `20261011120000_posts_height` and `20261018140000_session_uploaders`. Install pgvector before the people-in-media migration, or `prisma migrate deploy` stops before `event_team`. If an environment already applied `20260928180000_add_session_phase_tags`, run its undo SQL (2026-09-28 section) first.
-- People in media: tables are created on first upload if the pgvector migration never ran. Matching uses Rekognition DetectFaces + CompareFaces (gallery default 90). The AWS IAM user needs `rekognition:DetectFaces` and `rekognition:CompareFaces`. Profile photos should be JPEG or PNG (Rekognition rejects WebP). Videos are matched from the uploaded poster frame only (no ffmpeg on Vercel). Run `npm run faces:process` or wait for cron; GET my-media does not compare faces. Apply `20261024190000_event_wide_recognition` on hosted/local Postgres.
+- People in media: tables are created on first upload if the pgvector migration never ran. Matching uses Rekognition DetectFaces + CompareFaces (gallery default 90). The AWS IAM user needs `rekognition:DetectFaces` and `rekognition:CompareFaces`. Profile photos should be JPEG or PNG (Rekognition rejects WebP). Videos are matched from the uploaded poster frame only (no ffmpeg on Vercel). Drain with `POST /api/internal/media/process` / `npm run faces:process`; Hobby cron is once a day. Apply `20261024190000_event_wide_recognition` and `20261025120000_recognition_queue_restore`. Backfill per event via `POST /api/internal/media/backfill`.
 - Before deploying: go through the production checklist in the 2026-10-03 "/login ⇄ /dashboard redirect loop" section (`ADMIN_JWT_SECRET`, `X-Forwarded-Proto`, post-deploy login test).
 - Swapping two session titles on the same day in one save (A↔B) hits the unique (day, title) constraint; rename in two saves.
 - Watermark is an overlay: the mobile app must draw it (see `watermark` in `GET /api/events/{event_id}`); downloaded original files have no watermark.
