@@ -1,19 +1,29 @@
+import { NextResponse } from 'next/server';
 import { authJoinEventRequestSchema, parseBody } from '@/lib/validations';
-import { badRequest, conflict, notFound, ok, serverError, unauthorized } from '@/lib/api-response';
 import { getUserFromAuthorizationHeader } from '@/lib/jwt';
 import { joinAuthenticatedUserToEvent } from '@/server/auth-join';
+
+function joinEventJson(status: number, body: Record<string, unknown>) {
+  return NextResponse.json(body, { status });
+}
 
 /**
  * POST /api/auth/join-event
  * Logged-in guest joins (or switches to) an event from the in-app sheet or QR. No OTP.
+ * Does not change POST /api/auth, /api/auth/verify, or /api/auth/switch-event.
  */
 export async function POST(request: Request) {
   try {
     const user = getUserFromAuthorizationHeader(request);
-    if (!user) return unauthorized('Not authenticated');
+    if (!user) {
+      return joinEventJson(401, { success: false, message: 'Not authenticated' });
+    }
 
     const [body, err] = await parseBody(request, authJoinEventRequestSchema);
-    if (err) return err;
+    if (err) {
+      const parsed = (await err.json()) as { message?: string };
+      return joinEventJson(err.status, { success: false, message: parsed.message || 'Validation failed' });
+    }
 
     const result = await joinAuthenticatedUserToEvent({
       userId: user.id,
@@ -23,14 +33,16 @@ export async function POST(request: Request) {
       device_id: body.device_id,
     });
     if (!result.ok) {
-      if (result.status === 400) return badRequest(result.message);
-      if (result.status === 409) return conflict(result.message);
-      return notFound(result.message);
+      return joinEventJson(result.status, { success: false, message: result.message });
     }
 
-    return ok(result.data, 'Joined event');
+    return joinEventJson(200, {
+      success: true,
+      message: 'Joined event',
+      data: result.data,
+    });
   } catch (error) {
     console.error('POST /api/auth/join-event', error);
-    return serverError('Unable to join event');
+    return joinEventJson(500, { success: false, message: 'Unable to join event' });
   }
 }

@@ -20,8 +20,9 @@ export const updateUserSchema = createUserSchema.partial().extend({
   instagram_id: z.string().max(100).optional().nullable(),
 });
 
-/** PATCH /api/users/[user_id] — includes optional wedding context (event_guests.wedding_side) */
+/** PATCH /api/users/[user_id] — per-event profile when event_id is sent */
 export const patchUserBodySchema = updateUserSchema.extend({
+  full_name: z.string().max(100).optional(),
   wedding_side: z.enum(['groom', 'bride']).nullable().optional(),
   event_id: uuidSchema.optional(),
 }).superRefine((data, ctx) => {
@@ -65,8 +66,9 @@ export type PatchUserBodyInput = z.infer<typeof patchUserBodySchema>;
 /** Fields consumed by updateUser(); omit wedding patch keys before calling. */
 export function toUpdateUserInput(body: PatchUserBodyInput): UpdateUserInput {
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const { wedding_side: _ws, event_id: _eid, ...rest } = body;
-  return rest;
+  const { wedding_side: _ws, event_id, full_name, instagram_id, avatar_url, ...rest } = body;
+  if (event_id) return rest;
+  return { ...rest, full_name, instagram_id, avatar_url };
 }
 export type UserIdParam = z.infer<typeof userIdParamSchema>;
 export type UserIdPath = z.infer<typeof userIdPathSchema>;

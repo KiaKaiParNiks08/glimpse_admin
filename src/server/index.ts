@@ -13,3 +13,4 @@ export * from './users';
 export * from './event-days';
 export * from './venues';
 export * from './user-devices';
+export * from './user-event-profiles';

@@ -1,10 +1,13 @@
 import { NextRequest } from 'next/server';
-import { parseParams, userIdPathSchema } from '@/lib/validations';
-import { badRequest, notFound, ok, serverError } from '@/lib/api-response';
+import { parseParams, userIdPathSchema, uuidSchema } from '@/lib/validations';
+import { badRequest, forbidden, notFound, ok, serverError } from '@/lib/api-response';
+import { getUserFromAuthorizationHeader } from '@/lib/jwt';
 import { getMediaKind, resolveUploadMime, saveUploadedBuffer, validateMediaFile } from '@/lib/upload';
+import { isEventGuest } from '@/server/event-guests';
 import { enrollStoredFaceReference, queueExistingFaceReference } from '@/server/people-media/face-reference';
 import { verifyProfileFace } from '@/server/people-media/profile-verify';
-import { updateUser } from '@/server/users';
+import { overlayEventProfile, upsertUserEventProfile } from '@/server/user-event-profiles';
+import { getUserById, updateUser } from '@/server/users';
 
 /** Profile upload also enrolls the face reference and runs matching. */
 export const maxDuration = 60;
@@ -12,7 +15,7 @@ export const maxDuration = 60;
 /**
  * POST /api/users/[user_id]/profile-picture
  * First photo with one face becomes the account person. Later photos must be that person.
- * Body: multipart/form-data with field "file".
+ * Body: multipart/form-data with field "file" and event_id for the event profile photo.
  */
 export async function POST(
   request: NextRequest,
@@ -25,6 +28,21 @@ export async function POST(
 
     const formData = await request.formData();
     const file = formData.get('file');
+    const tokenUser = getUserFromAuthorizationHeader(request);
+    if (tokenUser && tokenUser.id !== path.user_id) {
+      return forbidden('You can only update your own profile picture');
+    }
+
+    const eventIdRaw = typeof formData.get('event_id') === 'string' ? String(formData.get('event_id')).trim() : '';
+    const eventIdParsed = eventIdRaw ? uuidSchema.safeParse(eventIdRaw) : null;
+    if (eventIdRaw && !eventIdParsed?.success) {
+      return badRequest('event_id must be a UUID');
+    }
+    const event_id = eventIdParsed?.success ? eventIdParsed.data : tokenUser?.event_id;
+    if (event_id) {
+      const guest = await isEventGuest(event_id, path.user_id);
+      if (!guest) return forbidden('User is not a guest of this event');
+    }
 
     if (!file || !(file instanceof File) || file.size === 0) {
       return badRequest('No image file provided. Send a file in the "file" field.');
@@ -53,8 +71,14 @@ export async function POST(
       fileName: file.name,
     });
 
-    const user = await updateUser(path.user_id, { avatar_url: saved.relativeUrl });
+    let user = event_id ? await getUserById(path.user_id) : await updateUser(path.user_id, { avatar_url: saved.relativeUrl });
     if (!user) return notFound('User not found');
+    if (event_id) {
+      const eventProfile = await upsertUserEventProfile(path.user_id, event_id, {
+        avatar_url: saved.relativeUrl,
+      });
+      user = overlayEventProfile(user, eventProfile);
+    }
 
     let face_reference = null;
     if (faceCheck.first) {

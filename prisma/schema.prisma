@@ -394,6 +394,7 @@ model events {
   user_favorites                       user_favorites[]
   media_assets                         media_assets[]
   user_event_face_scans                user_event_face_scans[]
+  user_event_profiles                  user_event_profiles[]
   posts                                posts[]
 
   @@index([category_id], map: "idx_events_category_id")
@@ -586,6 +587,7 @@ model users {
   media_matches                                        media_matches[]
   media_assets                                         media_assets[]
   user_event_face_scans                                user_event_face_scans[]
+  user_event_profiles                                  user_event_profiles[]
   roles                                                roles                   @relation(fields: [role_id], references: [id], onUpdate: NoAction)
 
   @@index([role_id], map: "idx_users_role_id")
@@ -697,6 +699,24 @@ model happening_photos {
   current_happening current_happening @relation(fields: [happening_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
 
   @@index([happening_id, sort_order], map: "idx_happening_photos_happening_id")
+}
+
+/// Guest display name, photo, and Instagram for one event. wedding_side stays on event_guests.
+model user_event_profiles {
+  id           String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  user_id      String    @db.Uuid
+  event_id     String    @db.Uuid
+  full_name    String    @default("") @db.VarChar(100)
+  avatar_url   String?
+  instagram_id String?
+  created_at   DateTime? @default(now()) @db.Timestamptz(6)
+  updated_at   DateTime? @default(now()) @db.Timestamptz(6)
+  events       events    @relation(fields: [event_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_user_event_profiles_event")
+  users        users     @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_user_event_profiles_user")
+
+  @@unique([user_id, event_id], map: "user_event_profiles_user_event_key")
+  @@index([event_id], map: "idx_user_event_profiles_event_id")
+  @@index([user_id], map: "idx_user_event_profiles_user_id")
 }
 
 model user_devices {

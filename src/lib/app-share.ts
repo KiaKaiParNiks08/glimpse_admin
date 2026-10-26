@@ -4,7 +4,9 @@
  */
 
 const EVENT_CODE_PATTERN = /^[A-Za-z0-9_-]{1,20}$/;
-const DEFAULT_ANDROID_STORE = 'https://play.google.com/store/apps/details?id=app.glimps';
+export const PRODUCTION_JOIN_ORIGIN = 'https://glimpse-admin-ecru.vercel.app';
+const DEFAULT_ANDROID_PACKAGE = 'com.creatortech.uniglim';
+const DEFAULT_ANDROID_STORE = `https://play.google.com/store/apps/details?id=${DEFAULT_ANDROID_PACKAGE}`;
 const DEFAULT_IOS_STORE = 'https://apps.apple.com/app/id0000000000';
 
 export function isShareEventCode(value: string): boolean {
@@ -12,12 +14,13 @@ export function isShareEventCode(value: string): boolean {
 }
 
 export function appPublicOrigin(): string {
-  const configured = process.env.APP_PUBLIC_URL?.trim() || process.env.APP_BASE_URL?.trim();
+  const configured = process.env.APP_PUBLIC_URL?.trim();
   if (configured) return configured.replace(/\/$/, '');
-  const production = process.env.VERCEL_PROJECT_PRODUCTION_URL?.trim();
-  if (production) return `https://${production.replace(/^https?:\/\//, '')}`;
-  const vercel = process.env.VERCEL_URL?.trim();
-  if (vercel) return `https://${vercel.replace(/^https?:\/\//, '')}`;
+  if (process.env.VERCEL) {
+    const production = process.env.VERCEL_PROJECT_PRODUCTION_URL?.trim();
+    if (production) return `https://${production.replace(/^https?:\/\//, '')}`;
+    return PRODUCTION_JOIN_ORIGIN;
+  }
   return 'http://localhost:3000';
 }
 
@@ -27,7 +30,7 @@ export function appUrlScheme(): string {
 }
 
 export function androidPackageName(): string {
-  return process.env.ANDROID_PACKAGE_NAME?.trim() || 'app.glimps';
+  return process.env.ANDROID_PACKAGE_NAME?.trim() || DEFAULT_ANDROID_PACKAGE;
 }
 
 export function iosBundleId(): string {
@@ -143,7 +146,7 @@ export function joinPageAccess(input: {
     return { ok: false };
   }
   if (!isShareEventCode(code)) return { ok: false };
-  if (!input.event || input.event.event_code !== code) return { ok: false };
+  if (!input.event || input.event.event_code.toLowerCase() !== code.toLowerCase()) return { ok: false };
   if (input.event.status === 'cancelled' || input.event.status === 'archived') return { ok: false };
   return { ok: true, eventCode: input.event.event_code };
 }
@@ -221,8 +224,12 @@ export function androidStoreUrl(eventCode: string): string {
   return url.toString();
 }
 
-export function iosStoreUrl(): string {
-  return storeUrl('IOS_APP_STORE_URL', DEFAULT_IOS_STORE);
+export function iosStoreUrl(eventCode?: string): string {
+  const raw = storeUrl('IOS_APP_STORE_URL', DEFAULT_IOS_STORE);
+  if (!eventCode || !isShareEventCode(eventCode)) return raw;
+  const url = new URL(raw);
+  url.searchParams.set('event_code', eventCode);
+  return url.toString();
 }
 
 export function androidIntentUrl(eventCode: string): string {

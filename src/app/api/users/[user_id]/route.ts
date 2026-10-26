@@ -9,7 +9,8 @@ import {
 } from '@/lib/validations';
 import { ok, notFound, serverError, noContent, conflict, forbidden, badRequest } from '@/lib/api-response';
 import { getUserById, updateUser, deleteUser, findUserByMobileNumber } from '@/server/users';
-import { updateGuestWeddingSide } from '@/server/event-guests';
+import { isEventGuest, updateGuestWeddingSide } from '@/server/event-guests';
+import { getUserEventProfile, overlayEventProfile, upsertUserEventProfile } from '@/server/user-event-profiles';
 import { prisma } from '@/server';
 import { Prisma } from '@prisma/client';
 import { getUserFromAuthorizationHeader } from '@/lib/jwt';
@@ -85,9 +86,14 @@ export async function GET(
         }
       }
 
+      const eventProfile = current_event_id
+        ? await getUserEventProfile(user.id, current_event_id)
+        : null;
+      const profile = overlayEventProfile(user, eventProfile);
+
       return ok({
         data: {
-          ...user,
+          ...profile,
           e_invite_pdf_url: invitePdfUrl,
           wedding_side,
           can_edit_wedding_side,
@@ -95,8 +101,15 @@ export async function GET(
           current_event_id,
           allow_new_event_login: true,
           events: joinedEvents.map((event) => ({
-            ...event,
+            event_id: event.event_id,
+            event_code: event.event_code,
+            title: event.title,
+            start_date: event.start_date,
+            end_date: event.end_date,
+            cover_image: event.cover_image,
             is_current: event.event_id === current_event_id,
+            event_type: event.event_type,
+            show_wedding_side: event.show_wedding_side,
           })),
         },
       });
@@ -135,8 +148,16 @@ export async function PATCH(
       }
     }
 
+    const appUser = getUserFromAuthorizationHeader(request);
+    if (body.event_id) {
+      if (appUser && appUser.id !== path.user_id) {
+        return forbidden('You can only update your own event profile');
+      }
+      const guest = await isEventGuest(body.event_id, path.user_id);
+      if (!guest) return forbidden('User is not a guest of this event');
+    }
+
     if (body.wedding_side !== undefined) {
-      const appUser = getUserFromAuthorizationHeader(request);
       if (appUser) {
         if (appUser.id !== path.user_id || appUser.event_id !== body.event_id) {
           return forbidden('You can only update wedding side for your account and current event');
@@ -158,6 +179,15 @@ export async function PATCH(
 
     const user = await updateUser(path.user_id, toUpdateUserInput(body));
     if (!user) return notFound('User not found');
+
+    if (body.event_id) {
+      const eventProfile = await upsertUserEventProfile(path.user_id, body.event_id, {
+        ...(body.full_name !== undefined ? { full_name: body.full_name } : {}),
+        ...(body.instagram_id !== undefined ? { instagram_id: body.instagram_id } : {}),
+        ...(body.avatar_url !== undefined ? { avatar_url: body.avatar_url ?? null } : {}),
+      });
+      return ok({ data: overlayEventProfile(user, eventProfile) });
+    }
 
     return ok({ data: user });
   } catch (e: unknown) {

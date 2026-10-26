@@ -60,18 +60,28 @@ export const authSwitchEventRequestSchema = z.object({
 });
 
 /** Logged-in user joining another event from the in-app sheet or QR. */
-export const authJoinEventRequestSchema = z.object({
-  event_code: optionalText(500),
-  event_id: z.preprocess(
-    (value) => (value === '' || value === null ? undefined : value),
-    z.string().uuid().optional()
-  ),
-  device_type: z.preprocess(
-    (value) => (value === '' || value === null ? undefined : value),
-    z.enum(['android', 'ios', 'web']).optional()
-  ),
-  device_id: optionalText(255),
-});
+export const authJoinEventRequestSchema = z
+  .object({
+    event_code: optionalText(500),
+    event_id: z.preprocess(
+      (value) => (value === '' || value === null ? undefined : value),
+      z.string().uuid().optional()
+    ),
+    device_type: z.preprocess(
+      (value) => (value === '' || value === null ? undefined : value),
+      z.enum(['android', 'ios', 'web']).optional()
+    ),
+    device_id: optionalText(255),
+  })
+  .superRefine((data, ctx) => {
+    if (!data.event_code && !data.event_id) {
+      ctx.addIssue({
+        code: 'custom',
+        message: 'Provide event_code or event_id',
+        path: ['event_code'],
+      });
+    }
+  });
 
 export type AuthJoinEventRequestInput = z.infer<typeof authJoinEventRequestSchema>;
 

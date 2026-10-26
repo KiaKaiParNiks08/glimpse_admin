@@ -44,6 +44,7 @@ export type JoinEventResult =
         event_id: string;
         token: string;
         expires_at: string;
+        event_code: string;
         event_type: string | null;
         show_wedding_side: boolean;
         primary_color: string | null;
@@ -149,6 +150,7 @@ export async function joinAuthenticatedUserToEvent(input: {
       event_id: event.id,
       token: issued.token,
       expires_at: issued.expires_at,
+      event_code: event.event_code,
       event_type: category.event_type,
       show_wedding_side: category.show_wedding_side,
       primary_color: theme?.primary_color ?? null,

@@ -443,6 +443,7 @@ export function getOpenApiSpec(serverUrl: string) {
                   schema: {
                     type: 'object',
                     properties: {
+                      success: { type: 'boolean', example: true },
                       message: { type: 'string', example: 'Joined event' },
                       data: {
                         type: 'object',
@@ -451,6 +452,7 @@ export function getOpenApiSpec(serverUrl: string) {
                           event_id: { type: 'string', format: 'uuid' },
                           token: { type: 'string' },
                           expires_at: { type: 'string', format: 'date-time' },
+                          event_code: { type: 'string', example: 'ABHI1234' },
                           event_type: { type: 'string', nullable: true, example: 'wedding' },
                           show_wedding_side: { type: 'boolean' },
                           primary_color: { type: 'string', nullable: true, example: '#0F172A' },
@@ -1952,7 +1954,7 @@ export function getOpenApiSpec(serverUrl: string) {
         get: {
           summary: 'Get user by ID',
           description:
-            'Returns user details for the given user_id (UUID). Excludes password_hash. Optional query event_id can be passed to resolve e_invite_pdf_url for that event when the user role is "user". For role "user", when the resolved event category is wedding, `wedding_side` and `can_edit_wedding_side` are included for profile UI. Role "user" also includes `events` (every event this user has logged into) and `current_event_id` for Instagram-style event switching. POST /api/auth/switch-event with a Bearer token to change the active event without a new OTP.',
+            'Returns user details for the given user_id (UUID). Excludes password_hash. Optional query event_id selects that event\'s profile (full_name, avatar_url, instagram_id, wedding_side) and e-invite. Role "user" includes `events` with event_code so the app can switch-event vs join-event. POST /api/auth/switch-event with a Bearer token to change the active event without a new OTP.',
           tags: ['Users'],
           parameters: [
             { name: 'user_id', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } },
@@ -2022,12 +2024,14 @@ export function getOpenApiSpec(serverUrl: string) {
                               type: 'object',
                               properties: {
                                 event_id: { type: 'string', format: 'uuid' },
+                                event_code: { type: 'string' },
                                 title: { type: 'string' },
                                 start_date: { type: 'string', format: 'date' },
                                 end_date: { type: 'string', format: 'date' },
                                 cover_image: { type: 'string', nullable: true },
-                                status: { type: 'string' },
                                 is_current: { type: 'boolean' },
+                                event_type: { type: 'string', nullable: true },
+                                show_wedding_side: { type: 'boolean' },
                               },
                             },
                           },
@@ -2045,7 +2049,7 @@ export function getOpenApiSpec(serverUrl: string) {
         patch: {
           summary: 'Update user',
           description:
-            'Updates user profile. Only provided fields are updated. Password is hashed if sent. Optional `wedding_side` with `event_id` updates Groom/Bride for that event when its category is wedding; app user JWT must match this user_id and event_id.',
+            'When event_id is sent, full_name, instagram_id, and avatar_url are stored on that event profile only. wedding_side still updates event_guests. Without event_id, fields update the global users row (admin).',
           tags: ['Users'],
           parameters: [
             { name: 'user_id', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } },
@@ -2107,7 +2111,7 @@ export function getOpenApiSpec(serverUrl: string) {
         post: {
           summary: 'Upload user profile picture',
           description:
-            'Uploads a single image and updates avatar_url. Body must be multipart/form-data with field `file`. The first photo that contains one face is stored as this account\'s person and is kept for later checks. A later photo is saved only when Amazon Rekognition matches that same person. A different person, a photo with no face, or a photo that cannot be checked returns 400 and does not change the picture. The request field does not change.',
+            'Uploads a single image. Multipart fields: `file` and `event_id`. The photo is stored on user_event_profiles for that event only. Face enrollment for recognition still uses this user\'s reference. A later photo is saved only when Amazon Rekognition matches that same person.',
           tags: ['Users'],
           parameters: [
             { name: 'user_id', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } },
@@ -2124,6 +2128,11 @@ export function getOpenApiSpec(serverUrl: string) {
                       type: 'string',
                       format: 'binary',
                       description: 'Profile image file (JPEG, PNG, GIF, WebP). Max 10MB.',
+                    },
+                    event_id: {
+                      type: 'string',
+                      format: 'uuid',
+                      description: 'Event whose profile photo to update. JWT event_id is used when omitted.',
                     },
                   },
                 },

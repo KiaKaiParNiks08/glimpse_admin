@@ -4,6 +4,7 @@ import {
   ANDROID_SHA256_PLACEHOLDER,
   IOS_TEAM_ID_PLACEHOLDER,
   androidAppLinksReady,
+  PRODUCTION_JOIN_ORIGIN,
   androidStoreUrl,
   buildAppleAppSiteAssociation,
   buildAssetLinks,
@@ -20,6 +21,8 @@ import {
 const envKeys = [
   'APP_PUBLIC_URL',
   'APP_BASE_URL',
+  'VERCEL',
+  'VERCEL_ENV',
   'VERCEL_PROJECT_PRODUCTION_URL',
   'VERCEL_URL',
   'ANDROID_PACKAGE_NAME',
@@ -58,12 +61,39 @@ describe('event share links', () => {
     assert.doesNotMatch(joinUrl('BIRTHDAY123'), /^glimps:/);
   });
 
+  it('does not put APP_BASE_URL or localhost into a Vercel production QR', () => {
+    saveEnv();
+    delete process.env.APP_PUBLIC_URL;
+    process.env.APP_BASE_URL = 'http://localhost:3000';
+    process.env.VERCEL = '1';
+    process.env.VERCEL_ENV = 'production';
+    process.env.VERCEL_PROJECT_PRODUCTION_URL = 'glimpse-admin-ecru.vercel.app';
+    assert.equal(joinUrl('ABHI1234'), 'https://glimpse-admin-ecru.vercel.app/join/ABHI1234');
+  });
+
+  it('keeps localhost join URLs in local development', () => {
+    saveEnv();
+    delete process.env.APP_PUBLIC_URL;
+    delete process.env.VERCEL;
+    delete process.env.VERCEL_PROJECT_PRODUCTION_URL;
+    delete process.env.VERCEL_URL;
+    assert.equal(joinUrl('ABHI1234'), 'http://localhost:3000/join/ABHI1234');
+  });
+
+  it('falls back to the production join host on Vercel when the production URL env is missing', () => {
+    saveEnv();
+    delete process.env.APP_PUBLIC_URL;
+    process.env.VERCEL = '1';
+    delete process.env.VERCEL_PROJECT_PRODUCTION_URL;
+    assert.equal(joinUrl('ABHI1234'), `${PRODUCTION_JOIN_ORIGIN}/join/ABHI1234`);
+  });
+
   it('encodes the Play Install Referrer and keeps the package id', () => {
     saveEnv();
-    process.env.ANDROID_PLAY_STORE_URL = 'https://play.google.com/store/apps/details?id=app.glimps';
+    process.env.ANDROID_PLAY_STORE_URL = 'https://play.google.com/store/apps/details?id=com.creatortech.uniglim';
     const url = new URL(androidStoreUrl('BIRTHDAY123'));
     assert.equal(url.hostname, 'play.google.com');
-    assert.equal(url.searchParams.get('id'), 'app.glimps');
+    assert.equal(url.searchParams.get('id'), 'com.creatortech.uniglim');
     assert.equal(url.searchParams.get('referrer'), 'event_code=BIRTHDAY123');
     assert.match(url.toString(), /referrer=event_code%3DBIRTHDAY123/);
   });
@@ -86,15 +116,15 @@ describe('event share links', () => {
     assert.throws(() => androidStoreUrl('../admin'), /Invalid event code/);
   });
 
-  it('selects the store from the device and keeps the iOS listing free of the event code', () => {
+  it('selects the store from the device and puts event_code on the App Store URL', () => {
     saveEnv();
     process.env.IOS_APP_STORE_URL = 'https://apps.apple.com/app/id0000000000';
     assert.equal(platformFromUserAgent('Mozilla/5.0 (Linux; Android 14)'), 'android');
     assert.equal(platformFromUserAgent('Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X)'), 'ios');
     assert.equal(platformFromUserAgent('Mozilla/5.0 (Macintosh)'), 'other');
-    const ios = new URL(iosStoreUrl());
+    const ios = new URL(iosStoreUrl('BIRTHDAY123'));
     assert.equal(ios.hostname, 'apps.apple.com');
-    assert.equal(ios.searchParams.get('event_code'), null);
+    assert.equal(ios.searchParams.get('event_code'), 'BIRTHDAY123');
     assert.equal(ios.searchParams.get('referrer'), null);
   });
 
@@ -108,17 +138,17 @@ describe('event share links', () => {
     assert.deepEqual(joinPageAccess({ code: 'BIRTHDAY123', event: { ...event, status: 'archived' } }), { ok: false });
     assert.deepEqual(
       joinPageAccess({ code: 'birthday123', event: { event_code: 'BIRTHDAY123', status: 'published' } }),
-      { ok: false }
+      { ok: true, eventCode: 'BIRTHDAY123' }
     );
   });
 
   it('serves the Android association file with a placeholder until a real fingerprint is configured', async () => {
     saveEnv();
     delete process.env.ANDROID_SHA256_CERT_FINGERPRINTS;
-    process.env.ANDROID_PACKAGE_NAME = 'app.glimps';
+    process.env.ANDROID_PACKAGE_NAME = 'com.creatortech.uniglim';
     assert.equal(androidAppLinksReady(), false);
     const body = buildAssetLinks();
-    assert.equal(body[0]?.target.package_name, 'app.glimps');
+    assert.equal(body[0]?.target.package_name, 'com.creatortech.uniglim');
     assert.deepEqual(body[0]?.target.sha256_cert_fingerprints, [ANDROID_SHA256_PLACEHOLDER]);
     const response = jsonAssociation(body);
     assert.equal(response.status, 200);
@@ -130,7 +160,7 @@ describe('event share links', () => {
     saveEnv();
     const fingerprint = 'AA:BB:CC:DD:EE:FF:00:11:22:33:44:55:66:77:88:99:AA:BB:CC:DD:EE:FF:00:11:22:33:44:55:66:77:88:99';
     process.env.ANDROID_SHA256_CERT_FINGERPRINTS = fingerprint;
-    process.env.ANDROID_PACKAGE_NAME = 'app.glimps';
+    process.env.ANDROID_PACKAGE_NAME = 'com.creatortech.uniglim';
     assert.equal(androidAppLinksReady(), true);
     assert.deepEqual(buildAssetLinks()[0]?.target.sha256_cert_fingerprints, [fingerprint]);
   });

@@ -1,7 +1,6 @@
 import { headers } from 'next/headers';
-import { notFound } from 'next/navigation';
+import { notFound, redirect } from 'next/navigation';
 import {
-  androidIntentUrl,
   androidStoreUrl,
   customSchemeUrl,
   iosStoreUrl,
@@ -25,8 +24,8 @@ export default async function JoinEventPage({
     notFound();
   }
 
-  const event = await prisma.events.findUnique({
-    where: { event_code: decoded },
+  const event = await prisma.events.findFirst({
+    where: { event_code: { equals: decoded, mode: 'insensitive' } },
     select: { title: true, event_code: true, status: true },
   });
   const access = joinPageAccess({ code: raw, event });
@@ -36,8 +35,10 @@ export default async function JoinEventPage({
   const requestHeaders = await headers();
   const platform = platformFromUserAgent(requestHeaders.get('user-agent') ?? '');
   const playStore = androidStoreUrl(code);
-  const appStore = iosStoreUrl();
-  const openApp = platform === 'android' ? androidIntentUrl(code) : customSchemeUrl(code);
+  const appStore = iosStoreUrl(code);
+
+  if (platform === 'android') redirect(playStore);
+  if (platform === 'ios') redirect(appStore);
 
   return (
     <main
@@ -57,21 +58,16 @@ export default async function JoinEventPage({
           Event code <strong>{code}</strong>
         </p>
         <p style={{ margin: '0 0 1rem', lineHeight: 1.5 }}>
-          If the app is installed, this HTTPS link opens it. This page stays available when the app is not installed.
-        </p>
-        <p style={{ margin: '0 0 1rem', lineHeight: 1.5 }}>
-          {platform === 'ios'
-            ? 'On iPhone, install from the App Store, then open this same link again. The App Store does not pass the event code through automatically.'
-            : 'On Android, the Play Store link includes the event code in the install referrer. That reaches the app only after an install from Google Play.'}
+          Open this link on your phone to install the app, or open it in the Glimps app if it is already installed.
         </p>
         <div style={{ display: 'flex', gap: 12, marginTop: '1.5rem', flexWrap: 'wrap' }}>
-          <a href={openApp} style={linkStyle}>
+          <a href={customSchemeUrl(code)} style={linkStyle}>
             Open app
           </a>
-          <a href={playStore} style={platform === 'android' ? linkStyle : secondaryStyle}>
+          <a href={playStore} style={secondaryStyle}>
             Play Store
           </a>
-          <a href={appStore} style={platform === 'ios' ? linkStyle : secondaryStyle}>
+          <a href={appStore} style={secondaryStyle}>
             App Store
           </a>
         </div>

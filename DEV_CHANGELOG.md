@@ -6,6 +6,36 @@ Nothing below is committed yet — run `git status` to see the same list.
 
 ---
 
+## 2026-10-25 — Event QR join URL, landing, join-event, per-event profiles
+
+QR / Copy link now encodes `APP_PUBLIC_URL/join/{event_code}` (production host on Vercel). It no longer falls back to `APP_BASE_URL`, which was localhost. Logged-in join is `POST /api/auth/join-event`. Guest name/photo/Instagram are per event in `user_event_profiles`. `POST /api/auth`, `/api/auth/verify`, and `/api/auth/switch-event` are unchanged.
+
+**New files**
+- `src/lib/user-event-profile.ts` / `src/lib/user-event-profile.test.ts` — overlay event vs global fields
+- `src/server/user-event-profiles.ts` — empty row on first join; persist GET/PATCH/photo
+- `prisma/migrations/20261025180000_user_event_profiles/migration.sql`
+
+**Modified files**
+- `src/lib/app-share.ts` — production origin, Play package `com.creatortech.uniglim`, App Store `event_code`, case-insensitive join codes
+- `src/app/join/[code]/page.tsx` — 404 unknown code; Android/iOS browser redirect to store
+- `src/app/api/auth/join-event/route.ts` — `{ success, message, data.token }` envelope
+- `src/server/auth-join.ts` — `event_code` on success data
+- `src/server/event-guests.ts` — empty profile only when membership is created
+- `src/app/api/users/[user_id]/route.ts` — `events[].event_code`; event-scoped name/photo/instagram
+- `src/app/api/users/[user_id]/profile-picture/route.ts` — multipart `event_id`
+- `.env.example` — `APP_PUBLIC_URL` and Play package
+- OpenAPI / tests
+
+**Undo the DB part**
+```sql
+DROP TABLE IF EXISTS user_event_profiles;
+DELETE FROM _prisma_migrations WHERE migration_name = '20261025180000_user_event_profiles';
+```
+
+Apply with `npx prisma db execute --file prisma/migrations/20261025180000_user_event_profiles/migration.sql` if `migrate deploy` is still blocked. On Vercel set `APP_PUBLIC_URL=https://glimpse-admin-ecru.vercel.app`, `ANDROID_PACKAGE_NAME=com.creatortech.uniglim`, and Play/App Store URLs. Set `ANDROID_SHA256_CERT_FINGERPRINTS` and `IOS_TEAM_ID` so App Links / Universal Links verify.
+
+---
+
 ## How to resume after a restart
 
 1. PostgreSQL 16 runs as the Windows service `postgresql-x64-16` (starts automatically). If the app shows

@@ -1,4 +1,5 @@
 import prisma from '@/server/prisma';
+import { createEmptyUserEventProfile } from '@/server/user-event-profiles';
 import type { EnsureEventGuestParams } from '@/types';
 
 export type { EnsureEventGuestParams } from '@/types';
@@ -14,16 +15,28 @@ export type WeddingSide = 'groom' | 'bride';
 export async function ensureEventGuest(params: EnsureEventGuestParams): Promise<void> {
   const { event_id, user_id, venue_contact_id = null } = params;
 
-  await prisma.event_guests.upsert({
+  const existing = await prisma.event_guests.findUnique({
     where: { event_id_user_id: { event_id, user_id } },
-    update: {},
-    create: {
-      event_id,
-      user_id,
-      venue_contact_id,
-      rsvp_status: 'pending',
-    },
+    select: { id: true },
   });
+  if (existing) return;
+
+  try {
+    await prisma.event_guests.create({
+      data: {
+        event_id,
+        user_id,
+        venue_contact_id,
+        rsvp_status: 'pending',
+      },
+    });
+  } catch (error) {
+    const code = (error as { code?: string }).code;
+    if (code === 'P2002') return;
+    throw error;
+  }
+
+  await createEmptyUserEventProfile(user_id, event_id);
 }
 
 export async function isEventGuest(event_id: string, user_id: string): Promise<boolean> {

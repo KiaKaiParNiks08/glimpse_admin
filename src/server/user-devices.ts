@@ -1,4 +1,5 @@
 import type { device_type } from '@prisma/client';
+import { isWeddingCategory } from '@/lib/event-categories';
 import prisma from '@/server/prisma';
 
 export interface UpsertUserDeviceInput {
@@ -12,11 +13,14 @@ export interface UpsertUserDeviceInput {
  */
 export type PreviousEventItem = {
   event_id: string;
+  event_code: string;
   title: string;
   start_date: Date;
   end_date: Date;
   cover_image: string | null;
   status: string;
+  event_type: string | null;
+  show_wedding_side: boolean;
 };
 
 export async function listPreviousEventsForDevice(deviceId: string): Promise<PreviousEventItem[]> {
@@ -42,11 +46,13 @@ export async function listPreviousEventsForUsers(userIds: string[]): Promise<Pre
     where: { id: { in: eventIds } },
     select: {
       id: true,
+      event_code: true,
       title: true,
       start_date: true,
       end_date: true,
       cover_image: true,
       status: true,
+      event_categories: { select: { slug: true, name: true } },
     },
   });
   const byId = new Map(events.map((event) => [event.id, event]));
@@ -59,11 +65,14 @@ export async function listPreviousEventsForUsers(userIds: string[]): Promise<Pre
     seen.add(event.id);
     items.push({
       event_id: event.id,
+      event_code: event.event_code,
       title: event.title,
       start_date: event.start_date,
       end_date: event.end_date,
       cover_image: event.cover_image,
       status: event.status,
+      event_type: event.event_categories.slug,
+      show_wedding_side: isWeddingCategory(event.event_categories),
     });
   }
   return items;
