@@ -39,6 +39,7 @@ export function rekognitionDetectMinConfidence(): number {
   return n;
 }
 
+/** Unused by the gallery worker. DetectFaces/CompareFaces always go to Amazon Rekognition. */
 export function faceProviderKind(): 'local' | 'http' {
   return process.env.FACE_PROVIDER === 'http' ? 'http' : 'local';
 }

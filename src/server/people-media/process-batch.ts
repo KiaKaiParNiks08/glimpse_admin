@@ -9,7 +9,9 @@ import {
 } from './config';
 import { ensurePeopleMediaSchema } from './ensure-schema';
 import { clearFaceEmbedding, deleteMatchesForUser, toVectorLiteral } from './match';
+import { RekognitionJobError } from './rekognition-errors';
 import {
+  detectFacesOutcomeToError,
   detectRekognitionFaces,
   ensureMediaFace,
   rekognitionClient,
@@ -25,6 +27,11 @@ import { readStoredMedia } from './storage';
 import type { DetectedFace } from './types';
 
 class PermanentFaceError extends Error {}
+
+function isPermanentJobError(error: unknown): boolean {
+  if (error instanceof PermanentFaceError) return true;
+  return error instanceof RekognitionJobError && error.permanent;
+}
 
 function errorText(error: unknown): string {
   const message = error instanceof Error ? error.message : 'Face processing failed';
@@ -107,7 +114,7 @@ async function claimMediaIds(batch: number, maxAttempts: number): Promise<string
           processing_status = 'pending'
           OR (
             processing_status = 'failed'
-            AND attempt_count < ${maxAttempts}
+            AND attempt_count < ${maxAttempts}::int
             AND (next_retry_at IS NULL OR next_retry_at <= now())
           )
           OR (
@@ -116,7 +123,7 @@ async function claimMediaIds(batch: number, maxAttempts: number): Promise<string
           )
         )
       ORDER BY created_at ASC
-      LIMIT ${batch}
+      LIMIT ${batch}::int
       FOR UPDATE SKIP LOCKED
     )
     RETURNING id
@@ -140,12 +147,12 @@ async function claimReferenceIds(batch: number, maxAttempts: number): Promise<st
           processing_status = 'pending'
           OR (
             processing_status = 'failed'
-            AND attempt_count < ${maxAttempts}
+            AND attempt_count < ${maxAttempts}::int
             AND (next_retry_at IS NULL OR next_retry_at <= now())
           )
         )
       ORDER BY updated_at ASC
-      LIMIT ${batch}
+      LIMIT ${batch}::int
       FOR UPDATE SKIP LOCKED
     )
     RETURNING id
@@ -239,7 +246,7 @@ async function processMedia(id: string, deadline: number): Promise<void> {
   if (!asset) return;
 
   if (!rekognitionClient()) {
-    throw new Error('Rekognition is not configured');
+    throw new RekognitionJobError('unavailable', 'missing_config', true, 'Rekognition is not configured');
   }
 
   const loaded = await loadAssetCompareBytes(asset);
@@ -260,12 +267,10 @@ async function processMedia(id: string, deadline: number): Promise<void> {
   let primaryFaceId: string | null = null;
   let faceCount = asset.face_count;
   if (!asset.guest_scan_cursor) {
-    const detected = await detectRekognitionFaces(loaded.bytes);
-    if (detected === 'too_large') throw new PermanentFaceError('Image is larger than Rekognition allows');
-    if (detected === 'unavailable') throw new Error('Rekognition is not configured');
-    if (detected === 'error') throw new Error('Rekognition DetectFaces failed');
-    faceCount = detected.length;
-    if (detected.length === 0) {
+    const detected = await detectRekognitionFaces(loaded.bytes, { job_id: asset.id, job_kind: 'media' });
+    if (!detected.ok) throw detectFacesOutcomeToError(detected);
+    faceCount = detected.faces.length;
+    if (detected.faces.length === 0) {
       await prisma.media_faces.deleteMany({ where: { media_asset_id: asset.id } });
       await prisma.media_assets.update({
         where: { id: asset.id },
@@ -279,7 +284,7 @@ async function processMedia(id: string, deadline: number): Promise<void> {
       });
       return;
     }
-    primaryFaceId = await persistDetectedFaces(asset.id, detected);
+    primaryFaceId = await persistDetectedFaces(asset.id, detected.faces);
   } else {
     primaryFaceId = await ensureMediaFace(asset.id);
   }
@@ -354,15 +359,13 @@ async function processReference(id: string): Promise<void> {
   if (!row?.storage_key) return;
 
   const stored = await readStoredMedia(row.storage_key);
-  const detected = await detectRekognitionFaces(stored.bytes);
-  if (detected === 'too_large') throw new PermanentFaceError('Profile photo is larger than Rekognition allows');
-  if (detected === 'unavailable') throw new Error('Rekognition is not configured');
-  if (detected === 'error') throw new Error('Rekognition DetectFaces failed');
-  if (detected.length !== 1) {
+  const detected = await detectRekognitionFaces(stored.bytes, { job_id: id, job_kind: 'reference' });
+  if (!detected.ok) throw detectFacesOutcomeToError(detected);
+  if (detected.faces.length !== 1) {
     await clearFaceEmbedding(row.user_id);
     await deleteMatchesForUser(row.user_id);
     throw new PermanentFaceError(
-      detected.length === 0 ? 'No face detected in the reference photo' : 'Profile photo must contain exactly one face'
+      detected.faces.length === 0 ? 'No face detected in the reference photo' : 'Profile photo must contain exactly one face'
     );
   }
 
@@ -428,7 +431,14 @@ export async function processFaceQueue(options?: { timeBudgetMs?: number }): Pro
 
   console.error(
     '[people-media] worker start',
-    JSON.stringify({ batch, maxAttempts, budget_ms: options?.timeBudgetMs ?? faceWorkerTimeBudgetMs() })
+    JSON.stringify({
+      batch,
+      maxAttempts,
+      budget_ms: options?.timeBudgetMs ?? faceWorkerTimeBudgetMs(),
+      rekognition_configured: Boolean(rekognitionClient()),
+      region: process.env.AWS_REGION?.trim() || null,
+      face_provider: process.env.FACE_PROVIDER?.trim() || 'local',
+    })
   );
 
   const referenceIds = await claimReferenceIds(batch, maxAttempts);
@@ -439,7 +449,7 @@ export async function processFaceQueue(options?: { timeBudgetMs?: number }): Pro
       result.references_processed += 1;
     } catch (error) {
       result.references_failed += 1;
-      await failReference(id, errorText(error), error instanceof PermanentFaceError);
+      await failReference(id, errorText(error), isPermanentJobError(error));
     }
   }
 
@@ -451,14 +461,15 @@ export async function processFaceQueue(options?: { timeBudgetMs?: number }): Pro
       result.media_processed += 1;
     } catch (error) {
       result.media_failed += 1;
-      if (error instanceof PermanentFaceError) {
+      if (isPermanentJobError(error)) {
         await prisma.media_assets.update({
           where: { id },
           data: {
             processing_status: 'failed',
             attempt_count: faceMaxAttempts(),
             last_error: errorText(error),
-            match_complete: true,
+            match_complete: false,
+            next_retry_at: null,
           },
         });
       } else {
@@ -475,7 +486,7 @@ export async function processFaceQueue(options?: { timeBudgetMs?: number }): Pro
       result.scans_processed += 1;
     } catch (error) {
       result.scans_failed += 1;
-      await failUserEventScan(scan.user_id, scan.event_id, errorText(error));
+      await failUserEventScan(scan.user_id, scan.event_id, errorText(error), isPermanentJobError(error));
     }
   }
 
@@ -483,15 +494,33 @@ export async function processFaceQueue(options?: { timeBudgetMs?: number }): Pro
     SELECT (
       (SELECT COUNT(*) FROM media_assets
         WHERE match_complete = false
-          AND processing_status IN ('pending', 'failed', 'processing')
-          AND (next_retry_at IS NULL OR next_retry_at <= now()))
+          AND (
+            processing_status = 'pending'
+            OR (processing_status = 'processing' AND updated_at < now() - interval '15 minutes')
+            OR (
+              processing_status = 'failed'
+              AND attempt_count < ${maxAttempts}::int
+              AND (next_retry_at IS NULL OR next_retry_at <= now())
+            )
+          ))
       + (SELECT COUNT(*) FROM user_face_references
         WHERE consent = true AND revoked_at IS NULL AND storage_key IS NOT NULL
-          AND processing_status IN ('pending', 'failed', 'processing')
-          AND (next_retry_at IS NULL OR next_retry_at <= now()))
+          AND (
+            processing_status = 'pending'
+            OR (
+              processing_status = 'failed'
+              AND attempt_count < ${maxAttempts}::int
+              AND (next_retry_at IS NULL OR next_retry_at <= now())
+            )
+          ))
       + (SELECT COUNT(*) FROM user_event_face_scans
-        WHERE status IN ('pending', 'failed', 'processing')
-          AND (next_retry_at IS NULL OR next_retry_at <= now()))
+        WHERE status = 'pending'
+           OR (status = 'processing' AND updated_at < now() - interval '15 minutes')
+           OR (
+             status = 'failed'
+             AND attempt_count < ${maxAttempts}::int
+             AND (next_retry_at IS NULL OR next_retry_at <= now())
+           ))
     )::int AS n
   `;
   result.has_more = (leftover[0]?.n ?? 0) > 0;

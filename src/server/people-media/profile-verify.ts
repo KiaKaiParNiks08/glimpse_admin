@@ -3,7 +3,7 @@ import {
   compareFacePhotos,
   detectSingleProfileFace,
   rekognitionClient,
-  rekognitionProfileMinSimilarity,
+  rekognitionProfileUpdateMinSimilarity,
 } from './rekognition';
 import { readStoredMedia } from './storage';
 
@@ -18,7 +18,8 @@ const COULD_NOT_CHECK = 'We could not confirm this is the same person as your fi
 
 /**
  * The first profile photo is the person for this account and is not replaced.
- * A later photo must be that same person. Amazon Rekognition CompareFaces does the check.
+ * A later photo must be that same person (new background or style is allowed).
+ * Amazon Rekognition CompareFaces does the check.
  */
 export async function verifyProfileFace(userId: string, nextBytes: Buffer): Promise<ProfileFaceCheck> {
   let rows: { storage_key: string }[] = [];
@@ -40,6 +41,15 @@ export async function verifyProfileFace(userId: string, nextBytes: Buffer): Prom
   const storageKey = rows[0]?.storage_key;
   if (!storageKey) return checkFirstProfileFace(nextBytes);
 
+  const incoming = await detectSingleProfileFace(nextBytes);
+  if (incoming === 'too_large') {
+    return { ok: false, message: 'Use a profile photo under 5 MB so the face can be checked.' };
+  }
+  if (incoming === 'many' || incoming === 'none') return { ok: false, message: NEED_ONE_FACE };
+  if (incoming === 'unavailable' || incoming === 'error') {
+    return { ok: false, message: COULD_NOT_CHECK };
+  }
+
   if (!rekognitionClient()) return { ok: false, message: COULD_NOT_CHECK };
 
   let stored: Buffer;
@@ -50,13 +60,17 @@ export async function verifyProfileFace(userId: string, nextBytes: Buffer): Prom
     return { ok: false, message: COULD_NOT_CHECK };
   }
 
-  const compared = await compareFacePhotos(stored, nextBytes, rekognitionProfileMinSimilarity());
+  const minSimilarity = rekognitionProfileUpdateMinSimilarity();
+  const compared = await compareFacePhotos(stored, nextBytes, minSimilarity);
   if (compared.ok) return { ok: true, first: false };
   if (compared.reason === 'too_large') {
     return { ok: false, message: 'Use a profile photo under 5 MB so the face can be checked.' };
   }
   if (compared.reason === 'no_face') return { ok: false, message: NEED_ONE_FACE };
-  if (compared.reason === 'below_threshold') return { ok: false, message: DIFFERENT_PERSON };
+  if (compared.reason === 'below_threshold') {
+    console.error('[profile-face] same-person check below threshold', minSimilarity);
+    return { ok: false, message: DIFFERENT_PERSON };
+  }
   return { ok: false, message: COULD_NOT_CHECK };
 }
 

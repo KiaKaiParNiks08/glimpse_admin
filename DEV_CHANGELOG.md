@@ -6,6 +6,49 @@ Nothing below is committed yet — run `git status` to see the same list.
 
 ---
 
+## 2026-10-29 — Fix scan query 42P18 (parameter $4)
+
+User-event scans failed after DetectFaces succeeded: `reference_sha256 = $3 OR $4 IS NULL` left Postgres unable to type a null hash. Scans now use `IS NOT DISTINCT FROM ...::text`. Integer limits/attempts are `::int`.
+
+**Modified files**
+- `src/server/people-media/scans.ts`
+- `src/server/people-media/process-batch.ts`
+- `src/server/people-media/queue.ts`
+
+Redeploy, then open my-media or POST `/api/internal/media/process`. `scans_failed` should drop; my-media fills only after CompareFaces writes matches.
+
+---
+
+## 2026-10-28 — Rekognition DetectFaces worker diagnostics and fail handling
+
+`FACE_PROVIDER=local` is an unused hash-embedding helper. People in Media always calls Amazon Rekognition `DetectFaces` / `CompareFaces` with `Image.Bytes` after S3/local download. Production failed at DetectFaces; the log had no AWS name. Exhausted failed jobs still counted as `has_more`, so the queue never drained. Detection failures were marked `match_complete`.
+
+**New files**
+- `src/server/people-media/rekognition-errors.ts` / `.test.ts`
+- `src/server/people-media/rekognition-image.ts` / `.test.ts`
+
+**Modified files**
+- `src/server/people-media/rekognition.ts` — structured DetectFaces/CompareFaces logs; JPEG/PNG gate
+- `src/server/people-media/process-batch.ts` / `queue.ts` / `scans.ts` — permanent vs retryable; do not complete on detect failure
+- `.env.example` — FACE_PROVIDER does not select Rekognition; `AWS_API_KEY` unused
+
+IAM still required on the access-key user: `rekognition:DetectFaces`, `rekognition:CompareFaces`, plus existing S3 get. Redeploy after this change. Retry after IAM: set `attempt_count = 0`, `processing_status = 'pending'`, `next_retry_at = NULL` on failed assets/scans.
+
+---
+
+## 2026-10-28 — Profile photo same-person updates + Rekognition error logs
+
+Later profile photos of the same person were rejected when background or style changed, because CompareFaces used threshold 95 and AWS did not return scores below that. DetectFaces/CompareFaces also logged no AWS error name, so IAM denials looked like a generic failure.
+
+**Modified files**
+- `src/server/people-media/rekognition.ts` — log DetectFaces/CompareFaces error name; AWS compare floor 80; `PROFILE_FACE_UPDATE_MIN_SIMILARITY` (default 90)
+- `src/server/people-media/profile-verify.ts` — require one face on the new photo; same-person update at 90, not 95
+- `.env.example` — `PROFILE_FACE_UPDATE_MIN_SIMILARITY`
+
+The first enrolled face is still the locked identity. A different person is still rejected. Gallery threshold is unchanged. Rekognition IAM (`DetectFaces` / `CompareFaces`) is still required on the AWS user; Vercel env vars are not where that permission lives.
+
+---
+
 ## 2026-10-25 — Event QR join URL, landing, join-event, per-event profiles
 
 QR / Copy link now encodes `APP_PUBLIC_URL/join/{event_code}` (production host on Vercel). It no longer falls back to `APP_BASE_URL`, which was localhost. Logged-in join is `POST /api/auth/join-event`. Guest name/photo/Instagram are per event in `user_event_profiles`. `POST /api/auth`, `/api/auth/verify`, and `/api/auth/switch-event` are unchanged.

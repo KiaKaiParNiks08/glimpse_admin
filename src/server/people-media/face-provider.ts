@@ -27,9 +27,8 @@ function l2Normalize(values: number[]): number[] {
 }
 
 /**
- * Deterministic embedding so the pipeline can run without a GPU.
- * The same file always maps to the same vector. Different photos of the same person do not match.
- * Set FACE_PROVIDER=http for real detection.
+ * Legacy hash embedding. Not used by People in Media matching.
+ * Gallery and profile checks call Amazon Rekognition DetectFaces/CompareFaces.
  */
 function embeddingFromBytes(bytes: Buffer): number[] {
   const out = new Array<number>(FACE_EMBEDDING_DIM).fill(0);

@@ -1,4 +1,5 @@
 import prisma from '@/server/prisma';
+import { faceMaxAttempts } from './config';
 import { MAX_WORKER_CHAIN } from './recognition-policy';
 import type { ProcessBatchResult } from './process-batch';
 
@@ -21,19 +22,38 @@ function isRekognitionConfigured(): boolean {
 }
 
 export async function hasPendingRecognitionWork(): Promise<boolean> {
+  const maxAttempts = faceMaxAttempts();
   const rows = await prisma.$queryRaw<{ n: number }[]>`
     SELECT (
       (SELECT COUNT(*) FROM media_assets
         WHERE match_complete = false
-          AND processing_status IN ('pending', 'processing', 'failed')
-          AND (next_retry_at IS NULL OR next_retry_at <= now()))
+          AND (
+            processing_status = 'pending'
+            OR (processing_status = 'processing' AND updated_at < now() - interval '15 minutes')
+            OR (
+              processing_status = 'failed'
+              AND attempt_count < ${maxAttempts}::int
+              AND (next_retry_at IS NULL OR next_retry_at <= now())
+            )
+          ))
       + (SELECT COUNT(*) FROM user_face_references
         WHERE consent = true AND revoked_at IS NULL AND storage_key IS NOT NULL
-          AND processing_status IN ('pending', 'processing', 'failed')
-          AND (next_retry_at IS NULL OR next_retry_at <= now()))
+          AND (
+            processing_status = 'pending'
+            OR (
+              processing_status = 'failed'
+              AND attempt_count < ${maxAttempts}::int
+              AND (next_retry_at IS NULL OR next_retry_at <= now())
+            )
+          ))
       + (SELECT COUNT(*) FROM user_event_face_scans
-        WHERE status IN ('pending', 'processing', 'failed')
-          AND (next_retry_at IS NULL OR next_retry_at <= now()))
+        WHERE status = 'pending'
+           OR (status = 'processing' AND updated_at < now() - interval '15 minutes')
+           OR (
+             status = 'failed'
+             AND attempt_count < ${maxAttempts}::int
+             AND (next_retry_at IS NULL OR next_retry_at <= now())
+           ))
     )::int AS n
   `;
   return (rows[0]?.n ?? 0) > 0;

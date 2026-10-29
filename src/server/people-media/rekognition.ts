@@ -10,6 +10,8 @@ import {
   videoThumbnailEvidence,
 } from './recognition-policy';
 import { readStoredMedia } from './storage';
+import { RekognitionJobError, classifyRekognitionError } from './rekognition-errors';
+import { isRekognitionSupportedImage, sniffImageKind } from './rekognition-image';
 
 const REKOGNITION_MAX_BYTES = 5 * 1024 * 1024;
 
@@ -35,6 +37,13 @@ export function rekognitionMediaMinSimilarity(): number {
 export function rekognitionProfileMinSimilarity(): number {
   const n = Number(process.env.PROFILE_FACE_MIN_SIMILARITY ?? '95');
   if (!Number.isFinite(n) || n < 80 || n > 100) return 95;
+  return n;
+}
+
+/** Later profile photos of the same person (new background/style). Lower than the first-photo lock. */
+export function rekognitionProfileUpdateMinSimilarity(): number {
+  const n = Number(process.env.PROFILE_FACE_UPDATE_MIN_SIMILARITY ?? '90');
+  if (!Number.isFinite(n) || n < 70 || n > 100) return 90;
   return n;
 }
 
@@ -65,23 +74,121 @@ function isThrottleError(error: unknown): boolean {
   );
 }
 
+export type DetectFacesContext = {
+  job_id?: string;
+  job_kind?: 'media' | 'reference' | 'scan' | 'profile';
+};
+
+export type DetectFacesOutcome =
+  | { ok: true; faces: DetectedRekognitionFace[]; byte_length: number; content_kind: string }
+  | {
+      ok: false;
+      code:
+        | 'too_large'
+        | 'unavailable'
+        | 'unsupported_format'
+        | 'rekognition_access_denied'
+        | 'rekognition_invalid_credentials'
+        | 'rekognition_invalid_image'
+        | 'rekognition_throttled'
+        | 'rekognition_error';
+      permanent: boolean;
+      byte_length: number;
+      content_kind: string;
+    };
+
+function logRekognitionFailure(
+  operation: string,
+  error: unknown,
+  extra: Record<string, unknown>
+): ReturnType<typeof classifyRekognitionError> {
+  const classified = classifyRekognitionError(error);
+  console.error(
+    `[people-media] Rekognition ${operation} failed`,
+    JSON.stringify({
+      kind: classified.kind,
+      name: classified.name,
+      http_status: classified.http_status,
+      request_id: classified.request_id,
+      region: classified.region,
+      permanent: classified.permanent,
+      message: classified.message,
+      ...extra,
+    })
+  );
+  return classified;
+}
+
+export function detectFacesOutcomeToError(outcome: Extract<DetectFacesOutcome, { ok: false }>): Error {
+  if (outcome.code === 'unavailable') {
+    return new RekognitionJobError('unavailable', 'missing_config', true, 'Rekognition is not configured');
+  }
+  if (outcome.code === 'too_large') {
+    return new RekognitionJobError(outcome.code, 'invalid_image', true, 'Image is larger than Rekognition allows');
+  }
+  if (outcome.code === 'unsupported_format') {
+    return new RekognitionJobError(
+      outcome.code,
+      'unsupported_format',
+      true,
+      `Rekognition Image.Bytes requires JPEG or PNG (got ${outcome.content_kind})`
+    );
+  }
+  const kind =
+    outcome.code === 'rekognition_access_denied'
+      ? 'access_denied'
+      : outcome.code === 'rekognition_invalid_credentials'
+        ? 'invalid_credentials'
+        : outcome.code === 'rekognition_throttled'
+          ? 'throttled'
+          : outcome.code === 'rekognition_invalid_image'
+            ? 'invalid_image'
+            : 'unknown';
+  return new RekognitionJobError(outcome.code, kind, outcome.permanent, outcome.code);
+}
+
 /** First profile photo must contain exactly one face so that face stays the account. */
 export async function detectSingleProfileFace(
   bytes: Buffer
 ): Promise<'one' | 'none' | 'many' | 'too_large' | 'unavailable' | 'error'> {
-  const faces = await detectRekognitionFaces(bytes);
-  if (faces === 'too_large' || faces === 'unavailable' || faces === 'error') return faces;
-  if (faces.length === 1) return 'one';
-  if (faces.length === 0) return 'none';
+  const outcome = await detectRekognitionFaces(bytes, { job_kind: 'profile' });
+  if (!outcome.ok) {
+    if (outcome.code === 'too_large') return 'too_large';
+    if (outcome.code === 'unavailable') return 'unavailable';
+    return 'error';
+  }
+  if (outcome.faces.length === 1) return 'one';
+  if (outcome.faces.length === 0) return 'none';
   return 'many';
 }
 
 export async function detectRekognitionFaces(
-  bytes: Buffer
-): Promise<DetectedRekognitionFace[] | 'too_large' | 'unavailable' | 'error'> {
+  bytes: Buffer,
+  context: DetectFacesContext = {}
+): Promise<DetectFacesOutcome> {
+  const content_kind = sniffImageKind(bytes);
+  const byte_length = bytes.length;
   const client = rekognitionClient();
-  if (!client) return 'unavailable';
-  if (bytes.length > REKOGNITION_MAX_BYTES) return 'too_large';
+  if (!client) {
+    return { ok: false, code: 'unavailable', permanent: true, byte_length, content_kind };
+  }
+  if (byte_length > REKOGNITION_MAX_BYTES) {
+    return { ok: false, code: 'too_large', permanent: true, byte_length, content_kind };
+  }
+  if (!isRekognitionSupportedImage(content_kind)) {
+    console.error(
+      '[people-media] Rekognition DetectFaces skipped unsupported bytes',
+      JSON.stringify({
+        job_id: context.job_id ?? null,
+        job_kind: context.job_kind ?? null,
+        retrieved: true,
+        byte_length,
+        content_kind,
+        region: process.env.AWS_REGION?.trim() ?? null,
+      })
+    );
+    return { ok: false, code: 'unsupported_format', permanent: true, byte_length, content_kind };
+  }
   const minConfidence = rekognitionDetectMinConfidence();
   try {
     const result = await client.send(
@@ -91,7 +198,7 @@ export async function detectRekognitionFaces(
       })
     );
     const details = result.FaceDetails ?? [];
-    return details
+    const faces = details
       .filter((face) => (face.Confidence ?? 0) >= minConfidence && face.BoundingBox)
       .map((face) => ({
         confidence: face.Confidence ?? 0,
@@ -102,11 +209,40 @@ export async function detectRekognitionFaces(
           top: face.BoundingBox?.Top ?? 0,
         },
       }));
+    return { ok: true, faces, byte_length, content_kind };
   } catch (error) {
     const name = error instanceof Error ? error.name : '';
-    if (name === 'InvalidParameterException') return [];
-    console.error('[people-media] Rekognition detect faces failed');
-    return 'error';
+    if (name === 'InvalidParameterException') {
+      return { ok: true, faces: [], byte_length, content_kind };
+    }
+    const classified = logRekognitionFailure('DetectFaces', error, {
+      job_id: context.job_id ?? null,
+      job_kind: context.job_kind ?? null,
+      retrieved: true,
+      byte_length,
+      content_kind,
+    });
+    const mapped: Extract<DetectFacesOutcome, { ok: false }>['code'] =
+      classified.kind === 'access_denied'
+        ? 'rekognition_access_denied'
+        : classified.kind === 'invalid_credentials'
+          ? 'rekognition_invalid_credentials'
+          : classified.kind === 'invalid_image'
+            ? 'rekognition_invalid_image'
+            : classified.kind === 'unsupported_format'
+              ? 'unsupported_format'
+              : classified.kind === 'throttled'
+                ? 'rekognition_throttled'
+                : classified.kind === 'missing_config'
+                  ? 'unavailable'
+                  : 'rekognition_error';
+    return {
+      ok: false,
+      code: mapped,
+      permanent: classified.permanent,
+      byte_length,
+      content_kind,
+    };
   }
 }
 
@@ -131,7 +267,7 @@ export async function compareFacePhotos(
         new CompareFacesCommand({
           SourceImage: { Bytes: new Uint8Array(sourceBytes) },
           TargetImage: { Bytes: new Uint8Array(targetBytes) },
-          SimilarityThreshold: minSimilarity,
+          SimilarityThreshold: Math.min(minSimilarity, 80),
         })
       );
       const best = result.FaceMatches?.[0];
@@ -159,12 +295,7 @@ export async function compareFacePhotos(
         await sleep(200 * 2 ** attempt);
         continue;
       }
-      const message = error instanceof Error ? error.message : '';
-      if (name === 'AccessDeniedException' || /not authorized|AccessDenied/i.test(message)) {
-        console.error('[people-media] IAM user needs rekognition:CompareFaces');
-        return { ok: false, reason: 'error' };
-      }
-      console.error('[people-media] Rekognition compare failed');
+      logRekognitionFailure('CompareFaces', error, {});
       return { ok: false, reason: 'error' };
     }
   }
@@ -269,13 +400,27 @@ export async function compareReferenceToAsset(input: {
   referenceBytes: Buffer;
   targetBytes: Buffer;
   mediaType: 'image' | 'video';
+  jobId?: string;
 }): Promise<FaceCompareResult> {
-  const detected = await detectRekognitionFaces(input.targetBytes);
-  if (detected === 'too_large') return { ok: false, reason: 'too_large' };
-  if (detected === 'unavailable') return { ok: false, reason: 'unavailable' };
-  if (detected === 'error') return { ok: false, reason: 'error' };
-  if (detected.length === 0) return { ok: false, reason: 'no_face' };
-  return compareFacePhotos(input.referenceBytes, input.targetBytes, rekognitionMediaMinSimilarity());
+  const detected = await detectRekognitionFaces(input.targetBytes, { job_id: input.jobId, job_kind: 'scan' });
+  if (!detected.ok) {
+    throw detectFacesOutcomeToError(detected);
+  }
+  if (detected.faces.length === 0) return { ok: false, reason: 'no_face' };
+  const compared = await compareFacePhotos(
+    input.referenceBytes,
+    input.targetBytes,
+    rekognitionMediaMinSimilarity()
+  );
+  if (!compared.ok && (compared.reason === 'error' || compared.reason === 'unavailable' || compared.reason === 'throttled')) {
+    throw new RekognitionJobError(
+      `rekognition_${compared.reason}`,
+      compared.reason === 'throttled' ? 'throttled' : compared.reason === 'unavailable' ? 'missing_config' : 'unknown',
+      compared.reason === 'unavailable',
+      compared.reason
+    );
+  }
+  return compared;
 }
 
 export function evidenceForCompare(

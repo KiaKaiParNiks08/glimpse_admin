@@ -149,7 +149,7 @@ export async function matchGuestsForAssetPage(input: {
             AND ufr.storage_key IS NOT NULL
             AND ufr.user_id > ${cursorSql}::uuid
           ORDER BY ufr.user_id ASC
-          LIMIT ${pageSize}
+          LIMIT ${pageSize}::int
         `
       : await prisma.$queryRaw<GuestRow[]>`
           SELECT ufr.user_id, ufr.storage_key, ufr.content_sha256
@@ -159,7 +159,7 @@ export async function matchGuestsForAssetPage(input: {
             AND ufr.revoked_at IS NULL
             AND ufr.storage_key IS NOT NULL
           ORDER BY ufr.user_id ASC
-          LIMIT ${pageSize}
+          LIMIT ${pageSize}::int
         `;
     if (guests.length === 0) {
       return { lastUserId, matched, scanned, done: true, throttled };
@@ -219,7 +219,7 @@ export async function claimUserEventScans(batch: number, maxAttempts: number): P
       WHERE status = 'pending'
          OR (
            status = 'failed'
-           AND attempt_count < ${maxAttempts}
+           AND attempt_count < ${maxAttempts}::int
            AND (next_retry_at IS NULL OR next_retry_at <= now())
          )
          OR (
@@ -227,7 +227,7 @@ export async function claimUserEventScans(batch: number, maxAttempts: number): P
            AND updated_at < now() - interval '15 minutes'
          )
       ORDER BY updated_at ASC
-      LIMIT ${batch}
+      LIMIT ${batch}::int
       FOR UPDATE SKIP LOCKED
     )
     RETURNING user_id, event_id
@@ -293,7 +293,7 @@ export async function processUserEventScan(
                 OR (ma.created_at = ${lastCreated} AND ma.id > ${lastId}::uuid)
               )
             ORDER BY ma.created_at ASC NULLS LAST, ma.id ASC
-            LIMIT ${pageSize}
+            LIMIT ${pageSize}::int
           `
         : lastCreated
           ? await prisma.$queryRaw<AssetRow[]>`
@@ -302,14 +302,14 @@ export async function processUserEventScan(
               WHERE ma.event_id = ${eventId}::uuid
                 AND ma.created_at > ${lastCreated}
               ORDER BY ma.created_at ASC NULLS LAST, ma.id ASC
-              LIMIT ${pageSize}
+              LIMIT ${pageSize}::int
             `
           : await prisma.$queryRaw<AssetRow[]>`
               SELECT ma.id, ma.storage_key, ma.media_type::text AS media_type, ma.thumbnail_storage_key, ma.created_at
               FROM media_assets ma
               WHERE ma.event_id = ${eventId}::uuid
               ORDER BY ma.created_at ASC NULLS LAST, ma.id ASC
-              LIMIT ${pageSize}
+              LIMIT ${pageSize}::int
             `;
 
     if (assets.length === 0) {
@@ -335,7 +335,7 @@ export async function processUserEventScan(
         WHERE media_asset_id = ${asset.id}::uuid
           AND user_id = ${userId}::uuid
           AND match_source = 'rekognition'
-          AND (reference_sha256 = ${ref.content_sha256} OR ${ref.content_sha256} IS NULL)
+          AND reference_sha256 IS NOT DISTINCT FROM ${ref.content_sha256}::text
         LIMIT 1
       `;
       if (existing[0]) continue;
@@ -417,16 +417,34 @@ export async function processUserEventScan(
   return { scanned, matched, complete: false };
 }
 
-export async function failUserEventScan(userId: string, eventId: string, message: string): Promise<void> {
+export async function failUserEventScan(
+  userId: string,
+  eventId: string,
+  message: string,
+  permanent = false
+): Promise<void> {
   const maxAttempts = faceMaxAttempts();
+  if (permanent) {
+    await prisma.$executeRaw`
+      UPDATE user_event_face_scans
+      SET status = 'failed',
+          attempt_count = ${maxAttempts}::int,
+          last_error = ${message},
+          next_retry_at = NULL,
+          updated_at = now()
+      WHERE user_id = ${userId}::uuid
+        AND event_id = ${eventId}::uuid
+    `;
+    return;
+  }
   await prisma.$executeRaw`
     UPDATE user_event_face_scans
     SET status = 'failed',
+        attempt_count = attempt_count + 1,
         last_error = ${message},
         next_retry_at = now() + (LEAST(600, 15 * power(2, GREATEST(attempt_count, 1))) * interval '1 second'),
         updated_at = now()
     WHERE user_id = ${userId}::uuid
       AND event_id = ${eventId}::uuid
-      AND attempt_count < ${maxAttempts}
   `;
 }
