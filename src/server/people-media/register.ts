@@ -2,6 +2,7 @@ import { Prisma } from '@prisma/client';
 import prisma from '@/server/prisma';
 import { ensurePeopleMediaSchema } from './ensure-schema';
 import { scheduleFaceProcessing } from './schedule';
+import { reopenCompleteScansForEvent } from './scans';
 import { sha256Hex, storageKeyFromMediaUrl } from './storage';
 
 export type MediaAssetSource = 'photographer' | 'user_post';
@@ -87,6 +88,7 @@ export async function registerMediaAsset(input: RegisterMediaInput): Promise<Reg
           last_error: null,
         },
       });
+      await reopenCompleteScansForEvent(input.eventId);
       return { id: existing.id, processing_status: 'pending', created: false };
     }
     return { id: existing.id, processing_status: existing.processing_status, created: false };
@@ -112,6 +114,7 @@ export async function registerMediaAsset(input: RegisterMediaInput): Promise<Reg
       },
       select: assetSelect,
     });
+    await reopenCompleteScansForEvent(input.eventId);
     return { id: created.id, processing_status: created.processing_status, created: true };
   } catch (error) {
     if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {

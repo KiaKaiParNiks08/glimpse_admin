@@ -9,7 +9,6 @@ import {
 } from './rekognition';
 import { readStoredMedia } from './storage';
 
-type GuestRow = { user_id: string; storage_key: string; content_sha256: string | null };
 type AssetRow = {
   id: string;
   storage_key: string;
@@ -71,6 +70,19 @@ export async function ensureUserEventScans(userId: string, referenceSha256: stri
   return Number(result);
 }
 
+/** New event photos should be compared even if a user's scan already finished. Keep the cursor. */
+export async function reopenCompleteScansForEvent(eventId: string): Promise<void> {
+  await prisma.$executeRaw`
+    UPDATE user_event_face_scans
+    SET status = 'pending',
+        last_error = NULL,
+        next_retry_at = NULL,
+        updated_at = now()
+    WHERE event_id = ${eventId}::uuid
+      AND status = 'complete'
+  `;
+}
+
 export async function resetUserEventScans(userId: string, referenceSha256: string): Promise<void> {
   await prisma.$executeRaw`
     INSERT INTO user_event_face_scans (
@@ -116,95 +128,6 @@ async function loadCompareBytes(asset: AssetRow): Promise<{ bytes: Buffer; media
   }
   const stored = await readStoredMedia(asset.storage_key);
   return { bytes: stored.bytes, mediaType: 'image' };
-}
-
-export async function matchGuestsForAssetPage(input: {
-  eventId: string;
-  mediaAssetId: string;
-  mediaFaceId: string;
-  targetBytes: Buffer;
-  mediaType: 'image' | 'video';
-  cursor: string | null;
-  deadline: number;
-}): Promise<{ lastUserId: string | null; matched: number; scanned: number; done: boolean; throttled: boolean }> {
-  if (!rekognitionClient()) {
-    return { lastUserId: input.cursor, matched: 0, scanned: 0, done: false, throttled: false };
-  }
-  const pageSize = faceComparePageSize();
-  let cursor = input.cursor;
-  let matched = 0;
-  let scanned = 0;
-  let lastUserId = cursor;
-  let throttled = false;
-
-  while (Date.now() < input.deadline) {
-    const cursorSql = cursor;
-    const guests = cursorSql
-      ? await prisma.$queryRaw<GuestRow[]>`
-          SELECT ufr.user_id, ufr.storage_key, ufr.content_sha256
-          FROM user_face_references ufr
-          JOIN event_guests eg ON eg.user_id = ufr.user_id AND eg.event_id = ${input.eventId}::uuid
-          WHERE ufr.consent = true
-            AND ufr.revoked_at IS NULL
-            AND ufr.storage_key IS NOT NULL
-            AND ufr.user_id > ${cursorSql}::uuid
-          ORDER BY ufr.user_id ASC
-          LIMIT ${pageSize}::int
-        `
-      : await prisma.$queryRaw<GuestRow[]>`
-          SELECT ufr.user_id, ufr.storage_key, ufr.content_sha256
-          FROM user_face_references ufr
-          JOIN event_guests eg ON eg.user_id = ufr.user_id AND eg.event_id = ${input.eventId}::uuid
-          WHERE ufr.consent = true
-            AND ufr.revoked_at IS NULL
-            AND ufr.storage_key IS NOT NULL
-          ORDER BY ufr.user_id ASC
-          LIMIT ${pageSize}::int
-        `;
-    if (guests.length === 0) {
-      return { lastUserId, matched, scanned, done: true, throttled };
-    }
-    for (const guest of guests) {
-      if (Date.now() >= input.deadline) {
-        return { lastUserId, matched, scanned, done: false, throttled };
-      }
-      lastUserId = guest.user_id;
-      scanned += 1;
-      let source: Buffer;
-      try {
-        source = (await readStoredMedia(guest.storage_key)).bytes;
-      } catch {
-        console.error('[people-media] guest reference could not be read', guest.user_id);
-        continue;
-      }
-      const compared = await compareReferenceToAsset({
-        referenceBytes: source,
-        targetBytes: input.targetBytes,
-        mediaType: input.mediaType,
-      });
-      if (!compared.ok) {
-        if (compared.reason === 'throttled') {
-          throttled = true;
-          return { lastUserId, matched, scanned, done: false, throttled };
-        }
-        continue;
-      }
-      await upsertRekognitionMatch({
-        mediaAssetId: input.mediaAssetId,
-        mediaFaceId: input.mediaFaceId,
-        userId: guest.user_id,
-        similarity: compared.similarity / 100,
-        referenceSha256: guest.content_sha256,
-        evidence: evidenceForCompare(input.mediaType, compared),
-      });
-      matched += 1;
-    }
-    cursor = lastUserId;
-    if (guests.length < pageSize) {
-      return { lastUserId, matched, scanned, done: true, throttled };
-    }
-  }
-  return { lastUserId, matched, scanned, done: false, throttled };
 }
 
 export async function claimUserEventScans(batch: number, maxAttempts: number): Promise<{ user_id: string; event_id: string }[]> {

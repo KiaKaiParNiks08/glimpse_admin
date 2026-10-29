@@ -19,7 +19,6 @@ import {
 import {
   claimUserEventScans,
   failUserEventScan,
-  matchGuestsForAssetPage,
   processUserEventScan,
   resetUserEventScans,
 } from './scans';
@@ -229,16 +228,27 @@ async function persistDetectedFaces(
   return primary ?? (await ensureMediaFace(assetId));
 }
 
-async function processMedia(id: string, deadline: number): Promise<void> {
+async function markMediaReady(id: string, faceCount: number): Promise<void> {
+  await prisma.media_assets.update({
+    where: { id },
+    data: {
+      processing_status: 'ready',
+      match_complete: true,
+      face_count: faceCount,
+      last_error: null,
+      next_retry_at: null,
+      processed_at: new Date(),
+    },
+  });
+}
+
+async function processMedia(id: string): Promise<void> {
   const asset = await prisma.media_assets.findUnique({
     where: { id },
     select: {
       id: true,
-      event_id: true,
       storage_key: true,
       media_type: true,
-      guest_scan_cursor: true,
-      match_complete: true,
       face_count: true,
       thumbnail_storage_key: true,
     },
@@ -249,99 +259,27 @@ async function processMedia(id: string, deadline: number): Promise<void> {
     throw new RekognitionJobError('unavailable', 'missing_config', true, 'Rekognition is not configured');
   }
 
+  const existingFaces = await prisma.media_faces.count({ where: { media_asset_id: asset.id } });
+  if (existingFaces > 0) {
+    await markMediaReady(asset.id, existingFaces);
+    return;
+  }
+
   const loaded = await loadAssetCompareBytes(asset);
   if (loaded === 'no_frame') {
-    await prisma.media_assets.update({
-      where: { id: asset.id },
-      data: {
-        processing_status: 'ready',
-        match_complete: true,
-        face_count: 0,
-        last_error: null,
-        processed_at: new Date(),
-      },
-    });
+    await markMediaReady(asset.id, 0);
     return;
   }
 
-  let primaryFaceId: string | null = null;
-  let faceCount = asset.face_count;
-  if (!asset.guest_scan_cursor) {
-    const detected = await detectRekognitionFaces(loaded.bytes, { job_id: asset.id, job_kind: 'media' });
-    if (!detected.ok) throw detectFacesOutcomeToError(detected);
-    faceCount = detected.faces.length;
-    if (detected.faces.length === 0) {
-      await prisma.media_faces.deleteMany({ where: { media_asset_id: asset.id } });
-      await prisma.media_assets.update({
-        where: { id: asset.id },
-        data: {
-          processing_status: 'ready',
-          match_complete: true,
-          face_count: 0,
-          last_error: null,
-          processed_at: new Date(),
-        },
-      });
-      return;
-    }
-    primaryFaceId = await persistDetectedFaces(asset.id, detected.faces);
-  } else {
-    primaryFaceId = await ensureMediaFace(asset.id);
-  }
-
-  if (!primaryFaceId) throw new Error('Unable to store media face');
-
-  const page = await matchGuestsForAssetPage({
-    eventId: asset.event_id,
-    mediaAssetId: asset.id,
-    mediaFaceId: primaryFaceId,
-    targetBytes: loaded.bytes,
-    mediaType: loaded.mediaType,
-    cursor: asset.guest_scan_cursor,
-    deadline,
-  });
-
-  if (page.throttled) {
-    await prisma.media_assets.update({
-      where: { id: asset.id },
-      data: {
-        processing_status: 'pending',
-        guest_scan_cursor: page.lastUserId,
-        match_complete: false,
-        face_count: faceCount,
-        last_error: 'throttled',
-        next_retry_at: new Date(Date.now() + 20_000),
-      },
-    });
+  const detected = await detectRekognitionFaces(loaded.bytes, { job_id: asset.id, job_kind: 'media' });
+  if (!detected.ok) throw detectFacesOutcomeToError(detected);
+  if (detected.faces.length === 0) {
+    await prisma.media_faces.deleteMany({ where: { media_asset_id: asset.id } });
+    await markMediaReady(asset.id, 0);
     return;
   }
-
-  if (page.done) {
-    await prisma.media_assets.update({
-      where: { id: asset.id },
-      data: {
-        processing_status: 'ready',
-        match_complete: true,
-        guest_scan_cursor: page.lastUserId,
-        face_count: faceCount,
-        last_error: null,
-        next_retry_at: null,
-        processed_at: new Date(),
-      },
-    });
-    return;
-  }
-
-  await prisma.media_assets.update({
-    where: { id: asset.id },
-    data: {
-      processing_status: 'pending',
-      match_complete: false,
-      guest_scan_cursor: page.lastUserId,
-      face_count: faceCount,
-      last_error: null,
-    },
-  });
+  await persistDetectedFaces(asset.id, detected.faces);
+  await markMediaReady(asset.id, detected.faces.length);
 }
 
 async function processReference(id: string): Promise<void> {
@@ -453,11 +391,23 @@ export async function processFaceQueue(options?: { timeBudgetMs?: number }): Pro
     }
   }
 
+  const scans = await claimUserEventScans(batch, maxAttempts);
+  for (const scan of scans) {
+    if (Date.now() >= deadline) break;
+    try {
+      await processUserEventScan(scan.user_id, scan.event_id, deadline);
+      result.scans_processed += 1;
+    } catch (error) {
+      result.scans_failed += 1;
+      await failUserEventScan(scan.user_id, scan.event_id, errorText(error), isPermanentJobError(error));
+    }
+  }
+
   const mediaIds = await claimMediaIds(batch, maxAttempts);
   for (const id of mediaIds) {
     if (Date.now() >= deadline) break;
     try {
-      await processMedia(id, deadline);
+      await processMedia(id);
       result.media_processed += 1;
     } catch (error) {
       result.media_failed += 1;
@@ -475,18 +425,6 @@ export async function processFaceQueue(options?: { timeBudgetMs?: number }): Pro
       } else {
         await failMedia(id, errorText(error));
       }
-    }
-  }
-
-  const scans = await claimUserEventScans(batch, maxAttempts);
-  for (const scan of scans) {
-    if (Date.now() >= deadline) break;
-    try {
-      await processUserEventScan(scan.user_id, scan.event_id, deadline);
-      result.scans_processed += 1;
-    } catch (error) {
-      result.scans_failed += 1;
-      await failUserEventScan(scan.user_id, scan.event_id, errorText(error), isPermanentJobError(error));
     }
   }
 

@@ -6,6 +6,21 @@ Nothing below is committed yet — run `git status` to see the same list.
 
 ---
 
+## 2026-10-29 — Stop media jobs from starving my-media scans
+
+After the $4 SQL fix, production logs showed `media_processed:2`, `scans_processed:1`, `scans_failed:0`, `has_more:true` every ~12s. Each media job ran DetectFaces then CompareFaces against every guest until the my-media time budget, then went back to pending. The same two photos never finished; the user scan barely moved.
+
+Media jobs now only DetectFaces and mark `match_complete`. CompareFaces runs on user-event scans first. New gallery/feed photos reopen completed scans (cursor kept).
+
+**Modified files**
+- `src/server/people-media/process-batch.ts`
+- `src/server/people-media/scans.ts`
+- `src/server/people-media/register.ts`
+
+Redeploy, then open my-media. Expect `media_processed` to drop to 0 once faces are stored, `scans_processed` to keep going until `has_more` is false.
+
+---
+
 ## 2026-10-29 — Fix scan query 42P18 (parameter $4)
 
 User-event scans failed after DetectFaces succeeded: `reference_sha256 = $3 OR $4 IS NULL` left Postgres unable to type a null hash. Scans now use `IS NOT DISTINCT FROM ...::text`. Integer limits/attempts are `::int`.
