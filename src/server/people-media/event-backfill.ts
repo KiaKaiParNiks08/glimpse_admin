@@ -176,7 +176,7 @@ export async function backfillEventRecognition(
   if (!dryRun) {
     const assets = await prisma.media_assets.updateMany({
       where: { event_id: eventId, processing_status: 'failed' },
-      data: { processing_status: 'pending', next_retry_at: null, match_complete: false },
+      data: { processing_status: 'pending', next_retry_at: null, match_complete: false, attempt_count: 0, last_error: null },
     });
     failed_assets_requeued = assets.count;
     failed_scans_requeued = await prisma.$executeRaw`

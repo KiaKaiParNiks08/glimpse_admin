@@ -34,8 +34,8 @@ export function faceWorkerTimeBudgetMs(): number {
 }
 
 export function rekognitionDetectMinConfidence(): number {
-  const n = Number(process.env.FACE_DETECT_MIN_CONFIDENCE ?? '90');
-  if (!Number.isFinite(n) || n < 50 || n > 100) return 90;
+  const n = Number(process.env.FACE_DETECT_MIN_CONFIDENCE ?? '70');
+  if (!Number.isFinite(n) || n < 50 || n > 100) return 70;
   return n;
 }
 

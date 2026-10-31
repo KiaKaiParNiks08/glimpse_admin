@@ -11,7 +11,7 @@ import {
 } from './recognition-policy';
 import { readStoredMedia } from './storage';
 import { RekognitionJobError, classifyRekognitionError } from './rekognition-errors';
-import { isRekognitionSupportedImage, sniffImageKind } from './rekognition-image';
+import { isRekognitionSupportedImage, normalizeImageForRekognition, sniffImageKind } from './rekognition-image';
 
 const REKOGNITION_MAX_BYTES = 5 * 1024 * 1024;
 
@@ -27,10 +27,10 @@ export function rekognitionClient(): RekognitionClient | null {
   });
 }
 
-/** Gallery discovery (default 90). Profile lock stays on PROFILE_FACE_MIN_SIMILARITY. */
+/** Gallery discovery threshold (default 75). Profile lock stays on PROFILE_FACE_MIN_SIMILARITY. */
 export function rekognitionMediaMinSimilarity(): number {
-  const n = Number(process.env.FACE_REKOGNITION_MIN_SIMILARITY ?? '90');
-  if (!Number.isFinite(n) || n < 70 || n > 100) return 90;
+  const n = Number(process.env.FACE_REKOGNITION_MIN_SIMILARITY ?? '75');
+  if (!Number.isFinite(n) || n < 50 || n > 100) return 75;
   return n;
 }
 
@@ -151,7 +151,8 @@ export function detectFacesOutcomeToError(outcome: Extract<DetectFacesOutcome, {
 export async function detectSingleProfileFace(
   bytes: Buffer
 ): Promise<'one' | 'none' | 'many' | 'too_large' | 'unavailable' | 'error'> {
-  const outcome = await detectRekognitionFaces(bytes, { job_kind: 'profile' });
+  const normalized = await normalizeImageForRekognition(bytes);
+  const outcome = await detectRekognitionFaces(normalized.bytes, { job_kind: 'profile' });
   if (!outcome.ok) {
     if (outcome.code === 'too_large') return 'too_large';
     if (outcome.code === 'unavailable') return 'unavailable';
@@ -166,8 +167,11 @@ export async function detectRekognitionFaces(
   bytes: Buffer,
   context: DetectFacesContext = {}
 ): Promise<DetectFacesOutcome> {
-  const content_kind = sniffImageKind(bytes);
-  const byte_length = bytes.length;
+  const normalized = await normalizeImageForRekognition(bytes);
+  const content_kind = normalized.kind;
+  const processedBytes = normalized.bytes;
+  const byte_length = processedBytes.length;
+
   const client = rekognitionClient();
   if (!client) {
     return { ok: false, code: 'unavailable', permanent: true, byte_length, content_kind };
@@ -193,7 +197,7 @@ export async function detectRekognitionFaces(
   try {
     const result = await client.send(
       new DetectFacesCommand({
-        Image: { Bytes: new Uint8Array(bytes) },
+        Image: { Bytes: new Uint8Array(processedBytes) },
         Attributes: ['DEFAULT'],
       })
     );
@@ -257,7 +261,11 @@ export async function compareFacePhotos(
 ): Promise<FaceCompareResult> {
   const client = rekognitionClient();
   if (!client) return { ok: false, reason: 'unavailable' };
-  if (sourceBytes.length > REKOGNITION_MAX_BYTES || targetBytes.length > REKOGNITION_MAX_BYTES) {
+
+  const normSource = await normalizeImageForRekognition(sourceBytes);
+  const normTarget = await normalizeImageForRekognition(targetBytes);
+
+  if (normSource.bytes.length > REKOGNITION_MAX_BYTES || normTarget.bytes.length > REKOGNITION_MAX_BYTES) {
     return { ok: false, reason: 'too_large' };
   }
   let lastError: unknown;
@@ -265,14 +273,15 @@ export async function compareFacePhotos(
     try {
       const result = await client.send(
         new CompareFacesCommand({
-          SourceImage: { Bytes: new Uint8Array(sourceBytes) },
-          TargetImage: { Bytes: new Uint8Array(targetBytes) },
-          SimilarityThreshold: Math.min(minSimilarity, 80),
+          SourceImage: { Bytes: new Uint8Array(normSource.bytes) },
+          TargetImage: { Bytes: new Uint8Array(normTarget.bytes) },
+          SimilarityThreshold: Math.min(minSimilarity, 70),
         })
       );
-      const best = result.FaceMatches?.[0];
+      const matches = result.FaceMatches ?? [];
+      const best = matches[0];
       const similarity = best?.Similarity ?? 0;
-      if (!result.FaceMatches?.length || similarity < minSimilarity) {
+      if (!matches.length || similarity < minSimilarity) {
         return { ok: false, reason: 'below_threshold' };
       }
       return {
@@ -402,11 +411,6 @@ export async function compareReferenceToAsset(input: {
   mediaType: 'image' | 'video';
   jobId?: string;
 }): Promise<FaceCompareResult> {
-  const detected = await detectRekognitionFaces(input.targetBytes, { job_id: input.jobId, job_kind: 'scan' });
-  if (!detected.ok) {
-    throw detectFacesOutcomeToError(detected);
-  }
-  if (detected.faces.length === 0) return { ok: false, reason: 'no_face' };
   const compared = await compareFacePhotos(
     input.referenceBytes,
     input.targetBytes,

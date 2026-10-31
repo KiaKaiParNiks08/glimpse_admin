@@ -263,8 +263,19 @@ export async function requeueMediaAsset(eventId: string, assetId: string): Promi
       attempt_count: 0,
       last_error: null,
       next_retry_at: null,
+      match_complete: false,
     },
   });
+  if (result.count > 0) {
+    try {
+      const { reopenCompleteScansForEvent } = await import('./scans');
+      const { scheduleFaceProcessing } = await import('./schedule');
+      await reopenCompleteScansForEvent(eventId);
+      scheduleFaceProcessing();
+    } catch (e) {
+      console.error('[people-media] requeue scan kick failed', e);
+    }
+  }
   return result.count > 0;
 }
 
@@ -275,6 +286,20 @@ export async function requeueFaceReference(eventId: string, userId: string): Pro
     where: { user_id: userId, consent: true, revoked_at: null },
     data: { processing_status: 'pending', attempt_count: 0, last_error: null, next_retry_at: null },
   });
+  if (result.count > 0) {
+    try {
+      await prisma.$executeRaw`
+        UPDATE user_event_face_scans
+        SET status = 'pending', attempt_count = 0, last_error = NULL, next_retry_at = NULL,
+            last_asset_id = NULL, last_asset_created_at = NULL, updated_at = now()
+        WHERE user_id = ${userId}::uuid AND event_id = ${eventId}::uuid
+      `;
+      const { scheduleFaceProcessing } = await import('./schedule');
+      scheduleFaceProcessing();
+    } catch (e) {
+      console.error('[people-media] requeue face ref kick failed', e);
+    }
+  }
   return result.count > 0;
 }
 

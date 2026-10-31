@@ -132,6 +132,13 @@ export async function joinAuthenticatedUserToEvent(input: {
     });
   }
 
+  try {
+    const { queueExistingFaceReference } = await import('@/server/people-media/face-reference');
+    await queueExistingFaceReference(input.userId);
+  } catch (error) {
+    console.error('[auth-join] face reference queueing skipped', error);
+  }
+
   if (input.device_id && input.device_type) {
     await upsertUserDevice({
       user_id: input.userId,

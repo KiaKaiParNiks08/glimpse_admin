@@ -6,6 +6,20 @@ Nothing below is committed yet — run `git status` to see the same list.
 
 ---
 
+## 2026-10-31 — Fix missed media recognition in people in media and my-media
+
+High-resolution photos (> 5MB) were failing permanently as too_large, WebP photos were rejected as unsupported_format, and duplicate DetectFaces inside compareReferenceToAsset was timing out scans and dropping faces with confidence < 90%.
+
+1. Added sharp image normalization in rekognition-image.ts to auto-orient, convert WebP to JPEG, and downscale images > 4.5MB so they never exceed AWS Rekognitions 5MB limit.
+2. Removed redundant DetectFaces pre-check inside compareReferenceToAsset in rekognition.ts, cutting AWS Rekognition calls and scan time in half.
+3. Lowered FACE_DETECT_MIN_CONFIDENCE default from 90% to 70% and FACE_REKOGNITION_MIN_SIMILARITY to 75% to catch candid, side-angle, and group photo faces.
+4. Updated scans.ts to skip non-face photos (face_count === 0 and match_complete === true) to speed up scans.
+5. In queries.ts, when an admin requeues an asset or user face reference, reset attempt_count: 0, reopen event scans, and schedule the background worker.
+6. In auth-join.ts, automatically queue user face scans when existing users join a new event.
+7. In event-backfill.ts, reset attempt_count = 0 and last_error = NULL when requeuing failed assets.
+
+---
+
 ## 2026-10-29 — Stop media jobs from starving my-media scans
 
 After the $4 SQL fix, production logs showed `media_processed:2`, `scans_processed:1`, `scans_failed:0`, `has_more:true` every ~12s. Each media job ran DetectFaces then CompareFaces against every guest until the my-media time budget, then went back to pending. The same two photos never finished; the user scan barely moved.

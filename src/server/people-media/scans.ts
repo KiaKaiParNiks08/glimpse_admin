@@ -15,6 +15,8 @@ type AssetRow = {
   media_type: string;
   thumbnail_storage_key: string | null;
   created_at: Date | null;
+  face_count: number | null;
+  match_complete: boolean | null;
 };
 
 /** Queue scans for a user's events without wiping a completed scan for the same reference. */
@@ -208,7 +210,7 @@ export async function processUserEventScan(
     const assets =
       lastCreated && lastId
         ? await prisma.$queryRaw<AssetRow[]>`
-            SELECT ma.id, ma.storage_key, ma.media_type::text AS media_type, ma.thumbnail_storage_key, ma.created_at
+            SELECT ma.id, ma.storage_key, ma.media_type::text AS media_type, ma.thumbnail_storage_key, ma.created_at, ma.face_count, ma.match_complete
             FROM media_assets ma
             WHERE ma.event_id = ${eventId}::uuid
               AND (
@@ -220,7 +222,7 @@ export async function processUserEventScan(
           `
         : lastCreated
           ? await prisma.$queryRaw<AssetRow[]>`
-              SELECT ma.id, ma.storage_key, ma.media_type::text AS media_type, ma.thumbnail_storage_key, ma.created_at
+              SELECT ma.id, ma.storage_key, ma.media_type::text AS media_type, ma.thumbnail_storage_key, ma.created_at, ma.face_count, ma.match_complete
               FROM media_assets ma
               WHERE ma.event_id = ${eventId}::uuid
                 AND ma.created_at > ${lastCreated}
@@ -228,7 +230,7 @@ export async function processUserEventScan(
               LIMIT ${pageSize}::int
             `
           : await prisma.$queryRaw<AssetRow[]>`
-              SELECT ma.id, ma.storage_key, ma.media_type::text AS media_type, ma.thumbnail_storage_key, ma.created_at
+              SELECT ma.id, ma.storage_key, ma.media_type::text AS media_type, ma.thumbnail_storage_key, ma.created_at, ma.face_count, ma.match_complete
               FROM media_assets ma
               WHERE ma.event_id = ${eventId}::uuid
               ORDER BY ma.created_at ASC NULLS LAST, ma.id ASC
