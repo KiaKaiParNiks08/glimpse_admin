@@ -7,6 +7,7 @@ import {
 import { parseBody } from '@/lib/validations';
 import { ok, notFound, serverError } from '@/lib/api-response';
 import { createComment, listComments, postExists } from '@/server/comments';
+import { notifyCommentAdded } from '@/server/notifications/service';
 
 /**
  * GET /api/feed/[post_id]/comments – List comments for a post.
@@ -60,6 +61,15 @@ export async function POST(
     if (!exists) return notFound('Post not found');
 
     const comment = await createComment(path.post_id, body);
+
+    void notifyCommentAdded({
+      postId: path.post_id,
+      commentId: comment.id,
+      commentText: body.comment_text,
+      authorUserId: body.user_id,
+      parentCommentId: body.parent_comment_id,
+    }).catch((err) => console.error('[notifications] notifyCommentAdded failed:', err));
+
     return ok(comment, 201);
   } catch (e) {
     console.error(e);

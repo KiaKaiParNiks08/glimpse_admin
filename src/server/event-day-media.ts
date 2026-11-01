@@ -2,6 +2,7 @@ import prisma from '@/server/prisma';
 import { deleteObjectByKey } from '@/lib/s3-presign';
 import { decryptToken } from '@/lib/upload-token';
 import { registerPhotographerGalleryItems } from '@/server/people-media/register';
+import { notifySessionMediaUploaded } from '@/server/notifications/service';
 
 export type EventDayMediaCreateInput = {
   event_day_id: string;
@@ -63,11 +64,49 @@ export async function createEventDayMedia(items: EventDayMediaCreateInput[]) {
           thumbnail_key: true,
           display_order: true,
           created_at: true,
+          uploaded_by: true,
         },
       })
     )
   );
   await registerPhotographerGalleryItems(created);
+
+  // Trigger push and in-app notifications for uploaded session media
+  void (async () => {
+    try {
+      const bySession = new Map<string, { count: number; eventDayId: string; uploaderUserId?: string | null }>();
+      for (const item of created) {
+        if (!item.event_session_id) continue;
+        const existing = bySession.get(item.event_session_id);
+        if (existing) {
+          existing.count += 1;
+        } else {
+          bySession.set(item.event_session_id, {
+            count: 1,
+            eventDayId: item.event_day_id,
+            uploaderUserId: item.uploaded_by,
+          });
+        }
+      }
+
+      for (const [sessionId, info] of bySession) {
+        const day = await prisma.event_days.findUnique({
+          where: { id: info.eventDayId },
+          select: { event_id: true },
+        });
+        if (!day) continue;
+        await notifySessionMediaUploaded({
+          eventId: day.event_id,
+          eventSessionId: sessionId,
+          count: info.count,
+          uploaderUserId: info.uploaderUserId,
+        });
+      }
+    } catch (err) {
+      console.error('[notifications] notifySessionMediaUploaded failed:', err);
+    }
+  })();
+
   return created;
 }
 
@@ -152,4 +191,3 @@ export async function deleteEventDayMediaById(mediaId: string): Promise<boolean>
   await prisma.event_day_media.delete({ where: { id: mediaId } });
   return true;
 }
-

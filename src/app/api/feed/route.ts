@@ -19,6 +19,7 @@ import { createPost, listPosts } from '@/server/posts';
 import prisma from '@/server/prisma';
 import { ensureEventGuest } from '@/server/event-guests';
 import { registerFeedPostMedia } from '@/server/people-media/register';
+import { notifyNewPostInEvent } from '@/server/notifications/service';
 
 /** Allow a video upload to finish. Body size is set in next.config (middlewareClientMaxBodySize). */
 export const maxDuration = 60;
@@ -256,6 +257,12 @@ export async function POST(request: NextRequest) {
           thumbnailStorageKey: item.media_type === 'video' ? videoThumbnail?.storageKey ?? null : null,
         })),
       });
+
+      void notifyNewPostInEvent({
+        postId: post.id,
+        eventId,
+        authorUserId: parsed.data.user_id,
+      }).catch((err) => console.error('[notifications] notifyNewPostInEvent failed:', err));
     }
 
     return ok(post, 201);

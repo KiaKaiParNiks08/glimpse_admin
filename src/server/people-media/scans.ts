@@ -1,3 +1,4 @@
+import { notifySessionFaceRecognized, notifySpotlightPost } from '@/server/notifications/service';
 import prisma from '@/server/prisma';
 import { faceComparePageSize, faceMaxAttempts } from './config';
 import {
@@ -17,6 +18,8 @@ type AssetRow = {
   created_at: Date | null;
   face_count: number | null;
   match_complete: boolean | null;
+  event_day_media_id?: string | null;
+  post_media_id?: string | null;
 };
 
 /** Queue scans for a user's events without wiping a completed scan for the same reference. */
@@ -159,6 +162,78 @@ export async function claimUserEventScans(batch: number, maxAttempts: number): P
   `;
 }
 
+
+async function dispatchScanMatchNotifications(
+  eventId: string,
+  userId: string,
+  matchedAssets: AssetRow[]
+): Promise<void> {
+  if (matchedAssets.length === 0) return;
+  try {
+    const dayMediaIds = matchedAssets
+      .map((a) => a.event_day_media_id)
+      .filter((id): id is string => Boolean(id));
+
+    if (dayMediaIds.length > 0) {
+      const dayMediaRows = await prisma.event_day_media.findMany({
+        where: { id: { in: dayMediaIds } },
+        select: { event_session_id: true },
+      });
+
+      const countBySession = new Map<string, number>();
+      for (const row of dayMediaRows) {
+        if (!row.event_session_id) continue;
+        countBySession.set(row.event_session_id, (countBySession.get(row.event_session_id) ?? 0) + 1);
+      }
+
+      for (const [sessionId, count] of countBySession) {
+        await notifySessionFaceRecognized({
+          eventId,
+          eventSessionId: sessionId,
+          userId,
+          recognizedCount: count,
+        });
+      }
+    }
+
+    const postMediaIds = matchedAssets
+      .map((a) => a.post_media_id)
+      .filter((id): id is string => Boolean(id));
+
+    if (postMediaIds.length > 0) {
+      const postMediaRows = await prisma.post_media.findMany({
+        where: { id: { in: postMediaIds } },
+        select: {
+          post_id: true,
+          posts: {
+            select: {
+              id: true,
+              user_id: true,
+              event_id: true,
+            },
+          },
+        },
+      });
+
+      const notifiedPosts = new Set<string>();
+      for (const pm of postMediaRows) {
+        if (!pm.posts || pm.posts.user_id === userId) continue;
+        if (notifiedPosts.has(pm.posts.id)) continue;
+        notifiedPosts.add(pm.posts.id);
+
+        await notifySpotlightPost({
+          postId: pm.posts.id,
+          eventId: pm.posts.event_id || eventId,
+          authorUserId: pm.posts.user_id,
+          recognizedUserId: userId,
+        });
+      }
+    }
+  } catch (err) {
+    console.error('[notifications] dispatchScanMatchNotifications failed:', err);
+  }
+}
+
 export async function processUserEventScan(
   userId: string,
   eventId: string,
@@ -205,12 +280,13 @@ export async function processUserEventScan(
   let lastId = scan.last_asset_id;
   let scanned = 0;
   let matched = 0;
+  const newlyMatchedAssets: AssetRow[] = [];
 
   while (Date.now() < deadline) {
     const assets =
       lastCreated && lastId
         ? await prisma.$queryRaw<AssetRow[]>`
-            SELECT ma.id, ma.storage_key, ma.media_type::text AS media_type, ma.thumbnail_storage_key, ma.created_at, ma.face_count, ma.match_complete
+            SELECT ma.id, ma.storage_key, ma.media_type::text AS media_type, ma.thumbnail_storage_key, ma.created_at, ma.face_count, ma.match_complete, ma.event_day_media_id, ma.post_media_id
             FROM media_assets ma
             WHERE ma.event_id = ${eventId}::uuid
               AND (
@@ -222,7 +298,7 @@ export async function processUserEventScan(
           `
         : lastCreated
           ? await prisma.$queryRaw<AssetRow[]>`
-              SELECT ma.id, ma.storage_key, ma.media_type::text AS media_type, ma.thumbnail_storage_key, ma.created_at, ma.face_count, ma.match_complete
+              SELECT ma.id, ma.storage_key, ma.media_type::text AS media_type, ma.thumbnail_storage_key, ma.created_at, ma.face_count, ma.match_complete, ma.event_day_media_id, ma.post_media_id
               FROM media_assets ma
               WHERE ma.event_id = ${eventId}::uuid
                 AND ma.created_at > ${lastCreated}
@@ -230,7 +306,7 @@ export async function processUserEventScan(
               LIMIT ${pageSize}::int
             `
           : await prisma.$queryRaw<AssetRow[]>`
-              SELECT ma.id, ma.storage_key, ma.media_type::text AS media_type, ma.thumbnail_storage_key, ma.created_at, ma.face_count, ma.match_complete
+              SELECT ma.id, ma.storage_key, ma.media_type::text AS media_type, ma.thumbnail_storage_key, ma.created_at, ma.face_count, ma.match_complete, ma.event_day_media_id, ma.post_media_id
               FROM media_assets ma
               WHERE ma.event_id = ${eventId}::uuid
               ORDER BY ma.created_at ASC NULLS LAST, ma.id ASC
@@ -247,6 +323,7 @@ export async function processUserEventScan(
             updated_at = now()
         WHERE user_id = ${userId}::uuid AND event_id = ${eventId}::uuid
       `;
+      void dispatchScanMatchNotifications(eventId, userId, newlyMatchedAssets);
       return { scanned, matched, complete: true };
     }
 
@@ -293,6 +370,7 @@ export async function processUserEventScan(
                 updated_at = now()
             WHERE user_id = ${userId}::uuid AND event_id = ${eventId}::uuid
           `;
+          void dispatchScanMatchNotifications(eventId, userId, newlyMatchedAssets);
           return { scanned, matched, complete: false };
         }
         continue;
@@ -308,6 +386,7 @@ export async function processUserEventScan(
         evidence: evidenceForCompare(loaded.mediaType, compared),
       });
       matched += 1;
+      newlyMatchedAssets.push(asset);
     }
 
     await prisma.$executeRaw`
@@ -327,6 +406,7 @@ export async function processUserEventScan(
         SET status = 'complete', last_error = NULL, updated_at = now()
         WHERE user_id = ${userId}::uuid AND event_id = ${eventId}::uuid
       `;
+      void dispatchScanMatchNotifications(eventId, userId, newlyMatchedAssets);
       return { scanned: 0, matched: 0, complete: true };
     }
   }
@@ -339,6 +419,7 @@ export async function processUserEventScan(
         updated_at = now()
     WHERE user_id = ${userId}::uuid AND event_id = ${eventId}::uuid
   `;
+  void dispatchScanMatchNotifications(eventId, userId, newlyMatchedAssets);
   return { scanned, matched, complete: false };
 }
 

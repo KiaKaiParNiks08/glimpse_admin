@@ -3,6 +3,7 @@ import { likePostPathSchema, likePostBodySchema } from '@/lib/validations/posts'
 import { ok, notFound, serverError } from '@/lib/api-response';
 import { setPostLike } from '@/server/posts';
 import { postExists } from '@/server/comments';
+import { notifyPostLiked } from '@/server/notifications/service';
 
 /**
  * POST /api/feed/[post_id]/like – Like/Unlike a post.
@@ -25,6 +26,14 @@ export async function POST(
     if (!exists) return notFound('Post not found');
 
     const { liked, like_count } = await setPostLike(path.post_id, body.user_id, body.action);
+
+    if (liked) {
+      void notifyPostLiked({
+        postId: path.post_id,
+        likerUserId: body.user_id,
+      }).catch((err) => console.error('[notifications] notifyPostLiked failed:', err));
+    }
+
     return ok({ liked, like_count }, 200);
   } catch (e) {
     console.error(e);
