@@ -178,7 +178,16 @@ export async function POST(request: Request) {
         );
       }
 
-      const otpResult = await createOtpForUser({ user_id: createdUser.user_id, expiry_minutes: 10 });
+      const otpChannel = email ? 'email' : 'sms';
+      const otpDestination = email || mobile_number || '';
+      const otpResult = await createOtpForUser({
+        user_id: createdUser.user_id,
+        channel: otpChannel,
+        destination: otpDestination,
+        country_code: country_code ?? null,
+        event_id: event.id,
+        event_code: event.event_code ?? event_code ?? null,
+      });
 
       return ok(
         {
@@ -199,11 +208,26 @@ export async function POST(request: Request) {
           : 'OTP sent; verify to continue'
       );
     } catch (e) {
-      if (e instanceof Error && e.message === 'MOBILE_REGISTERED_DIFFERENT_ROLE') {
-        return forbidden('Mobile number is registered with a different role');
-      }
-      if (e instanceof Error && e.message === 'EMAIL_IN_USE') {
-        return conflict('This email is already used by another account');
+      if (e instanceof Error) {
+        if (e.message === 'MOBILE_REGISTERED_DIFFERENT_ROLE') {
+          return forbidden('Mobile number is registered with a different role');
+        }
+        if (e.message === 'EMAIL_IN_USE') {
+          return conflict('This email is already used by another account');
+        }
+        if (e.message.startsWith('Please wait') || e.message.includes('Too many OTP requests')) {
+          return badRequest(e.message);
+        }
+        if (
+          e.message.includes('AWS') ||
+          e.message.includes('Sandbox') ||
+          e.message.includes('Configuration Error') ||
+          e.message.includes('SES') ||
+          e.message.includes('SMS') ||
+          e.message.includes('E.164')
+        ) {
+          return badRequest(e.message);
+        }
       }
       throw e;
     }

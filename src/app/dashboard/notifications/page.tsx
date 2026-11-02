@@ -14,7 +14,8 @@ import { uploadFileServerAction } from '@/app/actions/upload';
 export default function NotificationsPage() {
   // Event & Guest State
   const [events, setEvents] = useState<NotificationEventOption[]>([]);
-  const [selectedEventId, setSelectedEventId] = useState<string>('');
+  const [selectedEventIds, setSelectedEventIds] = useState<Set<string>>(new Set());
+  const [eventSearchQuery, setEventSearchQuery] = useState('');
   const [guests, setGuests] = useState<NotificationRecipientItem[]>([]);
   const [selectedUserIds, setSelectedUserIds] = useState<Set<string>>(new Set());
 
@@ -54,7 +55,7 @@ export default function NotificationsPage() {
         if (res.ok) {
           setEvents(res.data);
           if (res.data.length > 0) {
-            setSelectedEventId(res.data[0].id);
+            setSelectedEventIds(new Set([res.data[0].id]));
           }
         }
       })
@@ -62,9 +63,10 @@ export default function NotificationsPage() {
       .finally(() => setLoadingEvents(false));
   }, []);
 
-  // 2. Fetch guests when selected event changes
+  // 2. Fetch guests when selected events change
   useEffect(() => {
-    if (!selectedEventId) {
+    const ids = Array.from(selectedEventIds);
+    if (ids.length === 0) {
       setGuests([]);
       setSelectedUserIds(new Set());
       return;
@@ -72,7 +74,7 @@ export default function NotificationsPage() {
 
     setLoadingGuests(true);
     setResultAlert(null);
-    getEventGuestsForNotificationAction({ eventIds: [selectedEventId] })
+    getEventGuestsForNotificationAction({ eventIds: ids })
       .then((res) => {
         if (res.ok) {
           setGuests(res.data);
@@ -89,7 +91,21 @@ export default function NotificationsPage() {
         setGuests([]);
       })
       .finally(() => setLoadingGuests(false));
-  }, [selectedEventId]);
+  }, [selectedEventIds]);
+
+  // Filtered events matching search
+  const filteredEvents = useMemo(() => {
+    if (!eventSearchQuery.trim()) return events;
+    const q = eventSearchQuery.toLowerCase().trim();
+    return events.filter(
+      (e) => e.title.toLowerCase().includes(q) || e.event_code.toLowerCase().includes(q)
+    );
+  }, [events, eventSearchQuery]);
+
+  const selectedEvents = useMemo(
+    () => events.filter((e) => selectedEventIds.has(e.id)),
+    [events, selectedEventIds]
+  );
 
   // 3. Filtered guests
   const filteredGuests = useMemo(() => {
@@ -227,15 +243,16 @@ export default function NotificationsPage() {
       setResultAlert({ type: 'error', message: 'Please select at least one recipient user' });
       return;
     }
-    if (!selectedEventId) {
-      setResultAlert({ type: 'error', message: 'Please select an event' });
+    if (selectedEventIds.size === 0) {
+      setResultAlert({ type: 'error', message: 'Please select at least one event' });
       return;
     }
 
     const selectedCount = selectedUserIds.size;
     const reachableSelectedCount = guests.filter((g) => selectedUserIds.has(g.id) && g.has_active_device).length;
 
-    const confirmMsg = `Send push notification to ${selectedCount} guest(s)?\n(${reachableSelectedCount} currently have the mobile app installed).`;
+    const eventNames = selectedEvents.map((e) => e.title).join(', ');
+    const confirmMsg = `Send push notification to ${selectedCount} guest(s) across ${selectedEventIds.size} event(s) (${eventNames})?\n(${reachableSelectedCount} currently have the mobile app installed).`;
     if (!window.confirm(confirmMsg)) {
       return;
     }
@@ -245,7 +262,7 @@ export default function NotificationsPage() {
 
     try {
       const res = await sendAdminPushNotificationAction({
-        eventIds: [selectedEventId],
+        eventIds: Array.from(selectedEventIds),
         userIds: Array.from(selectedUserIds),
         title: title.trim(),
         body: body.trim(),
@@ -274,7 +291,7 @@ export default function NotificationsPage() {
     }
   }
 
-  const selectedEvent = events.find((e) => e.id === selectedEventId);
+  const selectedEvent = selectedEvents[0] || null;
   const reachableCount = useMemo(() => guests.filter((g) => g.has_active_device).length, [guests]);
   const selectedReachableCount = useMemo(
     () => guests.filter((g) => selectedUserIds.has(g.id) && g.has_active_device).length,
@@ -320,8 +337,14 @@ export default function NotificationsPage() {
           {/* Card 1: Event Selector */}
           <div className={styles.card}>
             <div className={styles.cardHeader}>
-              <h2>1. Select Target Event</h2>
-              {selectedEvent && <span className={styles.badge}>{selectedEvent.event_code}</span>}
+              <h2>1. Select Target Events</h2>
+              {selectedEvents.length > 0 ? (
+                <span className={`${styles.badge} ${styles.success}`}>
+                  {selectedEvents.length} event{selectedEvents.length === 1 ? '' : 's'} selected
+                </span>
+              ) : (
+                <span className={`${styles.badge} ${styles.warning}`}>None selected</span>
+              )}
             </div>
 
             {loadingEvents ? (
@@ -330,40 +353,132 @@ export default function NotificationsPage() {
               <div className={styles.emptyState}>No active events available to your account.</div>
             ) : (
               <div className={styles.fieldGroup}>
-                <label>Choose Event</label>
-                <select
-                  className={styles.select}
-                  value={selectedEventId}
-                  onChange={(e) => setSelectedEventId(e.target.value)}
-                >
-                  {events.map((ev) => (
-                    <option key={ev.id} value={ev.id}>
-                      {ev.title} ({ev.event_code})
-                    </option>
-                  ))}
-                </select>
+                {/* Search Bar */}
+                <div className={styles.eventSearchWrapper}>
+                  <svg className={styles.searchIcon} viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                    <circle cx="11" cy="11" r="8" strokeWidth="2" />
+                    <path d="M21 21l-4.35-4.35" strokeWidth="2" strokeLinecap="round" />
+                  </svg>
+                  <input
+                    type="text"
+                    className={styles.eventSearchInput}
+                    placeholder="Search events by title or code..."
+                    value={eventSearchQuery}
+                    onChange={(e) => setEventSearchQuery(e.target.value)}
+                  />
+                  {eventSearchQuery && (
+                    <button
+                      type="button"
+                      className={styles.clearSearchBtn}
+                      onClick={() => setEventSearchQuery('')}
+                      title="Clear search"
+                    >
+                      ✕
+                    </button>
+                  )}
+                </div>
 
-                <div className={styles.eventSelectorGrid}>
-                  {events.map((ev) => {
-                    const isSelected = ev.id === selectedEventId;
-                    return (
-                      <div
-                        key={ev.id}
-                        className={`${styles.eventCard} ${isSelected ? styles.selected : ''}`}
-                        onClick={() => setSelectedEventId(ev.id)}
-                      >
-                        {ev.cover_image ? (
-                          <img src={ev.cover_image} alt="" className={styles.eventCover} />
-                        ) : (
-                          <div className={styles.eventCover} />
-                        )}
-                        <div className={styles.eventCardInfo}>
-                          <strong>{ev.title}</strong>
-                          <span>Code: {ev.event_code}</span>
-                        </div>
-                      </div>
-                    );
-                  })}
+                {/* Actions & Count Row */}
+                <div className={styles.eventActionsRow}>
+                  <div className={styles.eventCountLabel}>
+                    {selectedEventIds.size === 0 ? (
+                      <span style={{ color: '#ef4444', fontWeight: 600 }}>No events selected</span>
+                    ) : (
+                      <span>
+                        <strong>{selectedEventIds.size}</strong> of {events.length} event{events.length === 1 ? '' : 's'} selected
+                      </span>
+                    )}
+                  </div>
+                  <div style={{ display: 'flex', gap: '0.4rem' }}>
+                    <button
+                      type="button"
+                      className={styles.actionPill}
+                      onClick={() => setSelectedEventIds(new Set(events.map((e) => e.id)))}
+                    >
+                      Select All ({events.length})
+                    </button>
+                    <button
+                      type="button"
+                      className={styles.actionPill}
+                      onClick={() => setSelectedEventIds(new Set())}
+                    >
+                      Clear All
+                    </button>
+                  </div>
+                </div>
+
+                {/* Selected Event Chips */}
+                {selectedEvents.length > 0 && (
+                  <div className={styles.selectedEventChips}>
+                    {selectedEvents.map((ev) => (
+                      <span key={ev.id} className={styles.eventChip}>
+                        <span className={styles.chipCode}>{ev.event_code}</span>
+                        <span className={styles.chipTitle} title={ev.title}>
+                          {ev.title}
+                        </span>
+                        <button
+                          type="button"
+                          className={styles.chipRemove}
+                          onClick={() => {
+                            const next = new Set(selectedEventIds);
+                            next.delete(ev.id);
+                            setSelectedEventIds(next);
+                          }}
+                          title={`Remove ${ev.title}`}
+                        >
+                          ✕
+                        </button>
+                      </span>
+                    ))}
+                  </div>
+                )}
+
+                {/* Scrollable Checklist of Events */}
+                <div className={styles.eventDropdownList}>
+                  {filteredEvents.length === 0 ? (
+                    <div className={styles.noEventsMatch}>
+                      No events matching &ldquo;{eventSearchQuery}&rdquo;
+                    </div>
+                  ) : (
+                    filteredEvents.map((ev) => {
+                      const isChecked = selectedEventIds.has(ev.id);
+                      return (
+                        <label
+                          key={ev.id}
+                          className={`${styles.eventCheckItem} ${isChecked ? styles.checked : ''}`}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={isChecked}
+                            onChange={() => {
+                              const next = new Set(selectedEventIds);
+                              if (isChecked) {
+                                next.delete(ev.id);
+                              } else {
+                                next.add(ev.id);
+                              }
+                              setSelectedEventIds(next);
+                            }}
+                          />
+                          {ev.cover_image ? (
+                            <img src={ev.cover_image} alt="" className={styles.eventCheckThumb} />
+                          ) : (
+                            <div className={styles.eventCheckThumbPlaceholder} />
+                          )}
+                          <div className={styles.eventCheckDetails}>
+                            <div className={styles.eventCheckTitleRow}>
+                              <span className={styles.eventCheckTitle}>{ev.title}</span>
+                              <span className={styles.eventCheckCode}>{ev.event_code}</span>
+                            </div>
+                            <span className={styles.eventCheckDates}>
+                              {new Date(ev.start_date).toLocaleDateString()}
+                              {ev.status && ` • ${ev.status.toUpperCase()}`}
+                            </span>
+                          </div>
+                        </label>
+                      );
+                    })
+                  )}
                 </div>
               </div>
             )}
@@ -428,21 +543,21 @@ export default function NotificationsPage() {
                     className={`${styles.smBtn} ${deviceFilter === 'all' ? styles.active : ''}`}
                     onClick={() => setDeviceFilter('all')}
                   >
-                    All ({guests.length})
+                    All Guests ({guests.length})
                   </button>
                   <button
                     type="button"
                     className={`${styles.smBtn} ${deviceFilter === 'reachable' ? styles.active : ''}`}
                     onClick={() => setDeviceFilter('reachable')}
                   >
-                    📱 On App ({reachableCount})
+                    📱 App Installed ({reachableCount})
                   </button>
                   <button
                     type="button"
                     className={`${styles.smBtn} ${deviceFilter === 'unregistered' ? styles.active : ''}`}
                     onClick={() => setDeviceFilter('unregistered')}
                   >
-                    No App ({guests.length - reachableCount})
+                    Web / Invitees ({guests.length - reachableCount})
                   </button>
                 </div>
 
@@ -451,7 +566,7 @@ export default function NotificationsPage() {
                     Select Filtered
                   </button>
                   <button type="button" className={styles.smBtn} onClick={handleSelectAllReachable}>
-                    Select All App Users
+                    Select App Users
                   </button>
                   <button type="button" className={styles.smBtn} onClick={handleDeselectAll}>
                     Deselect All
@@ -492,6 +607,7 @@ export default function NotificationsPage() {
                         />
                       </th>
                       <th>Guest</th>
+                      <th>Event</th>
                       <th>Mobile Number</th>
                       <th>Email</th>
                       <th>App Status</th>
@@ -529,6 +645,15 @@ export default function NotificationsPage() {
                             </div>
                           </td>
                           <td>
+                            <div className={styles.guestEventPills}>
+                              {guest.event_names.map((name, i) => (
+                                <span key={i} className={styles.guestEventPill} title={name}>
+                                  {name}
+                                </span>
+                              ))}
+                            </div>
+                          </td>
+                          <td>
                             <span style={{ fontFamily: 'monospace', fontSize: '0.8rem' }}>
                               {guest.mobile_number || '—'}
                             </span>
@@ -542,16 +667,16 @@ export default function NotificationsPage() {
                             {guest.has_active_device ? (
                               <span
                                 className={`${styles.badge} ${styles.success}`}
-                                title={`Active on ${guest.device_types.join(', ')}`}
+                                title={`Logged in via ${guest.device_types.join(', ')}`}
                               >
-                                ● {guest.device_types.join('/') || 'App'}
+                                ● {guest.device_types.map((t) => t.toUpperCase()).join('/') || 'APP'}
                               </span>
                             ) : (
                               <span
                                 className={`${styles.badge} ${styles.neutral}`}
-                                title="Will receive in-app notification"
+                                title="Has not logged in on mobile app yet; will receive in-app notification"
                               >
-                                In-app only
+                                Web / Invited
                               </span>
                             )}
                           </td>
@@ -641,48 +766,49 @@ export default function NotificationsPage() {
                   </button>
                 </div>
               ) : (
-                <div
-                  className={styles.uploadDropzone}
-                  onClick={() => fileInputRef.current?.click()}
-                >
-                  <input
-                    ref={fileInputRef}
-                    type="file"
-                    accept="image/png,image/jpeg,image/webp,image/gif"
-                    style={{ display: 'none' }}
-                    onChange={handleImageFileChange}
-                  />
-                  {isUploadingImage ? (
-                    <span style={{ color: '#3b82f6', fontSize: '0.85rem' }}>Uploading image to S3...</span>
-                  ) : (
-                    <div>
-                      <svg
-                        style={{ width: 28, height: 28, color: '#94a3b8', margin: '0 auto 0.25rem' }}
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth="1.75"
-                      >
-                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12" />
-                      </svg>
-                      <div style={{ fontSize: '0.8125rem', fontWeight: 600, color: '#334155' }}>
-                        Click to upload an image
+                <>
+                  <div
+                    className={styles.uploadDropzone}
+                    onClick={() => fileInputRef.current?.click()}
+                  >
+                    <input
+                      ref={fileInputRef}
+                      type="file"
+                      accept="image/png,image/jpeg,image/webp,image/gif"
+                      style={{ display: 'none' }}
+                      onChange={handleImageFileChange}
+                    />
+                    {isUploadingImage ? (
+                      <span style={{ color: '#3b82f6', fontSize: '0.85rem' }}>Uploading image to S3...</span>
+                    ) : (
+                      <div>
+                        <svg
+                          style={{ width: 28, height: 28, color: '#94a3b8', margin: '0 auto 0.25rem' }}
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="1.75"
+                        >
+                          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12" />
+                        </svg>
+                        <div style={{ fontSize: '0.8125rem', fontWeight: 600, color: '#334155' }}>
+                          Click to upload an image
+                        </div>
+                        <div style={{ fontSize: '0.7rem', color: '#94a3b8' }}>JPEG, PNG, WebP up to 10MB</div>
                       </div>
-                      <div style={{ fontSize: '0.7rem', color: '#94a3b8' }}>JPEG, PNG, WebP up to 10MB</div>
-                    </div>
-                  )}
-                </div>
-              )}
+                    )}
+                  </div>
 
-              {/* Or manual URL input */}
-              <input
-                type="url"
-                className={styles.input}
-                style={{ fontSize: '0.78rem', marginTop: '0.25rem' }}
-                placeholder="Or paste an image URL directly..."
-                value={imageUrl}
-                onChange={(e) => setImageUrl(e.target.value)}
-              />
+                  <input
+                    type="text"
+                    className={styles.input}
+                    style={{ fontSize: '0.78rem', marginTop: '0.25rem' }}
+                    placeholder="Or paste an image link directly (optional)..."
+                    value={imageUrl}
+                    onChange={(e) => setImageUrl(e.target.value)}
+                  />
+                </>
+              )}
             </div>
 
             {/* Submit / Blast Button */}
@@ -719,7 +845,14 @@ export default function NotificationsPage() {
                 <div className={styles.pushHeader}>
                   <div className={styles.appBrand}>
                     <div className={styles.appIcon} />
-                    <span>Glimpse • {selectedEvent ? selectedEvent.title : 'Event'}</span>
+                    <span>
+                      Glimpse •{' '}
+                      {selectedEvents.length === 1
+                        ? selectedEvents[0].title
+                        : selectedEvents.length > 1
+                        ? `${selectedEvents[0].title} (+${selectedEvents.length - 1} more)`
+                        : 'Select Events'}
+                    </span>
                   </div>
                   <span>now</span>
                 </div>

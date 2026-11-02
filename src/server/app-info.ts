@@ -1,8 +1,10 @@
 import prisma from '@/server/prisma';
 import type { AppInfoQuery } from '@/lib/validations/app-info';
 import {
+  ensureUserDevicesFcmColumn,
   listPreviousEventsForDevice,
   listPreviousEventsForUsers,
+  upsertUserDevice,
   type PreviousEventItem,
 } from '@/server/user-devices';
 
@@ -85,6 +87,26 @@ export async function getAppInfo(query: AppInfoQuery): Promise<AppInfoResult | n
   let previous_events: AppInfoResult['previous_events'] = [];
   if (query.device_id) {
     previous_events = mapPrevious(await listPreviousEventsForDevice(query.device_id));
+
+    // Passively register or refresh device & fcm_token if provided
+    const trimmedToken = query.fcm_token ? query.fcm_token.trim() : null;
+    if (query.user_id && user) {
+      const dType = query.platform === 'ios' ? 'ios' : 'android';
+      await upsertUserDevice({
+        user_id: query.user_id,
+        device_type: dType,
+        device_id: query.device_id,
+        fcm_token: trimmedToken,
+      }).catch((e) => console.warn('[getAppInfo] upsertUserDevice warning:', e));
+    } else if (trimmedToken) {
+      await ensureUserDevicesFcmColumn();
+      await prisma.user_devices
+        .updateMany({
+          where: { device_id: query.device_id },
+          data: { fcm_token: trimmedToken, last_seen_at: new Date() },
+        })
+        .catch((e) => console.warn('[getAppInfo] updateMany fcm_token warning:', e));
+    }
   } else if (query.user_id) {
     previous_events = mapPrevious(await listPreviousEventsForUsers([query.user_id]));
   }

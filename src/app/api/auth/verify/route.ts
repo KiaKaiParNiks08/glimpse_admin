@@ -58,10 +58,10 @@ export async function POST(request: Request) {
       return badRequest('User event context not found. Please request OTP again.');
     }
 
-    if (body.device_id && body.device_type) {
+    if (body.device_id) {
       await upsertUserDevice({
         user_id: body.user_id,
-        device_type: body.device_type,
+        device_type: body.device_type || 'android',
         device_id: body.device_id,
         fcm_token: body.fcm_token,
       });

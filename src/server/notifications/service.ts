@@ -14,7 +14,7 @@ export async function getDeviceTokensForUsers(userIds: string[]): Promise<string
   const devices = await prisma.user_devices.findMany({
     where: {
       user_id: { in: uniqueIds },
-      is_active: true,
+      is_active: { not: false },
     },
     select: {
       device_id: true,

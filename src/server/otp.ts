@@ -5,6 +5,13 @@ import type {
   VerifyOtpForUserOptions,
   VerifyOtpForUserResult,
 } from '@/types';
+import {
+  sendOtpForUser,
+  verifyOtpForUser as verifyOtpService,
+  generateSecureOtp,
+} from './otp/index';
+
+export * from './otp/index';
 
 export type {
   CreateOtpForUserOptions,
@@ -13,54 +20,72 @@ export type {
   VerifyOtpForUserResult,
 } from '@/types';
 
-const DEFAULT_OTP_EXPIRY_MINUTES = 10;
-
-/** Generate a random 6-digit OTP string */
+/** Generate a cryptographically secure 6-digit OTP string */
 export function generateOtp(): string {
-  return String(Math.floor(100000 + Math.random() * 900000));
+  return generateSecureOtp(6);
 }
 
 /**
- * Generate a 6-digit OTP, persist it in user_otps for the given user, and return the OTP and expiry.
+ * Creates, securely hashes, records, and dispatches an OTP via AWS SES (email) or AWS End User Messaging SMS.
  */
 export async function createOtpForUser(
   options: CreateOtpForUserOptions
 ): Promise<CreateOtpForUserResult> {
-  const { user_id, expiry_minutes = DEFAULT_OTP_EXPIRY_MINUTES } = options;
-  const otp = generateOtp();
-  const expires_at = new Date(Date.now() + expiry_minutes * 60 * 1000);
+  const { user_id, channel, destination, country_code, event_id, event_code } = options;
 
-  await prisma.user_otps.create({
-    data: {
-      user_id,
-      otp,
-      expires_at,
-      is_verified: false,
-    },
+  let deliveryChannel = channel;
+  let targetDestination = destination;
+  let targetCountryCode = country_code;
+
+  // If destination or channel is not specified, resolve from user profile
+  if (!targetDestination || !deliveryChannel) {
+    const user = await prisma.users.findUnique({
+      where: { id: user_id },
+      select: { email: true, mobile_number: true, country_code: true },
+    });
+
+    if (!user) {
+      throw new Error('User not found for OTP dispatch');
+    }
+
+    if (deliveryChannel === 'sms' || (!deliveryChannel && user.mobile_number)) {
+      deliveryChannel = 'sms';
+      targetDestination = user.mobile_number || '';
+      targetCountryCode = targetCountryCode || user.country_code;
+    } else {
+      deliveryChannel = 'email';
+      targetDestination = user.email;
+    }
+  }
+
+  const result = await sendOtpForUser({
+    userId: user_id,
+    channel: deliveryChannel,
+    destination: targetDestination,
+    countryCode: targetCountryCode,
+    eventId: event_id,
+    eventCode: event_code,
   });
 
-  return { otp, expires_at };
+  return {
+    otp: result.otp || '******',
+    expires_at: result.expiresAt,
+  };
 }
 
 /**
- * Verify the given OTP for the user. Finds the latest unverified, non-expired OTP
- * for the user; if it matches, marks it verified and returns success.
+ * Verify OTP using secure hash comparison and transactional state updates.
  */
 export async function verifyOtpForUser(
   options: VerifyOtpForUserOptions
 ): Promise<VerifyOtpForUserResult> {
   const { user_id, otp } = options;
-  const updated = await prisma.user_otps.updateMany({
-    where: {
-      user_id,
-      otp,
-      is_verified: false,
-      expires_at: { gt: new Date() },
-    },
-    data: { is_verified: true },
+  const res = await verifyOtpService({
+    userId: user_id,
+    otp,
   });
 
-  if (updated.count === 0) {
+  if (!res.success) {
     return { success: false, reason: 'invalid_or_expired' };
   }
 

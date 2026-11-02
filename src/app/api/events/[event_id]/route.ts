@@ -1,7 +1,9 @@
 import { parseParams, parseQuery } from '@/lib/validations';
 import { eventDetailsQuerySchema, eventIdPathSchema } from '@/lib/validations/events';
 import { ok, notFound, serverError } from '@/lib/api-response';
-import { getAdminFromAuthorizationHeader } from '@/lib/jwt';
+import { getAdminFromAuthorizationHeader, getUserFromAuthorizationHeader } from '@/lib/jwt';
+import prisma from '@/server/prisma';
+import { upsertUserDevice, ensureUserDevicesFcmColumn } from '@/server/user-devices';
 import {
   DEFAULT_CURRENT_HAPPENING_TITLE,
   DEFAULT_POST_EVENT_REPORT_TITLE,
@@ -38,6 +40,27 @@ export async function GET(
     if (err) return err;
     const [query, queryErr] = parseQuery(new URL(request.url).searchParams, eventDetailsQuerySchema);
     if (queryErr) return queryErr;
+
+    // Passively register or refresh device & fcm_token if provided
+    const userFromToken = getUserFromAuthorizationHeader(request);
+    const effectiveUserId = query.viewer_user_id || userFromToken?.id;
+    if (query.device_id && effectiveUserId) {
+      const devType = query.device_type || 'android';
+      await upsertUserDevice({
+        user_id: effectiveUserId,
+        device_id: query.device_id,
+        device_type: devType,
+        fcm_token: query.fcm_token,
+      }).catch((e) => console.warn('[events/[event_id]] upsertUserDevice warning:', e));
+    } else if (query.device_id && query.fcm_token) {
+      await ensureUserDevicesFcmColumn();
+      await prisma.user_devices
+        .updateMany({
+          where: { device_id: query.device_id },
+          data: { fcm_token: query.fcm_token.trim(), last_seen_at: new Date() },
+        })
+        .catch((e) => console.warn('[events/[event_id]] updateMany warning:', e));
+    }
 
     const event = await getEventDetailsById(path.event_id);
     if (!event) return notFound('Event not found');

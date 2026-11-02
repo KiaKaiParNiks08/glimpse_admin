@@ -154,6 +154,12 @@ export async function GET(request: NextRequest) {
           if (resolved?.postId) postId = resolved.postId;
           if (resolved?.eventId) eventId = resolved.eventId;
         }
+      } else if (row.reference_type === 'event') {
+        screen = 'notifications';
+        routingType = 'announcement';
+        if (row.reference_id) {
+          eventId = row.reference_id;
+        }
       }
 
       return {

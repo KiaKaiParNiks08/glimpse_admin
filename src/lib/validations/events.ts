@@ -192,6 +192,9 @@ export const eventDetailsQuerySchema = z.object({
   phase: z.enum(EVENT_PHASES).optional(),
   /** When set, each media item includes is_favorite for this user. */
   viewer_user_id: z.string().uuid().optional(),
+  device_id: z.string().max(255).optional(),
+  device_type: z.enum(['android', 'ios', 'web']).optional(),
+  fcm_token: z.string().max(500).optional(),
 });
 
 /** Add organizer from Days & sessions (step 2) */

@@ -140,10 +140,10 @@ export async function joinAuthenticatedUserToEvent(input: {
     console.error('[auth-join] face reference queueing skipped', error);
   }
 
-  if (input.device_id && input.device_type) {
+  if (input.device_id) {
     await upsertUserDevice({
       user_id: input.userId,
-      device_type: input.device_type,
+      device_type: input.device_type || 'android',
       device_id: input.device_id,
       fcm_token: input.fcm_token,
     });

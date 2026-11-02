@@ -7,6 +7,7 @@ export const appInfoQuerySchema = z
     user_id: uuidSchema.optional(),
     device_id: z.string().min(1).max(255).optional(),
     platform: z.string().max(20).optional(),
+    fcm_token: z.string().min(1).max(500).optional(),
   })
   .superRefine((query, ctx) => {
     if (!query.event_id && !query.device_id && !query.user_id) {

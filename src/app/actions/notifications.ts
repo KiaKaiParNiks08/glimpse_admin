@@ -4,6 +4,7 @@ import prisma from '@/server/prisma';
 import { getAdminSessionFromCookies, type AdminSessionUser } from '@/lib/admin-session';
 import { getDeviceTokensForUsers } from '@/server/notifications/service';
 import { sendFcmPush } from '@/server/notifications/firebase-http';
+import { appPublicOrigin } from '@/lib/app-share';
 
 async function requireAdminSession(): Promise<
   | { ok: true; session: AdminSessionUser }
@@ -182,7 +183,7 @@ export async function getEventGuestsForNotificationAction(params: {
         : await prisma.user_devices.findMany({
             where: {
               user_id: { in: userIds },
-              is_active: true,
+              is_active: { not: false },
             },
             select: {
               user_id: true,
@@ -199,7 +200,10 @@ export async function getEventGuestsForNotificationAction(params: {
     >();
     for (const dev of devices) {
       const list = devicesByUser.get(dev.user_id) ?? [];
-      const hasFcm = Boolean(dev.fcm_token?.trim() || (dev.device_id && dev.device_id.trim().length > 50));
+      const hasFcm = Boolean(
+        dev.fcm_token?.trim() ||
+          (dev.device_id && (dev.device_id.trim().length > 20 || dev.device_type === 'android' || dev.device_type === 'ios'))
+      );
       list.push({
         device_type: dev.device_type,
         has_fcm: hasFcm,
@@ -212,7 +216,7 @@ export async function getEventGuestsForNotificationAction(params: {
     for (const g of guests) {
       const u = g.users_event_guests_user_idTousers;
       const userDevs = devicesByUser.get(u.id) ?? [];
-      const hasActiveDevice = userDevs.some((d) => d.has_fcm);
+      const hasActiveDevice = userDevs.length > 0;
       const formattedMobile = [u.country_code, u.mobile_number].filter(Boolean).join(' ').trim();
       const rawMobile = (u.mobile_number || '').replace(/\D/g, '');
 
@@ -293,13 +297,33 @@ export async function sendAdminPushNotificationAction(input: {
   const primaryEventId = eventIds[0];
 
   try {
-    // 1. Bulk record in-app notifications
+    // Resolve which event each user belongs to among the selected events
+    const guestEventRows = await prisma.event_guests.findMany({
+      where: {
+        user_id: { in: userIds },
+        event_id: { in: eventIds },
+      },
+      select: {
+        user_id: true,
+        event_id: true,
+      },
+      orderBy: { joined_at: 'desc' },
+    });
+
+    const userEventMap = new Map<string, string>();
+    for (const g of guestEventRows) {
+      if (!userEventMap.has(g.user_id)) {
+        userEventMap.set(g.user_id, g.event_id);
+      }
+    }
+
+    // 1. Bulk record in-app notifications tied to each user's event
     await prisma.notifications.createMany({
       data: userIds.map((userId) => ({
         recipient_user_id: userId,
         sender_user_id: session.id,
         notification_type: 'event_update',
-        reference_id: primaryEventId,
+        reference_id: userEventMap.get(userId) || primaryEventId,
         reference_type: 'event',
         title,
         message: body,
@@ -307,37 +331,75 @@ export async function sendAdminPushNotificationAction(input: {
     });
 
     // 2. Fetch active FCM device tokens for all selected users
-    const tokens = await getDeviceTokensForUsers(userIds);
+    const devices = await prisma.user_devices.findMany({
+      where: {
+        user_id: { in: userIds },
+        is_active: { not: false },
+      },
+      select: {
+        user_id: true,
+        device_id: true,
+        fcm_token: true,
+      },
+    });
 
-    // 3. Dispatch FCM Push Notifications
+    // 3. Resolve absolute URL for FCM (lockscreen push requires public HTTPS URL)
+    let fcmImageUrl: string | undefined = undefined;
+    if (imageUrl) {
+      if (imageUrl.startsWith('http://') || imageUrl.startsWith('https://')) {
+        fcmImageUrl = imageUrl;
+      } else if (imageUrl.startsWith('/')) {
+        const origin = appPublicOrigin();
+        fcmImageUrl = `${origin}${imageUrl}`;
+      }
+    }
+
+    // 4. Group tokens by each user's target event
+    const tokensByEventId = new Map<string, Set<string>>();
+    for (const d of devices) {
+      const token = d.fcm_token?.trim() || (d.device_id?.trim().length > 50 ? d.device_id.trim() : null);
+      if (!token) continue;
+      const targetEventId = userEventMap.get(d.user_id) || primaryEventId;
+      if (!tokensByEventId.has(targetEventId)) {
+        tokensByEventId.set(targetEventId, new Set());
+      }
+      tokensByEventId.get(targetEventId)!.add(token);
+    }
+
+    // 5. Dispatch FCM Push Notifications event-wise
     let pushSuccessCount = 0;
     let pushFailureCount = 0;
+    let totalTokensCount = 0;
 
-    if (tokens.length > 0) {
+    for (const [evtId, tokenSet] of tokensByEventId.entries()) {
+      const tokens = Array.from(tokenSet);
+      totalTokensCount += tokens.length;
+      if (tokens.length === 0) continue;
+
       const pushRes = await sendFcmPush({
         tokens,
         notification: {
           title,
           body,
-          ...(imageUrl ? { image: imageUrl } : {}),
+          ...(fcmImageUrl ? { image: fcmImageUrl } : {}),
         },
         data: {
           screen: 'notifications',
           type: 'announcement',
-          event_id: primaryEventId,
-          image_url: imageUrl || '',
+          event_id: evtId,
+          image_url: fcmImageUrl || imageUrl || '',
         },
       });
 
-      pushSuccessCount = pushRes.successCount;
-      pushFailureCount = pushRes.failureCount;
+      pushSuccessCount += pushRes.successCount;
+      pushFailureCount += pushRes.failureCount;
     }
 
     return {
       ok: true,
       data: {
         inAppCount: userIds.length,
-        deviceTokensCount: tokens.length,
+        deviceTokensCount: totalTokensCount,
         pushSuccessCount,
         pushFailureCount,
       },

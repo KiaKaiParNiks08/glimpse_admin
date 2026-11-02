@@ -5,6 +5,11 @@
 export interface CreateOtpForUserOptions {
   user_id: string;
   expiry_minutes?: number;
+  channel?: 'email' | 'sms';
+  destination?: string;
+  country_code?: string | null;
+  event_id?: string | null;
+  event_code?: string | null;
 }
 
 export interface CreateOtpForUserResult {

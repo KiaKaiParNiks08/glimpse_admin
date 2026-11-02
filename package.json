@@ -8,7 +8,7 @@
     "postinstall": "prisma generate",
     "start": "next start",
     "lint": "next lint",
-    "test": "node --experimental-strip-types --test src/lib/app-share.test.ts src/lib/media-dimensions.test.ts src/lib/user-event-profile.test.ts src/server/people-media/recognition-policy.test.ts src/server/people-media/rekognition-errors.test.ts src/server/people-media/rekognition-image.test.ts src/server/notifications/notifications.test.ts",
+    "test": "node --experimental-strip-types --test src/lib/app-share.test.ts src/lib/media-dimensions.test.ts src/lib/user-event-profile.test.ts src/server/people-media/recognition-policy.test.ts src/server/people-media/rekognition-errors.test.ts src/server/people-media/rekognition-image.test.ts src/server/notifications/notifications.test.ts src/server/otp/otp.test.ts",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev --name init",
     "prisma:deploy": "prisma migrate deploy",
@@ -16,8 +16,10 @@
     "faces:process": "node scripts/process-media-faces.mjs"
   },
   "dependencies": {
+    "@aws-sdk/client-pinpoint-sms-voice-v2": "^3.1161.0",
     "@aws-sdk/client-rekognition": "^3.1009.0",
     "@aws-sdk/client-s3": "^3.1009.0",
+    "@aws-sdk/client-ses": "^3.1161.0",
     "@aws-sdk/s3-request-presigner": "^3.1009.0",
     "@prisma/adapter-pg": "^7.4.2",
     "@prisma/client": "^7.4.2",
@@ -29,9 +31,9 @@
     "react-dom": "^19.0.0",
     "recharts": "^2.15.4",
     "sass": "^1.98.0",
+    "sharp": "^0.34.5",
     "swagger-ui-react": "^5.32.0",
-    "zod": "^4.3.6",
-    "sharp": "^0.34.5"
+    "zod": "^4.3.6"
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3.0.0",
