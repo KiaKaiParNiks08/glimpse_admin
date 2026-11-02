@@ -137,7 +137,24 @@ export async function isEventAdminAssigned(eventId: string, userId: string): Pro
 /**
  * Get a single event by id with category and main venue.
  */
+
+let thumbnailColumnsEnsured = false;
+export async function ensurePostEventPdfThumbnailColumns(): Promise<void> {
+  if (thumbnailColumnsEnsured) return;
+  try {
+    await prisma.$executeRawUnsafe(`
+      ALTER TABLE "events"
+        ADD COLUMN IF NOT EXISTS "post_event_pdf_thumbnail_url" TEXT,
+        ADD COLUMN IF NOT EXISTS "post_event_pdf_thumbnail_key" TEXT;
+    `);
+    thumbnailColumnsEnsured = true;
+  } catch {
+    thumbnailColumnsEnsured = true;
+  }
+}
+
 export async function getEventById(eventId: string) {
+  await ensurePostEventPdfThumbnailColumns();
   const baseSelect = {
     id: true,
     category_id: true,
@@ -170,6 +187,8 @@ export async function getEventById(eventId: string) {
     post_event_pdf_size: true,
     post_event_pdf_uploaded_by: true,
     post_event_pdf_uploaded_at: true,
+    post_event_pdf_thumbnail_url: true,
+    post_event_pdf_thumbnail_key: true,
     watermark_url: true,
     watermark_position: true,
     watermark_opacity: true,

@@ -25,6 +25,7 @@ export const authRequestSchema = z
       z.enum(['android', 'ios', 'web']).optional()
     ),
     device_id: optionalText(255),
+    fcm_token: optionalText(500),
   })
   .superRefine((data, ctx) => {
     if (!data.mobile_number && !data.email && !data.event_code) {
@@ -38,11 +39,17 @@ export const authRequestSchema = z
 
 export type AuthRequestInput = z.infer<typeof authRequestSchema>;
 
-/** OTP verify request (POST body) – user_id, otp */
+/** OTP verify request (POST body) – user_id, otp, optional device registration */
 export const authVerifyRequestSchema = z.object({
   user_id: z.string().uuid(),
   otp: z.string().length(6).regex(/^\d{6}$/, 'OTP must be 6 digits'),
   event_id: z.string().uuid().optional(),
+  device_type: z.preprocess(
+    (value) => (value === '' || value === null ? undefined : value),
+    z.enum(['android', 'ios', 'web']).optional()
+  ),
+  device_id: optionalText(255),
+  fcm_token: optionalText(500),
 });
 
 export type AuthVerifyRequestInput = z.infer<typeof authVerifyRequestSchema>;
@@ -72,6 +79,7 @@ export const authJoinEventRequestSchema = z
       z.enum(['android', 'ios', 'web']).optional()
     ),
     device_id: optionalText(255),
+    fcm_token: optionalText(500),
   })
   .superRefine((data, ctx) => {
     if (!data.event_code && !data.event_id) {
@@ -86,6 +94,20 @@ export const authJoinEventRequestSchema = z
 export type AuthJoinEventRequestInput = z.infer<typeof authJoinEventRequestSchema>;
 
 export type AuthSwitchEventRequestInput = z.infer<typeof authSwitchEventRequestSchema>;
+
+/** Dedicated FCM token refresh request from mobile */
+export const fcmTokenRequestSchema = z.object({
+  user_id: z.string().uuid(),
+  event_id: z.preprocess(
+    (value) => (value === '' || value === null ? undefined : value),
+    z.string().uuid().optional()
+  ),
+  device_id: z.string().min(1).max(255),
+  device_type: z.enum(['android', 'ios']),
+  fcm_token: z.string().min(1),
+});
+
+export type FcmTokenRequestInput = z.infer<typeof fcmTokenRequestSchema>;
 
 /** Admin login (SuperAdmin / Event Admin) – email and password */
 export const adminLoginRequestSchema = z.object({

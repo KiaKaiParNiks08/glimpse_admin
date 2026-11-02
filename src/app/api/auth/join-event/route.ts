@@ -31,6 +31,7 @@ export async function POST(request: Request) {
       event_id: body.event_id,
       device_type: body.device_type,
       device_id: body.device_id,
+      fcm_token: body.fcm_token,
     });
     if (!result.ok) {
       return joinEventJson(result.status, { success: false, message: result.message });

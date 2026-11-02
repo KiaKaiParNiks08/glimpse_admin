@@ -94,6 +94,7 @@ export interface FcmPayload {
   notification: {
     title: string;
     body: string;
+    image?: string;
   };
   data?: Record<string, string>;
 }
@@ -134,13 +135,15 @@ export async function sendFcmPush(payload: FcmPayload): Promise<FcmSendResult> {
 
   const url = `https://fcm.googleapis.com/v1/projects/${projectId}/messages:send`;
 
-  // FCM data values MUST all be strings
+  // FCM data values MUST all be strings (never null, undefined, or literal "null")
   const sanitizedData: Record<string, string> = {
     click_action: 'FLUTTER_NOTIFICATION_CLICK',
   };
   if (payload.data) {
     for (const [k, v] of Object.entries(payload.data)) {
-      if (v !== undefined && v !== null) {
+      if (v === null || v === undefined || v === 'null') {
+        sanitizedData[k] = '';
+      } else {
         sanitizedData[k] = String(v);
       }
     }
@@ -158,6 +161,7 @@ export async function sendFcmPush(payload: FcmPayload): Promise<FcmSendResult> {
             notification: {
               title: payload.notification.title,
               body: payload.notification.body,
+              ...(payload.notification.image ? { image: payload.notification.image } : {}),
             },
             data: sanitizedData,
             android: {
@@ -166,6 +170,7 @@ export async function sendFcmPush(payload: FcmPayload): Promise<FcmSendResult> {
                 channel_id: 'glimpse_notifications',
                 sound: 'default',
                 default_sound: true,
+                ...(payload.notification.image ? { image: payload.notification.image } : {}),
               },
             },
             apns: {
@@ -226,7 +231,12 @@ export async function sendFcmPush(payload: FcmPayload): Promise<FcmSendResult> {
   if (result.invalidTokens.length > 0) {
     try {
       await prisma.user_devices.updateMany({
-        where: { device_id: { in: result.invalidTokens } },
+        where: {
+          OR: [
+            { fcm_token: { in: result.invalidTokens } },
+            { device_id: { in: result.invalidTokens } },
+          ],
+        },
         data: { is_active: false, updated_at: new Date() },
       });
       console.info(`[fcm] Deactivated ${result.invalidTokens.length} invalid/unregistered device tokens`);

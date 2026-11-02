@@ -4,6 +4,8 @@ import { sendFcmPush } from './firebase-http';
 
 /**
  * Get active FCM device tokens for a given set of user IDs.
+ * Prefers fcm_token; falls back to device_id only if it looks like an FCM token (> 50 chars)
+ * rather than an installation UUID.
  */
 export async function getDeviceTokensForUsers(userIds: string[]): Promise<string[]> {
   const uniqueIds = [...new Set(userIds.filter(Boolean))];
@@ -14,10 +16,23 @@ export async function getDeviceTokensForUsers(userIds: string[]): Promise<string
       user_id: { in: uniqueIds },
       is_active: true,
     },
-    select: { device_id: true },
+    select: {
+      device_id: true,
+      fcm_token: true,
+    },
   });
 
-  return [...new Set(devices.map((d) => d.device_id.trim()).filter(Boolean))];
+  const tokens = devices
+    .map((d) => {
+      const fcm = d.fcm_token?.trim();
+      if (fcm) return fcm;
+      const dev = d.device_id?.trim();
+      if (dev && dev.length > 50) return dev;
+      return null;
+    })
+    .filter((token): token is string => Boolean(token));
+
+  return [...new Set(tokens)];
 }
 
 interface InAppNotificationInput {

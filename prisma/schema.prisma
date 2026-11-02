@@ -354,6 +354,8 @@ model events {
   post_event_pdf_size                  Int?
   post_event_pdf_uploaded_by           String?               @db.Uuid
   post_event_pdf_uploaded_at           DateTime?             @db.Timestamptz(6)
+  post_event_pdf_thumbnail_url         String?
+  post_event_pdf_thumbnail_key         String?
   groom_name                           String?               @db.VarChar(200)
   bride_name                           String?               @db.VarChar(200)
   greetings_text                       String?
@@ -724,6 +726,7 @@ model user_devices {
   user_id      String      @db.Uuid
   device_type  device_type
   device_id    String      @db.VarChar(255)
+  fcm_token    String?
   is_active    Boolean?    @default(true)
   last_seen_at DateTime?   @db.Timestamptz(6)
   created_at   DateTime?   @default(now()) @db.Timestamptz(6)
@@ -734,6 +737,7 @@ model user_devices {
   @@index([device_type], map: "idx_user_devices_device_type")
   @@index([user_id], map: "idx_user_devices_user_id")
   @@index([device_id], map: "idx_user_devices_device_id")
+  @@index([fcm_token], map: "idx_user_devices_fcm_token")
 }
 
 /// A user's favorite item within one event. Exactly one target column is set, matching item_type

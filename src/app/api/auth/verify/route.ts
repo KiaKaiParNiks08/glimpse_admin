@@ -3,6 +3,7 @@ import { ok, badRequest, serverError } from '@/lib/api-response';
 import { prisma, verifyOtpForUser } from '@/server';
 import { createUserJwtToken } from '@/lib/jwt';
 import { toAuthCategoryFields } from '@/server/auth-login';
+import { upsertUserDevice } from '@/server/user-devices';
 
 type GuestEventRow = {
   event_id: string;
@@ -55,6 +56,15 @@ export async function POST(request: Request) {
     const guest = guestRows[0];
     if (!guest) {
       return badRequest('User event context not found. Please request OTP again.');
+    }
+
+    if (body.device_id && body.device_type) {
+      await upsertUserDevice({
+        user_id: body.user_id,
+        device_type: body.device_type,
+        device_id: body.device_id,
+        fcm_token: body.fcm_token,
+      });
     }
 
     const { token, expires_at } = createUserJwtToken({

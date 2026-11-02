@@ -185,6 +185,7 @@ export function CreateEventWizard({
     url: string;
     originalName: string | null;
     uploadedAt: string | null;
+    thumbnailUrl?: string | null;
   } | null>(null);
   const [postEventReport, setPostEventReport] = useState<PostEventReportSettings>({
     title: '',
@@ -291,6 +292,7 @@ export function CreateEventWizard({
           post_event_pdf_url?: string | null;
           post_event_pdf_original_name?: string | null;
           post_event_pdf_uploaded_at?: string | null;
+          post_event_pdf_thumbnail_url?: string | null;
           post_event_pdf_title?: string | null;
           post_event_pdf_show_pre_event?: boolean;
           post_event_pdf_show_ongoing_event?: boolean;
@@ -321,6 +323,7 @@ export function CreateEventWizard({
           url: event.post_event_pdf_url ?? '',
           originalName: event.post_event_pdf_original_name ?? null,
           uploadedAt: event.post_event_pdf_uploaded_at ?? null,
+          thumbnailUrl: event.post_event_pdf_thumbnail_url ?? null,
         });
         setPostEventReport({
           title: event.post_event_pdf_title ?? '',
@@ -904,6 +907,7 @@ export function CreateEventWizard({
                   post_event_pdf_url: postEventPdf?.url ?? null,
                   post_event_pdf_original_name: postEventPdf?.originalName ?? null,
                   post_event_pdf_uploaded_at: postEventPdf?.uploadedAt ?? null,
+                  post_event_pdf_thumbnail_url: postEventPdf?.thumbnailUrl ?? null,
                   start_date: basicPayload.start_date,
                   end_date: basicPayload.end_date,
                   main_venue_id: basicPayload.main_venue_id ?? null,
@@ -922,6 +926,7 @@ export function CreateEventWizard({
               url: next.url,
               originalName: next.originalName,
               uploadedAt: next.uploadedAt,
+              thumbnailUrl: next.thumbnailUrl,
             })
           }
           postEventReportSettings={postEventReport}

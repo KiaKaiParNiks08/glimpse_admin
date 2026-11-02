@@ -52,6 +52,8 @@ export default function DashboardLayout({
         return <path d="M3 13h8V3H3v10Zm10 8h8V11h-8v10ZM3 21h8v-6H3v6Zm10-10h8V3h-8v8Z" />;
       case 'events':
         return <path d="M7 2v2H5a2 2 0 0 0-2 2v3h18V6a2 2 0 0 0-2-2h-2V2h-2v2H9V2H7Zm14 9H3v8a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-8ZM7 15h4v4H7v-4Z" />;
+      case 'notifications':
+        return <path d="M12 22c1.1 0 2-.9 2-2h-4c0 1.1.9 2 2 2zm6-6v-5c0-3.07-1.63-5.64-4.5-6.32V4c0-.83-.67-1.5-1.5-1.5s-1.5.67-1.5 1.5v.68C7.64 5.36 6 7.92 6 11v5l-2 2v1h16v-1l-2-2zm-2 1H8v-6c0-2.48 1.51-4.5 4-4.5s4 2.02 4 4.5v6z" />;
       case 'venues':
         return <path d="M12 2 3 7v2h18V7l-9-5Zm-7 9h14v9h2v2H3v-2h2v-9Zm2 0v9h2v-9H7Zm4 0v9h2v-9h-2Zm4 0v9h2v-9h-2Z" />;
       case 'explore-categories':

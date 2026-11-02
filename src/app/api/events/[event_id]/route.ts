@@ -147,6 +147,7 @@ export async function GET(
             original_name: event.post_event_pdf_original_name,
             size: event.post_event_pdf_size,
             uploaded_at: event.post_event_pdf_uploaded_at,
+            thumbnail_url: event.post_event_pdf_thumbnail_url ?? null,
           }
         : undefined;
 
@@ -171,6 +172,8 @@ export async function GET(
       post_event_pdf_show_pre_event,
       post_event_pdf_show_ongoing_event,
       post_event_pdf_show_post_event,
+      post_event_pdf_thumbnail_url,
+      post_event_pdf_thumbnail_key,
       event_cover_images,
       ...eventFields
     } = event;

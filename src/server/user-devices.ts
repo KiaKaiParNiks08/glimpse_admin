@@ -6,6 +6,22 @@ export interface UpsertUserDeviceInput {
   user_id: string;
   device_type: device_type;
   device_id: string;
+  fcm_token?: string | null;
+}
+
+let userDevicesEnsured = false;
+export async function ensureUserDevicesFcmColumn(): Promise<void> {
+  if (userDevicesEnsured) return;
+  try {
+    await prisma.$executeRawUnsafe(`
+      ALTER TABLE "user_devices"
+        ADD COLUMN IF NOT EXISTS "fcm_token" TEXT;
+      CREATE INDEX IF NOT EXISTS "idx_user_devices_fcm_token" ON "user_devices" ("fcm_token");
+    `);
+    userDevicesEnsured = true;
+  } catch {
+    userDevicesEnsured = true;
+  }
 }
 
 /**
@@ -79,7 +95,8 @@ export async function listPreviousEventsForUsers(userIds: string[]): Promise<Pre
 }
 
 export async function upsertUserDevice(input: UpsertUserDeviceInput): Promise<void> {
-  const { user_id, device_type, device_id } = input;
+  await ensureUserDevicesFcmColumn();
+  const { user_id, device_type, device_id, fcm_token } = input;
   const now = new Date();
 
   await prisma.user_devices.upsert({
@@ -93,13 +110,18 @@ export async function upsertUserDevice(input: UpsertUserDeviceInput): Promise<vo
       device_type,
       is_active: true,
       last_seen_at: now,
+      updated_at: now,
+      ...(fcm_token !== undefined ? { fcm_token: fcm_token ? fcm_token.trim() : null } : {}),
     },
     create: {
       user_id,
       device_type,
       device_id,
+      fcm_token: fcm_token ? fcm_token.trim() : null,
       is_active: true,
       last_seen_at: now,
+      created_at: now,
+      updated_at: now,
     },
   });
 }

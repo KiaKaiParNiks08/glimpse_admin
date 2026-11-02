@@ -262,6 +262,9 @@ export function getOpenApiSpec(serverUrl: string) {
                     user_id: { type: 'string', format: 'uuid' },
                     otp: { type: 'string', minLength: 6, maxLength: 6, pattern: '^\\d{6}$', example: '123456' },
                     event_id: { type: 'string', format: 'uuid', description: 'Event chosen at login. If omitted, the latest guest event is used.' },
+                    device_type: { type: 'string', enum: ['android', 'ios', 'web'], description: 'Optional device platform.' },
+                    device_id: { type: 'string', maxLength: 255, description: 'Stable installation UUID stored on device.' },
+                    fcm_token: { type: 'string', maxLength: 500, description: 'Firebase Cloud Messaging registration token.' },
                   },
                 },
               },
@@ -430,6 +433,7 @@ export function getOpenApiSpec(serverUrl: string) {
                     },
                     device_type: { type: 'string', enum: ['android', 'ios', 'web'] },
                     device_id: { type: 'string', maxLength: 255 },
+                    fcm_token: { type: 'string', maxLength: 500, description: 'Firebase Cloud Messaging registration token.' },
                   },
                 },
               },
@@ -504,6 +508,50 @@ export function getOpenApiSpec(serverUrl: string) {
               },
             },
             '403': { description: 'Not authenticated' },
+            '500': { description: 'Server error' },
+          },
+        },
+      },
+      '/api/auth/fcm-token': {
+        post: {
+          summary: 'Register or refresh FCM push token',
+          description:
+            'Dedicated endpoint for mobile devices to refresh or update their Firebase Cloud Messaging token. Associates with the user and event if supplied.',
+          tags: ['Auth'],
+          requestBody: {
+            required: true,
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['user_id', 'device_id', 'device_type', 'fcm_token'],
+                  properties: {
+                    user_id: { type: 'string', format: 'uuid' },
+                    event_id: { type: 'string', format: 'uuid', description: 'Optional active event id.' },
+                    device_id: { type: 'string', maxLength: 255, description: 'Stable installation UUID stored on device.' },
+                    device_type: { type: 'string', enum: ['android', 'ios'] },
+                    fcm_token: { type: 'string', description: 'Firebase Cloud Messaging registration token.' },
+                  },
+                },
+              },
+            },
+          },
+          responses: {
+            '200': {
+              description: 'FCM token updated successfully',
+              content: {
+                'application/json': {
+                  schema: {
+                    type: 'object',
+                    properties: {
+                      success: { type: 'boolean', example: true },
+                      message: { type: 'string', example: 'FCM token updated' },
+                    },
+                  },
+                },
+              },
+            },
+            '400': { description: 'Validation failed' },
             '500': { description: 'Server error' },
           },
         },
@@ -2545,6 +2593,7 @@ export function getOpenApiSpec(serverUrl: string) {
                               original_name: { type: 'string', nullable: true },
                               size: { type: 'integer', nullable: true, description: 'Bytes' },
                               uploaded_at: { type: 'string', format: 'date-time', nullable: true },
+                              thumbnail_url: { type: 'string', nullable: true, description: 'Thumbnail / cover image URL for the post-event report' },
                             },
                           },
                         },

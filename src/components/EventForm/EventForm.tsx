@@ -239,6 +239,7 @@ export interface EventFormProps {
     post_event_pdf_url?: string | null;
     post_event_pdf_original_name?: string | null;
     post_event_pdf_uploaded_at?: string | null;
+    post_event_pdf_thumbnail_url?: string | null;
     start_date: string;
     end_date: string;
     main_venue_id?: string | null;
@@ -255,7 +256,7 @@ export interface EventFormProps {
   cancelLabel?: string;
   loading?: boolean;
   error?: string | null;
-  onPostEventPdfChanged?: (next: { url: string; originalName: string | null; uploadedAt: string | null }) => void;
+  onPostEventPdfChanged?: (next: { url: string; originalName: string | null; uploadedAt: string | null; thumbnailUrl?: string | null }) => void;
   postEventReportSettings?: PostEventReportSettings;
   onPostEventReportSettingsChange?: (next: PostEventReportSettings) => void;
 }
@@ -657,6 +658,7 @@ export function EventForm({
               value={event.post_event_pdf_url ?? ''}
               originalName={event.post_event_pdf_original_name ?? null}
               uploadedAt={event.post_event_pdf_uploaded_at ?? null}
+              thumbnailUrl={event.post_event_pdf_thumbnail_url ?? null}
               onChange={(next) => onPostEventPdfChanged?.(next)}
               settings={postEventReportSettings}
               onSettingsChange={onPostEventReportSettingsChange}

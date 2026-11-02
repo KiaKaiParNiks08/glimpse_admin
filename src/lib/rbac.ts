@@ -3,6 +3,7 @@ export type AdminRoleName = 'super_admin' | 'event_admin';
 export type AdminModule =
   | 'dashboard'
   | 'events'
+  | 'notifications'
   | 'venues'
   | 'explore-categories'
   | 'admins'
@@ -14,6 +15,7 @@ export const MODULE_LABELS: Record<AdminModule, string> = {
   admins: 'Admins',
   venues: 'Venues',
   events: 'Events',
+  notifications: 'Push Notifications',
   'explore-categories': 'Explore categories',
   'app-config': 'App configuration',
   'app-themes': 'App themes',
@@ -24,6 +26,7 @@ export const MODULE_HREFS: Record<AdminModule, string> = {
   admins: '/dashboard/admins',
   venues: '/dashboard/venues',
   events: '/dashboard/events',
+  notifications: '/dashboard/notifications',
   'explore-categories': '/dashboard/explore-categories',
   'app-config': '/dashboard/app-config',
   'app-themes': '/dashboard/app-themes',
@@ -32,11 +35,11 @@ export const MODULE_HREFS: Record<AdminModule, string> = {
 /**
  * Single source of truth for RBAC.
  * - super_admin: full access
- * - event_admin: can manage events and related content, but NOT manage admins
+ * - event_admin: can manage events, notifications, and related content, but NOT manage admins
  */
 export const ROLE_MODULE_ACCESS: Record<AdminRoleName, AdminModule[]> = {
-  super_admin: ['dashboard', 'admins', 'venues', 'events', 'explore-categories', 'app-config', 'app-themes'],
-  event_admin: ['dashboard', 'venues', 'events', 'explore-categories'],
+  super_admin: ['dashboard', 'admins', 'venues', 'events', 'notifications', 'explore-categories', 'app-config', 'app-themes'],
+  event_admin: ['dashboard', 'venues', 'events', 'notifications', 'explore-categories'],
 };
 
 export function isAdminRole(role: string | null | undefined): role is AdminRoleName {
@@ -55,9 +58,9 @@ export function moduleFromPathname(pathname: string): AdminModule | null {
   if (pathname.startsWith('/dashboard/admins')) return 'admins';
   if (pathname.startsWith('/dashboard/venues')) return 'venues';
   if (pathname.startsWith('/dashboard/events')) return 'events';
+  if (pathname.startsWith('/dashboard/notifications')) return 'notifications';
   if (pathname.startsWith('/dashboard/explore-categories')) return 'explore-categories';
   if (pathname.startsWith('/dashboard/app-config')) return 'app-config';
   if (pathname.startsWith('/dashboard/app-themes')) return 'app-themes';
   return null;
 }
-

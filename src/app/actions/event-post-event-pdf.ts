@@ -10,6 +10,8 @@ type ResultOk = { ok: true; url: string; originalName: string | null; uploadedAt
 type ResultErr = { ok: false; error: string };
 export type UploadPostEventPdfResult = ResultOk | ResultErr;
 export type RemovePostEventPdfResult = { ok: true } | ResultErr;
+export type UploadPostEventPdfThumbnailResult = { ok: true; url: string } | ResultErr;
+export type RemovePostEventPdfThumbnailResult = { ok: true } | ResultErr;
 
 function isUuid(v: unknown): v is string {
   return typeof v === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(v);
@@ -100,7 +102,94 @@ export async function uploadPostEventPdfAction(
 }
 
 /**
- * Remove post-event PDF (DB + best-effort S3 delete).
+ * Upload a thumbnail image for post-event PDF report.
+ * FormData: file (JPEG, PNG, WebP, GIF)
+ */
+export async function uploadPostEventPdfThumbnailAction(
+  eventId: string,
+  formData: FormData
+): Promise<UploadPostEventPdfThumbnailResult> {
+  if (!isUuid(eventId)) return { ok: false, error: 'Invalid event id' };
+
+  const access = await requireEventWriteAccess(eventId);
+  if (!access.ok) return { ok: false, error: access.error };
+
+  const file = formData.get('file');
+  if (!isFileLike(file)) return { ok: false, error: 'No file provided or invalid file' };
+
+  const mimeType = (file.type || '').split(';')[0].trim().toLowerCase() || 'application/octet-stream';
+  const kind = getMediaKind(mimeType);
+  if (kind !== 'image') return { ok: false, error: 'Please choose an image file (JPEG, PNG, WebP or GIF).' };
+
+  const validationError = validateMediaFile({ type: mimeType, size: file.size }, 'image');
+  if (validationError) return { ok: false, error: validationError };
+
+  const event = await prisma.events.findUnique({
+    where: { id: eventId },
+    select: { id: true, post_event_pdf_thumbnail_key: true },
+  });
+  if (!event) return { ok: false, error: 'Event not found' };
+
+  try {
+    const key = generateS3Key(`events/${eventId}/post-event/thumbnails`, mimeType);
+    const buffer = Buffer.from(await file.arrayBuffer());
+    await putObjectFromBuffer(key, buffer, mimeType);
+    const url = getStoredObjectUrl(key);
+
+    await prisma.events.update({
+      where: { id: eventId },
+      data: {
+        post_event_pdf_thumbnail_url: url,
+        post_event_pdf_thumbnail_key: key,
+      },
+    });
+
+    if (event.post_event_pdf_thumbnail_key && event.post_event_pdf_thumbnail_key !== key) {
+      deleteObjectByKey(event.post_event_pdf_thumbnail_key).catch(() => null);
+    }
+
+    return { ok: true, url };
+  } catch (e) {
+    console.error('[uploadPostEventPdfThumbnailAction]', e);
+    const message = e instanceof Error ? e.message : 'Thumbnail upload failed';
+    return { ok: false, error: message };
+  }
+}
+
+/**
+ * Remove post-event PDF thumbnail image.
+ */
+export async function removePostEventPdfThumbnailAction(
+  eventId: string
+): Promise<RemovePostEventPdfThumbnailResult> {
+  if (!isUuid(eventId)) return { ok: false, error: 'Invalid event id' };
+
+  const access = await requireEventWriteAccess(eventId);
+  if (!access.ok) return { ok: false, error: access.error };
+
+  const event = await prisma.events.findUnique({
+    where: { id: eventId },
+    select: { id: true, post_event_pdf_thumbnail_key: true },
+  });
+  if (!event) return { ok: false, error: 'Event not found' };
+
+  await prisma.events.update({
+    where: { id: eventId },
+    data: {
+      post_event_pdf_thumbnail_url: null,
+      post_event_pdf_thumbnail_key: null,
+    },
+  });
+
+  if (event.post_event_pdf_thumbnail_key) {
+    deleteObjectByKey(event.post_event_pdf_thumbnail_key).catch(() => null);
+  }
+
+  return { ok: true };
+}
+
+/**
+ * Remove post-event PDF and its thumbnail (DB + best-effort S3 delete).
  */
 export async function removePostEventPdfAction(eventId: string): Promise<RemovePostEventPdfResult> {
   if (!isUuid(eventId)) return { ok: false, error: 'Invalid event id' };
@@ -110,7 +199,7 @@ export async function removePostEventPdfAction(eventId: string): Promise<RemoveP
 
   const event = await prisma.events.findUnique({
     where: { id: eventId },
-    select: { id: true, post_event_pdf_key: true },
+    select: { id: true, post_event_pdf_key: true, post_event_pdf_thumbnail_key: true },
   });
   if (!event) return { ok: false, error: 'Event not found' };
 
@@ -123,13 +212,17 @@ export async function removePostEventPdfAction(eventId: string): Promise<RemoveP
       post_event_pdf_size: null,
       post_event_pdf_uploaded_by: null,
       post_event_pdf_uploaded_at: null,
+      post_event_pdf_thumbnail_url: null,
+      post_event_pdf_thumbnail_key: null,
     },
   });
 
   if (event.post_event_pdf_key) {
     deleteObjectByKey(event.post_event_pdf_key).catch(() => null);
   }
+  if (event.post_event_pdf_thumbnail_key) {
+    deleteObjectByKey(event.post_event_pdf_thumbnail_key).catch(() => null);
+  }
 
   return { ok: true };
 }
-

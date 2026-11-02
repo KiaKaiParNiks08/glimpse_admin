@@ -1,5 +1,10 @@
 import test, { describe } from 'node:test';
 import assert from 'node:assert/strict';
+import {
+  fcmTokenRequestSchema,
+  authVerifyRequestSchema,
+  authJoinEventRequestSchema,
+} from '../../lib/validations/auth.ts';
 
 describe('Notification formatting and deep-link payload contracts', () => {
   test('Case 1A: Session Media Upload broadcast format and payload', () => {
@@ -190,5 +195,72 @@ describe('Notification formatting and deep-link payload contracts', () => {
     assert.equal(body, "Fiona Gallagher liked your post, where you've been recognized.");
     assert.equal(data.screen, 'post_details');
     assert.equal(data.type, 'recognized_post_liked');
+  });
+  test('Post-event report structure includes custom thumbnail_url', () => {
+    const report = {
+      title: 'Annual Gala Recap',
+      url: 'https://s3.amazonaws.com/bucket/events/e1/post-event.pdf',
+      originalName: 'recap.pdf',
+      size: 204800,
+      uploadedAt: '2026-11-01T21:00:00.000Z',
+      thumbnail_url: 'https://s3.amazonaws.com/bucket/events/e1/post-event/thumbnails/thumb.jpg',
+    };
+
+    assert.equal(report.title, 'Annual Gala Recap');
+    assert.ok(report.url.endsWith('.pdf'));
+    assert.equal(report.thumbnail_url, 'https://s3.amazonaws.com/bucket/events/e1/post-event/thumbnails/thumb.jpg');
+  });
+
+  test('FCM token validation schema accepts valid registration request', () => {
+    const valid = fcmTokenRequestSchema.safeParse({
+      user_id: 'e2b3472b-8a8b-4a57-b088-7e3e9d8e57aa',
+      event_id: 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11',
+      device_id: 'a1b2c3d4-uuid-device',
+      device_type: 'android',
+      fcm_token: 'fcm_sample_token_abcdef1234567890',
+    });
+    assert.equal(valid.success, true);
+    if (valid.success) {
+      assert.equal(valid.data.device_type, 'android');
+      assert.equal(valid.data.device_id, 'a1b2c3d4-uuid-device');
+      assert.equal(valid.data.fcm_token, 'fcm_sample_token_abcdef1234567890');
+    }
+
+    // Optional event_id
+    const withoutEvent = fcmTokenRequestSchema.safeParse({
+      user_id: 'e2b3472b-8a8b-4a57-b088-7e3e9d8e57aa',
+      device_id: 'a1b2c3d4-uuid-device',
+      device_type: 'ios',
+      fcm_token: 'fcm_token_xyz',
+    });
+    assert.equal(withoutEvent.success, true);
+
+    // Rejection on invalid inputs
+    const badType = fcmTokenRequestSchema.safeParse({
+      user_id: 'e2b3472b-8a8b-4a57-b088-7e3e9d8e57aa',
+      device_id: 'a1b2c3d4-uuid-device',
+      device_type: 'windows',
+      fcm_token: 'token',
+    });
+    assert.equal(badType.success, false);
+  });
+
+  test('Auth verify and join-event schemas accept fcm_token and device info', () => {
+    const verifyValid = authVerifyRequestSchema.safeParse({
+      user_id: 'e2b3472b-8a8b-4a57-b088-7e3e9d8e57aa',
+      otp: '123456',
+      device_id: 'device-uuid-1234',
+      device_type: 'android',
+      fcm_token: 'fcm_token_123',
+    });
+    assert.equal(verifyValid.success, true);
+
+    const joinValid = authJoinEventRequestSchema.safeParse({
+      event_id: 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11',
+      device_id: 'device-uuid-1234',
+      device_type: 'ios',
+      fcm_token: 'fcm_token_456',
+    });
+    assert.equal(joinValid.success, true);
   });
 });

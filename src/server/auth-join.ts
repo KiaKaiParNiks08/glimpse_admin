@@ -114,6 +114,7 @@ export async function joinAuthenticatedUserToEvent(input: {
   event_id?: string;
   device_type?: 'android' | 'ios' | 'web';
   device_id?: string;
+  fcm_token?: string;
 }): Promise<JoinEventResult> {
   const resolved = await resolveJoinEvent({
     event_code: input.event_code,
@@ -144,6 +145,7 @@ export async function joinAuthenticatedUserToEvent(input: {
       user_id: input.userId,
       device_type: input.device_type,
       device_id: input.device_id,
+      fcm_token: input.fcm_token,
     });
   }
 
