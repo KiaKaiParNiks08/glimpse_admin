@@ -79,7 +79,7 @@ async function readCompleteFile(file: File): Promise<Buffer> {
   return buffer;
 }
 
-function isS3Configured(): boolean {
+export function isS3Configured(): boolean {
   return Boolean(process.env.AWS_REGION && process.env.S3_BUCKET);
 }
 

@@ -120,6 +120,7 @@ const eventDayMediaSelect = {
   thumbnail_url: true,
   display_order: true,
   created_at: true,
+  uploaded_by: true,
 } as const;
 
 export async function listSessionMediaPage(input: {

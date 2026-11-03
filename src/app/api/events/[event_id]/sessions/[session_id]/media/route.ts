@@ -170,7 +170,11 @@ export async function POST(
 
     return ok(
       {
-        data: created.map(({ media_key: _key, ...row }) => row),
+        data: created.map(({ media_key: _key, ...row }) => ({
+          ...row,
+          can_upload: true,
+          can_delete: true,
+        })),
       },
       'Media uploaded'
     );

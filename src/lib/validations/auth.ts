@@ -64,6 +64,12 @@ export type AuthResendRequestInput = z.infer<typeof authResendRequestSchema>;
 /** Switch the current event without a new OTP (profile account switch). */
 export const authSwitchEventRequestSchema = z.object({
   event_id: z.string().uuid(),
+  device_type: z.preprocess(
+    (value) => (value === '' || value === null ? undefined : value),
+    z.enum(['android', 'ios', 'web']).optional()
+  ),
+  device_id: optionalText(255),
+  fcm_token: optionalText(500),
 });
 
 /** Logged-in user joining another event from the in-app sheet or QR. */

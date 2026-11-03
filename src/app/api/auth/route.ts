@@ -25,7 +25,7 @@ export async function POST(request: Request) {
     const [body, err] = await parseBody(request, authRequestSchema);
     if (err) return err;
 
-    const { country_code, mobile_number, event_code, event_id, email, device_type, device_id } = body;
+    const { country_code, mobile_number, event_code, event_id, email, device_type, device_id, fcm_token } = body;
 
     const rolePromise = getRoleByName(USER_ROLE_NAME);
 
@@ -42,13 +42,12 @@ export async function POST(request: Request) {
       if (device_id) {
         const returning = await findReturningUserByDevice(eventByCode.id, device_id, userRole.id);
         if (returning) {
-          if (device_type) {
-            await upsertUserDevice({
-              user_id: returning.user_id,
-              device_type,
-              device_id,
-            });
-          }
+          await upsertUserDevice({
+            user_id: returning.user_id,
+            device_type: device_type || 'android',
+            device_id,
+            fcm_token,
+          });
           const { token, expires_at } = createUserJwtToken({
             user_id: returning.user_id,
             event_id: eventByCode.id,
@@ -145,8 +144,13 @@ export async function POST(request: Request) {
         roleId: userRole.id,
       });
       await Promise.all([
-        device_id && device_type
-          ? upsertUserDevice({ user_id: createdUser.user_id, device_type, device_id })
+        device_id
+          ? upsertUserDevice({
+              user_id: createdUser.user_id,
+              device_type: device_type || 'android',
+              device_id,
+              fcm_token,
+            })
           : Promise.resolve(),
         ensureEventGuest({
           event_id: event.id,

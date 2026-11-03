@@ -1,7 +1,6 @@
 import { badRequest, forbidden, notFound, ok, serverError } from '@/lib/api-response';
-import { getUserFromAuthorizationHeader } from '@/lib/jwt';
+import { getAdminFromAuthorizationHeader, getUserFromAuthorizationHeader } from '@/lib/jwt';
 import { deleteEventDayMediaById } from '@/server/event-day-media';
-import { sessionIdsViewerCanUpload } from '@/server/session-uploaders';
 import prisma from '@/server/prisma';
 
 function isUuid(value: string): boolean {
@@ -10,7 +9,12 @@ function isUuid(value: string): boolean {
 
 /**
  * DELETE /api/events/{event_id}/sessions/{session_id}/media/{media_id}
- * The signed-in uploader may delete only media they uploaded to a session they can upload to.
+ * Auth: Bearer token (user or admin).
+ * The uploader (owner) or event/super admin may delete media.
+ * Returns:
+ *   200: { message: "Media deleted", data: { id } }
+ *   403: { message: "..." } if not owner
+ *   404: { message: "..." } if not found or already deleted
  */
 export async function DELETE(
   request: Request,
@@ -18,13 +22,14 @@ export async function DELETE(
 ) {
   try {
     const user = getUserFromAuthorizationHeader(request);
-    if (!user) return forbidden('Not authenticated');
+    const admin = getAdminFromAuthorizationHeader(request);
+    if (!user && !admin) return forbidden('Not authenticated');
 
     const { event_id, session_id, media_id } = await context.params;
     if (!isUuid(event_id) || !isUuid(session_id) || !isUuid(media_id)) {
       return badRequest('Invalid event, session, or media id');
     }
-    if (user.event_id !== event_id) return forbidden('This login is for a different event');
+    if (user && user.event_id !== event_id) return forbidden('This login is for a different event');
 
     const media = await prisma.event_day_media.findFirst({
       where: {
@@ -36,9 +41,11 @@ export async function DELETE(
     });
     if (!media) return notFound('Media not found');
 
-    const allowed = await sessionIdsViewerCanUpload([session_id], user.id);
-    if (!allowed.has(session_id) || media.uploaded_by !== user.id) {
-      return forbidden('You can only delete media you uploaded to this session');
+    const isOwner = Boolean(user && media.uploaded_by === user.id);
+    const isAdmin = Boolean(admin);
+
+    if (!isOwner && !isAdmin) {
+      return forbidden('You can only delete media you uploaded');
     }
 
     await deleteEventDayMediaById(media.id);

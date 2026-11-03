@@ -7,12 +7,14 @@ import {
 } from '@/server/event-day-media';
 import { getFavoritedItemIds } from '@/server/favorites';
 import { sessionIdsViewerCanUpload } from '@/server/session-uploaders';
+import { getAdminFromAuthorizationHeader, getUserFromAuthorizationHeader } from '@/lib/jwt';
 import prisma from '@/server/prisma';
 
 /**
  * GET /api/events/day-media
  * Returns gallery media rows of one session (event_session_id) or of a whole day (event_day_id).
  * Query: event_session_id or event_day_id (one required), viewer_user_id (optional, adds is_favorite per item).
+ * Also inspects Bearer token for authenticated viewer.
  */
 export async function GET(request: Request) {
   try {
@@ -20,14 +22,14 @@ export async function GET(request: Request) {
     const [query, err] = parseQuery(searchParams, listEventDayMediaQuerySchema);
     if (err) return err;
 
+    const userFromToken = getUserFromAuthorizationHeader(request);
+    const adminFromToken = getAdminFromAuthorizationHeader(request);
+    const effectiveUserId = userFromToken?.id || query.viewer_user_id;
+    const isAdmin = Boolean(adminFromToken);
+
     const rows = query.event_session_id
       ? await getEventDayMediaBySessionId(query.event_session_id)
       : await getEventDayMediaByEventDayId(query.event_day_id!);
-    const data = rows.map(({ media_key, ...row }) => row);
-
-    if (!query.viewer_user_id) {
-      return ok({ data, meta: { can_upload: false } });
-    }
 
     const sessionIds = query.event_session_id
       ? [query.event_session_id]
@@ -37,18 +39,39 @@ export async function GET(request: Request) {
             select: { id: true },
           })
         ).map((row) => row.id);
-    const canUploadIds = await sessionIdsViewerCanUpload(sessionIds, query.viewer_user_id);
+
+    const [canUploadIds, favorited] = await Promise.all([
+      isAdmin
+        ? Promise.resolve(new Set(sessionIds))
+        : sessionIdsViewerCanUpload(sessionIds, effectiveUserId),
+      effectiveUserId
+        ? getFavoritedItemIds(
+            effectiveUserId,
+            'day_media',
+            rows.map((m) => m.id)
+          )
+        : Promise.resolve(null),
+    ]);
+
     const can_upload = query.event_session_id
       ? canUploadIds.has(query.event_session_id)
       : canUploadIds.size > 0;
 
-    const favorited = await getFavoritedItemIds(
-      query.viewer_user_id,
-      'day_media',
-      data.map((m) => m.id)
-    );
+    const data = rows.map(({ media_key: _key, uploaded_by, ...m }) => {
+      const canUploadItem = m.event_session_id ? canUploadIds.has(m.event_session_id) : false;
+      const isOwner = Boolean(effectiveUserId && uploaded_by && uploaded_by === effectiveUserId);
+      const canDelete = Boolean(isAdmin || isOwner);
+
+      return {
+        ...m,
+        ...(favorited && { is_favorite: favorited.has(m.id) }),
+        can_upload: canUploadItem,
+        can_delete: canDelete,
+      };
+    });
+
     return ok({
-      data: data.map((m) => ({ ...m, is_favorite: favorited.has(m.id) })),
+      data,
       meta: { can_upload },
     });
   } catch (e) {

@@ -77,16 +77,25 @@ export async function GET(
     ]);
 
     const sessionIds = days.flatMap((day) => day.event_sessions.map((s) => s.id));
+    const admin = getAdminFromAuthorizationHeader(request);
+    const isAdmin = Boolean(admin);
     const [favorited, canUploadIds] = await Promise.all([
-      query.viewer_user_id
-        ? getFavoritedItemIds(query.viewer_user_id, 'day_media', mediaRows.map((m) => m.id))
+      effectiveUserId
+        ? getFavoritedItemIds(effectiveUserId, 'day_media', mediaRows.map((m) => m.id))
         : Promise.resolve(null),
-      sessionIdsViewerCanUpload(sessionIds, query.viewer_user_id),
+      isAdmin
+        ? Promise.resolve(new Set(sessionIds))
+        : sessionIdsViewerCanUpload(sessionIds, effectiveUserId),
     ]);
-    const allMedia = mediaRows.map(({ media_key, ...m }) => ({
-      ...m,
-      ...(favorited && { is_favorite: favorited.has(m.id) }),
-    }));
+    const allMedia = mediaRows.map(({ media_key, uploaded_by, ...m }) => {
+      const isOwner = Boolean(effectiveUserId && uploaded_by && uploaded_by === effectiveUserId);
+      return {
+        ...m,
+        ...(favorited && { is_favorite: favorited.has(m.id) }),
+        can_upload: m.event_session_id ? canUploadIds.has(m.event_session_id) : false,
+        can_delete: Boolean(isAdmin || isOwner),
+      };
+    });
     const mediaBySession = new Map<string, typeof allMedia>();
     for (const m of allMedia) {
       if (!m.event_session_id) continue;
