@@ -8,7 +8,7 @@
     "postinstall": "prisma generate",
     "start": "next start",
     "lint": "next lint",
-    "test": "node --experimental-strip-types --test src/lib/app-share.test.ts src/lib/media-dimensions.test.ts src/lib/user-event-profile.test.ts src/server/people-media/recognition-policy.test.ts src/server/people-media/rekognition-errors.test.ts src/server/people-media/rekognition-image.test.ts src/server/notifications/notifications.test.ts src/server/otp/otp.test.ts src/server/session-media-delete.test.ts src/server/upload-sessions.test.ts",
+    "test": "node --experimental-strip-types --test src/lib/app-share.test.ts src/lib/media-dimensions.test.ts src/lib/user-event-profile.test.ts src/server/people-media/recognition-policy.test.ts src/server/people-media/rekognition-errors.test.ts src/server/people-media/rekognition-image.test.ts src/server/notifications/notifications.test.ts src/server/otp/otp.test.ts src/server/session-media-delete.test.ts src/server/upload-sessions.test.ts src/server/event-team.test.ts",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev --name init",
     "prisma:deploy": "prisma migrate deploy",

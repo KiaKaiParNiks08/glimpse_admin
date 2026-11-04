@@ -21,6 +21,7 @@ import { getEventDayMediaByEventId } from '@/server/event-day-media';
 import { getFavoritedItemIds } from '@/server/favorites';
 import { getCurrentHappeningByEventId } from '@/server/current-happening';
 import { sessionIdsViewerCanUpload } from '@/server/session-uploaders';
+import { getEventTeam } from '@/server/event-team';
 
 /**
  * GET /api/events/[event_id]
@@ -71,9 +72,10 @@ export async function GET(
     const previewPhase = getAdminFromAuthorizationHeader(request) ? query.phase : undefined;
     const current = previewPhase ?? actualPhase;
 
-    const [days, mediaRows] = await Promise.all([
+    const [days, mediaRows, team] = await Promise.all([
       getEventDaysByEventId(event.id),
       getEventDayMediaByEventId(event.id),
+      getEventTeam(event.id),
     ]);
 
     const sessionIds = days.flatMap((day) => day.event_sessions.map((s) => s.id));
@@ -211,9 +213,29 @@ export async function GET(
     } = event;
     /* eslint-enable @typescript-eslint/no-unused-vars */
 
+    const fallbackOrganizers =
+      event.event_organizers && event.event_organizers.length > 0
+        ? event.event_organizers
+        : team?.planner
+        ? [
+            {
+              id: 'event-planner',
+              name: team.planner.name,
+              logo_url: team.planner.image_url ?? '',
+              contact_email: team.planner.email ?? '',
+              contact_phone: team.planner.phone ?? '',
+              website_url: '',
+            },
+          ]
+        : [];
+
     return ok({
       data: {
         ...eventFields,
+        event_organizers: fallbackOrganizers,
+        event_team: team,
+        event_planner: team?.planner ?? null,
+        photographer: team?.photographer ?? null,
         cover_images: event.event_cover_images.map((c) => c.image_url),
         phase: { current, is_preview: previewPhase !== undefined, today, timezone },
         event_sessions,

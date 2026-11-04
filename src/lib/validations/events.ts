@@ -294,7 +294,7 @@ export const eventTeamSchema = z.object({
 });
 
 export const eventTeamQuerySchema = z.object({
-  event_id: uuidSchema,
+  event_id: uuidSchema.optional(),
 });
 
 /** Gallery watermark settings (wizard step 3). No url = no watermark. */
