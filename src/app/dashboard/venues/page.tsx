@@ -1,9 +1,12 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import styles from './venues.module.scss';
 import { PaginatedTable } from '@/components/PaginatedTable';
 import { VenueFormModal } from './VenueFormModal';
+import { useAdminAccess } from '@/components/auth/AdminAccessContext';
+import { ContentSkeleton } from '@/components/navigation/ContentSkeleton';
 import {
   getVenuesAction,
   deleteVenueAction,
@@ -16,6 +19,7 @@ export type VenueListItem = {
   city: string | null;
   state_name: string | null;
   country: string | null;
+  tenant_owner_id: string | null;
   created_at: string | null;
 };
 
@@ -24,6 +28,8 @@ type FormMode = 'create' | 'edit';
 const PAGE_LIMIT = 10;
 
 export default function DashboardVenuesPage() {
+  const router = useRouter();
+  const { access, hasPermission } = useAdminAccess();
   const [venues, setVenues] = useState<VenueListItem[]>([]);
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
@@ -39,7 +45,16 @@ export default function DashboardVenuesPage() {
 
   const debouncedSearch = useDebouncedValue(search, 300);
 
+  const canView = hasPermission('venues.view') || hasPermission('venues.manage');
+  const canManage = hasPermission('venues.manage');
+
   useEffect(() => {
+    if (!access) return;
+    if (!canView) router.replace('/dashboard');
+  }, [access, canView, router]);
+
+  useEffect(() => {
+    if (!access || !canView) return;
     let cancelled = false;
 
     async function fetchVenues() {
@@ -71,7 +86,7 @@ export default function DashboardVenuesPage() {
     return () => {
       cancelled = true;
     };
-  }, [page, debouncedSearch, listRefreshKey]);
+  }, [access, canView, page, debouncedSearch, listRefreshKey]);
 
   function openCreateForm() {
     setFormMode('create');
@@ -104,20 +119,33 @@ export default function DashboardVenuesPage() {
     }
   }
 
+  function canEditRow(venue: VenueListItem): boolean {
+    if (!canManage || !access) return false;
+    if (access.tier === 'super_admin' || access.tier === 'super_staff') return true;
+    const ownerId = access.tenant_owner_id ?? access.id;
+    return venue.tenant_owner_id != null && venue.tenant_owner_id === ownerId;
+  }
+
+  if (!access || !canView) {
+    return <ContentSkeleton />;
+  }
+
   return (
     <div className={styles.page}>
       <div className={styles.headerRow}>
         <div className={styles.headerText}>
           <h1>Venues</h1>
-          <p>Manage venues, contacts, facilities, and photos.</p>
+          <p>Browse global platform venues or manage your custom client venues.</p>
         </div>
-        <button
-          type="button"
-          onClick={openCreateForm}
-          className={styles.newVenueButton}
-        >
-          + New venue
-        </button>
+        {canManage && (
+          <button
+            type="button"
+            onClick={openCreateForm}
+            className={styles.newVenueButton}
+          >
+            + New venue
+          </button>
+        )}
       </div>
 
       <div className={styles.controlsRow}>
@@ -139,6 +167,7 @@ export default function DashboardVenuesPage() {
         header={
           <tr className={styles.tableHeadRow}>
             <th className={styles.th}>Name</th>
+            <th className={styles.th}>Scope</th>
             <th className={styles.th}>Address</th>
             <th className={styles.th}>City</th>
             <th className={styles.th}>Country</th>
@@ -149,38 +178,50 @@ export default function DashboardVenuesPage() {
         totalPages={totalPages}
         total={total}
         pageSize={PAGE_LIMIT}
-        colSpan={5}
+        colSpan={6}
         loading={loading}
         loadingMessage="Loading venues…"
         emptyMessage="No venues found."
         onPageChange={setPage}
       >
-        {venues.map((venue) => (
-          <tr key={venue.id} className={styles.rowDivider}>
-            <td className={styles.td}>{venue.name}</td>
-            <td className={styles.td}>{venue.address}</td>
-            <td className={styles.td}>{venue.city ?? '—'}</td>
-            <td className={styles.td}>{venue.country ?? '—'}</td>
-            <td className={styles.td} style={{ textAlign: 'right' }}>
-              <div className={styles.actions}>
-                <button
-                  type="button"
-                  onClick={() => openEditForm(venue)}
-                  className={styles.btnEdit}
-                >
-                  Edit
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handleDelete(venue)}
-                  className={styles.btnDelete}
-                >
-                  Delete
-                </button>
-              </div>
-            </td>
-          </tr>
-        ))}
+        {venues.map((venue) => {
+          const mutable = canEditRow(venue);
+          return (
+            <tr key={venue.id} className={styles.rowDivider}>
+              <td className={styles.td}>{venue.name}</td>
+              <td className={styles.td}>
+                <span style={{ fontSize: '0.74rem', color: venue.tenant_owner_id ? '#1e40af' : '#475569' }}>
+                  {venue.tenant_owner_id ? 'Private' : 'Global'}
+                </span>
+              </td>
+              <td className={styles.td}>{venue.address}</td>
+              <td className={styles.td}>{venue.city ?? '—'}</td>
+              <td className={styles.td}>{venue.country ?? '—'}</td>
+              <td className={styles.td} style={{ textAlign: 'right' }}>
+                {mutable ? (
+                  <div className={styles.actions}>
+                    <button
+                      type="button"
+                      onClick={() => openEditForm(venue)}
+                      className={styles.btnEdit}
+                    >
+                      Edit
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleDelete(venue)}
+                      className={styles.btnDelete}
+                    >
+                      Delete
+                    </button>
+                  </div>
+                ) : (
+                  <span style={{ fontSize: '0.75rem', color: '#94a3b8' }}>Global read-only</span>
+                )}
+              </td>
+            </tr>
+          );
+        })}
       </PaginatedTable>
 
       <VenueFormModal

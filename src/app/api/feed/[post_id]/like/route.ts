@@ -1,8 +1,9 @@
 import { parseParams, parseBody } from '@/lib/validations';
 import { likePostPathSchema, likePostBodySchema } from '@/lib/validations/posts';
-import { ok, notFound, serverError } from '@/lib/api-response';
+import { ok, forbidden, notFound, serverError } from '@/lib/api-response';
 import { setPostLike } from '@/server/posts';
 import { postExists } from '@/server/comments';
+import { getPostEventFeedAllowed } from '@/server/access';
 import { notifyPostLiked } from '@/server/notifications/service';
 
 /**
@@ -21,6 +22,10 @@ export async function POST(
 
     const [body, bodyErr] = await parseBody(request, likePostBodySchema);
     if (bodyErr) return bodyErr;
+
+    const feedAccess = await getPostEventFeedAllowed(path.post_id);
+    if (!feedAccess.exists) return notFound('Post not found');
+    if (!feedAccess.allowed) return forbidden('Social feed is disabled for this event');
 
     const exists = await postExists(path.post_id);
     if (!exists) return notFound('Post not found');

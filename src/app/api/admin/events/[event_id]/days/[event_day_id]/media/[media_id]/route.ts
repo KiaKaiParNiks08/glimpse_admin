@@ -1,8 +1,7 @@
 import { NextRequest } from 'next/server';
 import { ok, badRequest, forbidden, notFound, serverError } from '@/lib/api-response';
-import { getAdminFromAuthorizationHeader } from '@/lib/jwt';
+import { canContextAccessEvent, getAdminContextFromRequest } from '@/server/access';
 import prisma from '@/server/prisma';
-import { isEventAdminAssigned } from '@/server/events';
 import { deleteEventDayMediaById } from '@/server/event-day-media';
 
 function isUuid(v: unknown): v is string {
@@ -18,8 +17,11 @@ export async function DELETE(
   context: { params: Promise<{ event_id: string; event_day_id: string; media_id: string }> }
 ) {
   try {
-    const admin = getAdminFromAuthorizationHeader(request);
-    if (!admin) return forbidden('Not authenticated');
+    const ctx = await getAdminContextFromRequest(request);
+    if (!ctx) return forbidden('Not authenticated');
+    if (!ctx.hasPermission('media.delete')) {
+      return forbidden('Forbidden: media deletion is disabled for your role or plan');
+    }
 
     const params = await context.params;
     const eventId = params.event_id;
@@ -27,9 +29,8 @@ export async function DELETE(
     const mediaId = params.media_id;
     if (!isUuid(eventId) || !isUuid(eventDayId) || !isUuid(mediaId)) return badRequest('Invalid id');
 
-    if (admin.role_name === 'event_admin') {
-      const allowed = await isEventAdminAssigned(eventId, admin.id);
-      if (!allowed) return notFound('Event not found');
+    if (!(await canContextAccessEvent(ctx, eventId))) {
+      return notFound('Event not found');
     }
 
     // Validate nested ownership: media -> day -> event
@@ -47,4 +48,3 @@ export async function DELETE(
     return serverError('Unable to delete media');
   }
 }
-

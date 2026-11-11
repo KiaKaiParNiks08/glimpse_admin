@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useRef } from 'react';
+import Link from 'next/link';
 import { EventForm } from '@/components/EventForm';
 import { ContentSkeleton } from '@/components/navigation/ContentSkeleton';
 import { ImageUploadField } from '@/components/VenueForm/ImageUploadField';
@@ -29,7 +30,14 @@ import {
   setEventTeamAction,
   getEventTeamAction,
   setPostEventReportSettingsAction,
+  getEventEffectiveFeaturesAction,
 } from '@/app/actions/events';
+
+import { getClientAdminsForSelectAction } from '@/app/actions/admins';
+import { useAdminAccess } from '@/components/auth/AdminAccessContext';
+import { ALL_FEATURES_ENABLED, type FeatureMap } from '@/lib/rbac';
+
+
 import type { PostEventReportSettings } from '@/components/EventForm/PostEventPdfUploadField';
 import { ALL_PHASES_ON } from '@/lib/event-phase';
 import {
@@ -193,6 +201,52 @@ export function CreateEventWizard({
   });
   /** Captured at step 1 submit so step 2 initial sessions get the correct default venue */
   const mainVenueIdRef = useRef<string | null>(null);
+  const { access, hasPermission } = useAdminAccess();
+  const [eventFeatures, setEventFeatures] = useState<FeatureMap | null>(null);
+  const [clientOwners, setClientOwners] = useState<
+    Array<{ id: string; full_name: string; email: string; purchase_plan_name: string | null }>
+  >([]);
+  const [selectedTenantOwnerId, setSelectedTenantOwnerId] = useState('');
+
+  const effectiveFeatures: FeatureMap =
+    eventFeatures ??
+    (access?.tier === 'super_admin' || access?.tier === 'super_staff'
+      ? ALL_FEATURES_ENABLED
+      : access?.features ?? ALL_FEATURES_ENABLED);
+
+  const visibleSteps = STEPS.filter((s) => {
+    if (s.id === 1) return true;
+    if (s.id === 2) {
+      return effectiveFeatures.event_sessions && (hasPermission('sessions.manage') || hasPermission('sessions.view'));
+    }
+    if (s.id === 3) return effectiveFeatures.event_watermark && hasPermission('watermark.manage');
+    if (s.id === 4) {
+      return effectiveFeatures.event_team && (hasPermission('team.manage') || hasPermission('team.view'));
+    }
+    if (s.id === 5) return effectiveFeatures.event_explore && hasPermission('explore.manage');
+    if (s.id === 6) return effectiveFeatures.event_highlights && hasPermission('highlights.manage');
+    if (s.id === 7) return hasPermission('events.edit') || hasPermission('users.view');
+    return false;
+  });
+
+  function nextStepObj(currentStepId: number) {
+    const idx = visibleSteps.findIndex((s) => s.id === currentStepId);
+    return idx >= 0 && idx + 1 < visibleSteps.length ? visibleSteps[idx + 1]! : null;
+  }
+
+  function prevStepId(currentStepId: number): number {
+    const idx = visibleSteps.findIndex((s) => s.id === currentStepId);
+    return idx > 0 ? visibleSteps[idx - 1]!.id : 1;
+  }
+
+  function advanceOrFinish(currentStepId: number) {
+    const next = nextStepObj(currentStepId);
+    if (next) setStep(next.id);
+    else {
+      onSuccess();
+      onClose();
+    }
+  }
 
   // Step 2: days with sessions
   const [days, setDays] = useState<EventDayInput[]>([]);
@@ -264,8 +318,9 @@ export function CreateEventWizard({
       getEventAdminUserIdsAction(initialEventId),
       getExploreCategoriesWithItemsAction(),
       getAdminUsersForSelectAction(),
+      getEventEffectiveFeaturesAction(initialEventId),
     ])
-      .then(([eventRes, daysRes, exploreRes, highlightsRes, adminsRes, categoriesRes, adminOptionsRes]) => {
+      .then(([eventRes, daysRes, exploreRes, highlightsRes, adminsRes, categoriesRes, adminOptionsRes, effFeatRes]) => {
         if (cancelled) return;
         if (!eventRes.ok) {
           setError(eventRes.error ?? 'Failed to load event');
@@ -302,6 +357,7 @@ export function CreateEventWizard({
           main_venue_id?: string | null;
           status: string;
           created_by: string;
+          tenant_owner_id?: string | null;
           watermark_url?: string | null;
           watermark_position?: string | null;
           watermark_opacity?: number | null;
@@ -399,6 +455,8 @@ export function CreateEventWizard({
           );
           setHighlightsLoaded(true);
         }
+        if (effFeatRes.ok) setEventFeatures(effFeatRes.data);
+        setSelectedTenantOwnerId(event.tenant_owner_id ?? '');
         if (adminOptionsRes.ok) setAdminOptions(adminOptionsRes.data);
         if (adminsRes.ok) {
           setSelectedAdminIds(new Set(adminsRes.data));
@@ -486,19 +544,33 @@ export function CreateEventWizard({
     }
   }, [step, createdEventId, highlightsLoaded]);
 
-  // Create flow never runs the edit preload; load event_admin users when opening step 6.
   useEffect(() => {
-    if (step !== 6) return;
-    if (adminOptions.length > 0) return;
+    if (!access) return;
+    if (access.tier === 'super_admin' || access.tier === 'super_staff') {
+      getClientAdminsForSelectAction().then((res) => {
+        if (res.ok) {
+          setClientOwners(res.data);
+          if (!initialEventId && access.tier === 'super_staff' && res.data.length === 1) {
+            setSelectedTenantOwnerId((prev) => prev || res.data[0]!.id);
+          }
+        }
+      });
+    }
+  }, [access, initialEventId]);
+
+  // Load event admins / sub-users scoped to the event's tenant workspace when opening step 7.
+  useEffect(() => {
+    if (step !== 7) return;
+
     let cancelled = false;
-    getAdminUsersForSelectAction().then((res) => {
+    getAdminUsersForSelectAction(selectedTenantOwnerId || undefined).then((res) => {
       if (cancelled) return;
       if (res.ok) setAdminOptions(res.data);
     });
     return () => {
       cancelled = true;
     };
-  }, [step, adminOptions.length]);
+  }, [step, selectedTenantOwnerId]);
 
   useEffect(() => {
     if (step !== 2 || !createdEventId) return;
@@ -525,9 +597,14 @@ export function CreateEventWizard({
       if (createdEventId) {
         // eslint-disable-next-line @typescript-eslint/no-unused-vars -- omit for update
         const { created_by, ...updatePayload } = payload;
-        const result = await updateEventAction(createdEventId, updatePayload);
+        const ownerPatch =
+          access?.tier === 'super_admin' || access?.tier === 'super_staff'
+            ? { tenant_owner_id: selectedTenantOwnerId || null }
+            : {};
+        const result = await updateEventAction(createdEventId, { ...updatePayload, ...ownerPatch });
         if (!result.ok) throw new Error(result.error);
-        const reportRes = await setPostEventReportSettingsAction(createdEventId, {
+        let reportRes: { ok: true } | { ok: false; error: string } = { ok: true };
+        if (effectiveFeatures.event_post_report && hasPermission('report.manage')) reportRes = await setPostEventReportSettingsAction(createdEventId, {
           ...postEventReport,
           title: postEventReport.title.trim() || null,
         });
@@ -536,13 +613,19 @@ export function CreateEventWizard({
         setDays((prev) =>
           prev.length > 0 ? mergeDaysWithRange(prev, payload.start_date, payload.end_date, mainVenueId) : prev
         );
-        setStep(2);
+        advanceOrFinish(1);
       } else {
-        const result = await createEventAction(payload);
+        const createOwnerPatch =
+          access?.tier === 'super_admin' || access?.tier === 'super_staff'
+            ? { tenant_owner_id: selectedTenantOwnerId || null }
+            : {};
+        const result = await createEventAction({ ...payload, ...createOwnerPatch });
         if (!result.ok) throw new Error(result.error);
         setCreatedEventId(result.data.id);
+        const effRes = await getEventEffectiveFeaturesAction(result.data.id);
+        if (effRes.ok) setEventFeatures(effRes.data);
         setBasicPayload(payload);
-        setStep(2);
+        advanceOrFinish(1);
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to save event');
@@ -612,7 +695,7 @@ export function CreateEventWizard({
     upsertEventDaysWithSessionsAction(createdEventId!, payload)
       .then((result) => {
         if (!result.ok) throw new Error(result.error);
-        setStep(3);
+        advanceOrFinish(2);
       })
       .catch((err) => setError(err instanceof Error ? err.message : 'Failed to save'))
       .finally(() => setSubmitting(false));
@@ -728,7 +811,7 @@ export function CreateEventWizard({
     })
       .then((result) => {
         if (!result.ok) throw new Error(result.error);
-        setStep(4);
+        advanceOrFinish(3);
       })
       .catch((err) => setError(err instanceof Error ? err.message : 'Failed to save'))
       .finally(() => setSubmitting(false));
@@ -740,7 +823,7 @@ export function CreateEventWizard({
     setEventTeamAction(createdEventId!, { planner, photographer })
       .then((result) => {
         if (!result.ok) throw new Error(result.error);
-        setStep(5);
+        advanceOrFinish(4);
       })
       .catch((err) => setError(err instanceof Error ? err.message : 'Failed to save'))
       .finally(() => setSubmitting(false));
@@ -752,7 +835,7 @@ export function CreateEventWizard({
     setEventExploreItemsAction(createdEventId!, Array.from(selectedItemIds))
       .then((result) => {
         if (!result.ok) throw new Error(result.error);
-        setStep(6);
+        advanceOrFinish(5);
       })
       .catch((err) => setError(err instanceof Error ? err.message : 'Failed to save'))
       .finally(() => setSubmitting(false));
@@ -778,7 +861,7 @@ export function CreateEventWizard({
     setEventHighlightsAction(createdEventId!, trimmed)
       .then((result) => {
         if (!result.ok) throw new Error(result.error);
-        setStep(7);
+        advanceOrFinish(6);
       })
       .catch((err) => setError(err instanceof Error ? err.message : 'Failed to save'))
       .finally(() => setSubmitting(false));
@@ -830,7 +913,7 @@ export function CreateEventWizard({
   const canNavigateSteps = !!(createdEventId && basicPayload);
 
   function goToStep(targetStep: number) {
-    if (targetStep < 1 || targetStep > STEPS.length) return;
+    if (!visibleSteps.some((s) => s.id === targetStep)) return;
     if (targetStep > 1 && !canNavigateSteps) return;
     setError(null);
     setStep(targetStep);
@@ -838,8 +921,29 @@ export function CreateEventWizard({
 
   return (
     <>
+      {createdEventId && (
+        <div
+          style={{
+            display: 'flex',
+            justifyContent: 'flex-end',
+            gap: '0.5rem',
+            marginBottom: '0.75rem',
+            flexWrap: 'wrap',
+          }}
+        >
+          <Link href={`/dashboard/events/${createdEventId}/media`} className={styles.btnEdit} style={{ display: hasPermission('media.view') || hasPermission('media.upload') ? undefined : 'none' }}>
+            Session Media
+          </Link>
+          <Link href={`/dashboard/events/${createdEventId}/people-media`} className={styles.btnEdit} style={{ display: effectiveFeatures.ai_recognition && hasPermission('people_media.view') ? undefined : 'none' }}>
+            People in Media
+          </Link>
+          <Link href={`/dashboard/events/${createdEventId}/notifications`} className={styles.btnEdit} style={{ display: effectiveFeatures.push_notifications && hasPermission('notifications.send') ? undefined : 'none' }}>
+            Send Push Notification
+          </Link>
+        </div>
+      )}
       <div className={styles.wizardSteps} role="navigation" aria-label="Event wizard steps">
-        {STEPS.map((s) => {
+        {visibleSteps.map((s, visibleIdx) => {
           const isActive = step === s.id;
           const isPast = step > s.id;
           const canClick = (s.id === 1 || canNavigateSteps) && !isActive;
@@ -848,7 +952,7 @@ export function CreateEventWizard({
           if (isActive) {
             return (
               <span key={s.id} className={stepClass} aria-current="step">
-                {s.id}. {s.label}
+                {visibleIdx + 1}. {s.label}
               </span>
             );
           }
@@ -856,7 +960,7 @@ export function CreateEventWizard({
           if (!canClick) {
             return (
               <span key={s.id} className={`${stepClass} ${styles.wizardStepDisabled}`} aria-disabled="true">
-                {s.id}. {s.label}
+                {visibleIdx + 1}. {s.label}
               </span>
             );
           }
@@ -869,7 +973,7 @@ export function CreateEventWizard({
               aria-label={`Go to step ${s.id}: ${s.label}`}
               onClick={() => goToStep(s.id)}
             >
-              {s.id}. {s.label}
+              {visibleIdx + 1}. {s.label}
             </button>
           );
         })}
@@ -877,6 +981,27 @@ export function CreateEventWizard({
 
       {error && <p className={styles.errorText}>{error}</p>}
 
+      {step === 1 && (access?.tier === 'super_admin' || access?.tier === 'super_staff') && clientOwners.length > 0 && (
+        <div style={{ marginBottom: '0.85rem', padding: '0.75rem 0.9rem', borderRadius: '0.6rem', border: '1px solid #e2e8f0', background: '#f8fafc' }}>
+          <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 600, color: '#0f172a', marginBottom: '0.35rem' }}>
+            Client Admin Owner (Event Planner Workspace){access.tier === 'super_staff' ? ' *' : ' (Optional)'}
+          </label>
+          <select
+            value={selectedTenantOwnerId}
+            onChange={(e) => setSelectedTenantOwnerId(e.target.value)}
+            disabled={Boolean(createdEventId && access.tier !== 'super_admin')}
+            style={{ width: '100%', padding: '0.45rem 0.65rem', borderRadius: '0.45rem', border: '1px solid #cbd5e1', background: '#ffffff', color: '#0f172a', fontSize: '0.85rem' }}
+          >
+            {access.tier === 'super_admin' && <option value="">Platform-owned (Super Admin — All features)</option>}
+            {access.tier === 'super_staff' && clientOwners.length > 1 && <option value="">Select client admin…</option>}
+            {clientOwners.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.full_name} ({c.email}){c.purchase_plan_name ? ` · ${c.purchase_plan_name}` : ''}
+              </option>
+            ))}
+          </select>
+        </div>
+      )}
       {step === 1 && (
         <EventForm
           mode={createdEventId ? 'edit' : 'create'}
@@ -931,7 +1056,9 @@ export function CreateEventWizard({
           }
           postEventReportSettings={postEventReport}
           onPostEventReportSettingsChange={setPostEventReport}
-          submitLabel="Next: Days & sessions"
+          submitLabel={nextStepObj(1) ? `Next: ${nextStepObj(1)!.label}` : 'Finish & Save'}
+          canManageThemes={hasPermission('app_themes.manage')}
+          canManagePostEventReport={effectiveFeatures.event_post_report && hasPermission('report.manage')}
           cancelLabel="Cancel"
           loading={submitting}
           error={null}
@@ -1342,7 +1469,7 @@ export function CreateEventWizard({
             ))}
           </div>
           <div className={styles.wizardActions}>
-            <button type="button" onClick={() => setStep(1)} className={styles.btnSecondary}>
+            <button type="button" onClick={() => setStep(prevStepId(2))} className={styles.btnSecondary}>
               Back
             </button>
             <button
@@ -1351,7 +1478,7 @@ export function CreateEventWizard({
               disabled={submitting || sessionLookups === null}
               className={styles.btnPrimary}
             >
-              {submitting ? 'Saving…' : 'Next: Gallery watermark'}
+              {submitting ? 'Saving…' : nextStepObj(2) ? `Next: ${nextStepObj(2)!.label}` : 'Finish'}
             </button>
           </div>
         </div>
@@ -1455,7 +1582,7 @@ export function CreateEventWizard({
             </div>
           </div>
           <div className={styles.wizardActions}>
-            <button type="button" onClick={() => setStep(2)} className={styles.btnSecondary}>
+            <button type="button" onClick={() => setStep(prevStepId(3))} className={styles.btnSecondary}>
               Back
             </button>
             <button
@@ -1464,7 +1591,7 @@ export function CreateEventWizard({
               disabled={submitting}
               className={styles.btnPrimary}
             >
-              {submitting ? 'Saving…' : 'Next: Planner & photographer'}
+              {submitting ? 'Saving…' : nextStepObj(3) ? `Next: ${nextStepObj(3)!.label}` : 'Finish'}
             </button>
           </div>
         </div>
@@ -1491,11 +1618,11 @@ export function CreateEventWizard({
             />
           </div>
           <div className={styles.wizardActions}>
-            <button type="button" onClick={() => setStep(3)} className={styles.btnSecondary}>
+            <button type="button" onClick={() => setStep(prevStepId(4))} className={styles.btnSecondary}>
               Back
             </button>
             <button type="button" onClick={handleTeamNext} disabled={submitting} className={styles.btnPrimary}>
-              {submitting ? 'Saving…' : 'Next: Explore mapping'}
+              {submitting ? 'Saving…' : nextStepObj(4) ? `Next: ${nextStepObj(4)!.label}` : 'Finish'}
             </button>
           </div>
         </div>
@@ -1510,6 +1637,7 @@ export function CreateEventWizard({
             type="button"
             onClick={() => setAddCategoryOpen(true)}
             className={styles.addCategoryBtn}
+            style={{ display: hasPermission('explore_categories.manage') ? undefined : 'none' }}
           >
             + Add new explore category
           </button>
@@ -1538,7 +1666,7 @@ export function CreateEventWizard({
             ))}
           </div>
           <div className={styles.wizardActions}>
-            <button type="button" onClick={() => setStep(4)} className={styles.btnSecondary}>
+            <button type="button" onClick={() => setStep(prevStepId(5))} className={styles.btnSecondary}>
               Back
             </button>
             <button
@@ -1547,7 +1675,7 @@ export function CreateEventWizard({
               disabled={submitting}
               className={styles.btnPrimary}
             >
-              {submitting ? 'Saving…' : 'Next: Event highlights'}
+              {submitting ? 'Saving…' : nextStepObj(5) ? `Next: ${nextStepObj(5)!.label}` : 'Finish'}
             </button>
           </div>
         </div>
@@ -1656,7 +1784,7 @@ export function CreateEventWizard({
             + Add highlight
           </button>
           <div className={styles.wizardActions}>
-            <button type="button" onClick={() => setStep(5)} className={styles.btnSecondary}>
+            <button type="button" onClick={() => setStep(prevStepId(6))} className={styles.btnSecondary}>
               Back
             </button>
             <button
@@ -1665,7 +1793,7 @@ export function CreateEventWizard({
               disabled={submitting}
               className={styles.btnPrimary}
             >
-              {submitting ? 'Saving…' : 'Next: Event admins'}
+              {submitting ? 'Saving…' : nextStepObj(6) ? `Next: ${nextStepObj(6)!.label}` : 'Finish'}
             </button>
           </div>
         </div>
@@ -1674,7 +1802,7 @@ export function CreateEventWizard({
       {step === 7 && (
         <div className={styles.wizardStep5}>
           <p className={styles.wizardStepDesc}>
-            Assign event admins (role: <strong>event_admin</strong>) who can manage this event.
+            Assign tenant team users or event admins who can manage this event.
           </p>
 
           {adminOptions.length === 0 ? (
@@ -1698,7 +1826,7 @@ export function CreateEventWizard({
           )}
 
           <div className={styles.wizardActions}>
-            <button type="button" onClick={() => setStep(6)} className={styles.btnSecondary}>
+            <button type="button" onClick={() => setStep(prevStepId(7))} className={styles.btnSecondary}>
               Back
             </button>
             <button

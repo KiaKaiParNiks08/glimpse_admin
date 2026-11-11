@@ -1,7 +1,8 @@
 import { parseParams } from '@/lib/validations';
 import { eventIdPathSchema } from '@/lib/validations/events';
-import { notFound, ok, serverError } from '@/lib/api-response';
+import { forbidden, notFound, ok, serverError } from '@/lib/api-response';
 import { getEventTeam } from '@/server/event-team';
+import { getEventEffectiveFeatures } from '@/server/access';
 
 /**
  * GET /api/events/[event_id]/team
@@ -16,9 +17,15 @@ export async function GET(
     const [path, err] = parseParams(params, eventIdPathSchema);
     if (err) return err;
 
-    const team = await getEventTeam(path.event_id);
+    const [team, features] = await Promise.all([
+      getEventTeam(path.event_id),
+      getEventEffectiveFeatures(path.event_id),
+    ]);
     if (!team) return notFound('Event not found');
-    return ok(team);
+    if (!features.event_team) return forbidden('Event team is disabled for this event');
+    const res = ok(team);
+    res.headers.set('Cache-Control', 'no-store');
+    return res;
   } catch (e) {
     console.error(e);
     return serverError('Unable to fetch event team');

@@ -1,5 +1,6 @@
 import { createHmac, timingSafeEqual } from 'crypto';
-import type { AdminRoleName, AdminSessionUser } from '@/lib/admin-session';
+import { isAdminRole, type AdminRoleName } from '@/lib/rbac';
+import type { AdminSessionUser } from '@/lib/admin-session';
 
 /** Shared HS256 encode/sign/verify (admin + app-user tokens). */
 
@@ -98,12 +99,13 @@ export function verifyAdminJwtToken(token: string): AdminSessionUser | null {
   const parsed = parsePayloadJson<Partial<AdminJwtClaims>>(verified.payloadB64);
   if (!parsed) return null;
 
-  const role = parsed.role_name as AdminRoleName | undefined;
+  const role = parsed.role_name;
   if (
     typeof parsed.id !== 'string' ||
     typeof parsed.email !== 'string' ||
     typeof parsed.full_name !== 'string' ||
-    (role !== 'super_admin' && role !== 'event_admin')
+    typeof role !== 'string' ||
+    !isAdminRole(role)
   ) {
     return null;
   }
@@ -113,7 +115,7 @@ export function verifyAdminJwtToken(token: string): AdminSessionUser | null {
     id: parsed.id,
     full_name: parsed.full_name,
     email: parsed.email,
-    role_name: role,
+    role_name: role as AdminRoleName,
   };
 }
 

@@ -2,7 +2,8 @@ import { cookies } from 'next/headers';
 import { createHmac, timingSafeEqual } from 'crypto';
 import { verifyAdminJwtToken } from '@/lib/jwt';
 
-export type AdminRoleName = 'super_admin' | 'event_admin';
+import { isAdminRole, type AdminRoleName } from '@/lib/rbac';
+export type { AdminRoleName };
 
 export type AdminSessionUser = {
   id: string;
@@ -61,7 +62,7 @@ export function verifyAdminSessionToken(token: string): AdminSessionUser | null 
     const payloadRaw = base64urlDecodeToBuffer(payloadB64).toString('utf8');
     const parsed = JSON.parse(payloadRaw) as AdminSessionUser & { iat?: number };
     if (!parsed?.id || !parsed?.email || !parsed?.role_name) return null;
-    if (parsed.role_name !== 'super_admin' && parsed.role_name !== 'event_admin') return null;
+    if (!isAdminRole(parsed.role_name)) return null;
     return {
       id: parsed.id,
       full_name: parsed.full_name,

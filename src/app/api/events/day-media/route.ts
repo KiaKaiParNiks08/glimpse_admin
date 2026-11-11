@@ -8,6 +8,8 @@ import {
 import { getFavoritedItemIds } from '@/server/favorites';
 import { sessionIdsViewerCanUpload } from '@/server/session-uploaders';
 import { getAdminFromAuthorizationHeader, getUserFromAuthorizationHeader } from '@/lib/jwt';
+import { getEventEffectiveFeatures, resolveSessionOrDayEventId } from '@/server/access';
+import { ALL_FEATURES_ENABLED } from '@/lib/rbac';
 import prisma from '@/server/prisma';
 
 /**
@@ -40,11 +42,21 @@ export async function GET(request: Request) {
           })
         ).map((row) => row.id);
 
+    const eventId = await resolveSessionOrDayEventId({
+      event_session_id: query.event_session_id,
+      event_day_id: query.event_day_id,
+    });
+    const enabledFeatures = eventId
+      ? await getEventEffectiveFeatures(eventId)
+      : { ...ALL_FEATURES_ENABLED };
+
     const [canUploadIds, favorited] = await Promise.all([
-      isAdmin
-        ? Promise.resolve(new Set(sessionIds))
-        : sessionIdsViewerCanUpload(sessionIds, effectiveUserId),
-      effectiveUserId
+      enabledFeatures.session_media_upload
+        ? isAdmin
+          ? Promise.resolve(new Set(sessionIds))
+          : sessionIdsViewerCanUpload(sessionIds, effectiveUserId)
+        : Promise.resolve(new Set<string>()),
+      effectiveUserId && enabledFeatures.mobile_favorites
         ? getFavoritedItemIds(
             effectiveUserId,
             'day_media',
@@ -70,10 +82,12 @@ export async function GET(request: Request) {
       };
     });
 
-    return ok({
+    const res = ok({
       data,
       meta: { can_upload },
     });
+    res.headers.set('Cache-Control', 'no-store');
+    return res;
   } catch (e) {
     console.error(e);
     return serverError('Unable to fetch event day media');

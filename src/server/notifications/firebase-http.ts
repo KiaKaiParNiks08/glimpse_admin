@@ -103,6 +103,7 @@ export interface FcmSendResult {
   successCount: number;
   failureCount: number;
   invalidTokens: string[];
+  failureSamples?: string[];
 }
 
 /**
@@ -113,6 +114,7 @@ export async function sendFcmPush(payload: FcmPayload): Promise<FcmSendResult> {
     successCount: 0,
     failureCount: 0,
     invalidTokens: [],
+    failureSamples: [],
   };
 
   const validTokens = [...new Set(payload.tokens.filter(Boolean))];
@@ -130,19 +132,25 @@ export async function sendFcmPush(payload: FcmPayload): Promise<FcmSendResult> {
   if (!accessToken) {
     console.error('[fcm] Cannot send push notification: no valid Google access token');
     result.failureCount = validTokens.length;
+    result.failureSamples = ['Missing or invalid Firebase credentials'];
     return result;
   }
 
   const url = `https://fcm.googleapis.com/v1/projects/${projectId}/messages:send`;
+  const imageUrl = payload.notification.image?.trim() || undefined;
 
   // FCM data values MUST all be strings (never null, undefined, or literal "null")
   const sanitizedData: Record<string, string> = {
     click_action: 'FLUTTER_NOTIFICATION_CLICK',
   };
+  if (imageUrl) {
+    sanitizedData.image = imageUrl;
+    sanitizedData.image_url = imageUrl;
+  }
   if (payload.data) {
     for (const [k, v] of Object.entries(payload.data)) {
       if (v === null || v === undefined || v === 'null') {
-        sanitizedData[k] = '';
+        if (!sanitizedData[k]) sanitizedData[k] = '';
       } else {
         sanitizedData[k] = String(v);
       }
@@ -161,7 +169,7 @@ export async function sendFcmPush(payload: FcmPayload): Promise<FcmSendResult> {
             notification: {
               title: payload.notification.title,
               body: payload.notification.body,
-              ...(payload.notification.image ? { image: payload.notification.image } : {}),
+              ...(imageUrl ? { image: imageUrl } : {}),
             },
             data: sanitizedData,
             android: {
@@ -170,7 +178,7 @@ export async function sendFcmPush(payload: FcmPayload): Promise<FcmSendResult> {
                 channel_id: 'glimpse_notifications',
                 sound: 'default',
                 default_sound: true,
-                ...(payload.notification.image ? { image: payload.notification.image } : {}),
+                ...(imageUrl ? { image: imageUrl } : {}),
               },
             },
             apns: {
@@ -178,8 +186,10 @@ export async function sendFcmPush(payload: FcmPayload): Promise<FcmSendResult> {
                 aps: {
                   sound: 'default',
                   badge: 1,
+                  ...(imageUrl ? { 'mutable-content': 1 } : {}),
                 },
               },
+              ...(imageUrl ? { fcm_options: { image: imageUrl } } : {}),
             },
           },
         };
@@ -203,7 +213,14 @@ export async function sendFcmPush(payload: FcmPayload): Promise<FcmSendResult> {
 
           const errorStatus = errorJson?.error?.status || '';
           const errorCode = errorJson?.error?.code || res.status;
-          const errorMessage = errorJson?.error?.message || '';
+          const errorMessage = errorJson?.error?.message || `HTTP ${res.status}`;
+
+          if (result.failureSamples && result.failureSamples.length < 5) {
+            const label = errorStatus ? `${errorStatus}: ${errorMessage}` : errorMessage;
+            if (!result.failureSamples.includes(label)) {
+              result.failureSamples.push(label);
+            }
+          }
 
           // Check if token is invalid or unregistered
           if (
@@ -220,6 +237,10 @@ export async function sendFcmPush(payload: FcmPayload): Promise<FcmSendResult> {
         }
       } catch (err) {
         result.failureCount += 1;
+        const msg = err instanceof Error ? err.message : 'Network error';
+        if (result.failureSamples && result.failureSamples.length < 5 && !result.failureSamples.includes(msg)) {
+          result.failureSamples.push(msg);
+        }
         console.error('[fcm] Network/send error for token:', token.slice(0, 15) + '...', err);
       }
     });

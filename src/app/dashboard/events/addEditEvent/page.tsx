@@ -4,9 +4,9 @@ import { useEffect, useMemo, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useRouteProgress } from '@/components/navigation/NavigationProvider';
 import { ContentSkeleton } from '@/components/navigation/ContentSkeleton';
+import { useAdminAccess } from '@/components/auth/AdminAccessContext';
 import styles from '../events.module.scss';
 import { CreateEventWizard } from '../CreateEventWizard';
-import { adminBearerAuthHeader } from '@/lib/admin-jwt-client';
 import {
   getEventCategoriesAction,
   getVenuesForSelectAction,
@@ -21,19 +21,13 @@ type Mode = 'create' | 'edit';
 export default function AddEditEventPage() {
   const router = useRouter();
   const { pendingHref, navigate } = useRouteProgress();
+  const { access, hasPermission, hasFeature } = useAdminAccess();
   const searchParams = useSearchParams();
   const modeParam = searchParams.get('mode');
   const eventIdParam = searchParams.get('eventId');
   const mode: Mode = modeParam === 'edit' ? 'edit' : 'create';
   const eventId = mode === 'edit' ? eventIdParam : null;
 
-  const [currentUser, setCurrentUser] = useState<{
-    id: string;
-    full_name: string;
-    email: string;
-    role_name: string;
-  } | null>(null);
-  const [loadingUser, setLoadingUser] = useState(true);
   const [loadingOptions, setLoadingOptions] = useState(true);
   const [categories, setCategories] = useState<EventCategoryOption[]>([]);
   const [venues, setVenues] = useState<VenueOption[]>([]);
@@ -44,28 +38,6 @@ export default function AddEditEventPage() {
     () => (mode === 'edit' ? 'Edit event' : 'Create event'),
     [mode]
   );
-
-  useEffect(() => {
-    const headers = adminBearerAuthHeader();
-    if (!headers.Authorization) {
-      setCurrentUser(null);
-      setLoadingUser(false);
-      return;
-    }
-    fetch('/api/admin/me', { headers })
-      .then(async (r) => {
-        if (!r.ok) {
-          setCurrentUser(null);
-          return;
-        }
-        type AdminUser = { id: string; full_name: string; email: string; role_name: string };
-        type AdminMeJson = { data?: { user?: AdminUser } | null; user?: AdminUser };
-        const json = (await r.json()) as AdminMeJson;
-        setCurrentUser(json.data?.user ?? json.user ?? null);
-      })
-      .catch(() => setCurrentUser(null))
-      .finally(() => setLoadingUser(false));
-  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -102,16 +74,24 @@ export default function AddEditEventPage() {
     }
   }, [mode, eventId, router]);
 
-  if (loadingUser || loadingOptions) {
+  if (!access || loadingOptions) {
     return <ContentSkeleton variant="form" />;
   }
 
-  if (!currentUser) {
-    return <p className={styles.errorText}>You are not authorized. Please login again.</p>;
+  if (mode === 'create' && (!hasPermission('events.create') || !hasFeature('event_basic'))) {
+    return (
+      <p className={styles.errorText}>
+        Your role or purchase plan does not allow creating events.
+      </p>
+    );
   }
 
-  if (mode === 'create' && currentUser.role_name === 'event_admin') {
-    return <p className={styles.errorText}>Event Admin can’t create events. They can only edit assigned events.</p>;
+  if (mode === 'edit' && !hasPermission('events.edit')) {
+    return (
+      <p className={styles.errorText}>
+        Your role does not allow editing event configuration.
+      </p>
+    );
   }
 
   return (
@@ -119,7 +99,7 @@ export default function AddEditEventPage() {
       <div className={styles.headerRow}>
         <div className={styles.headerText}>
           <h1>{pageTitle}</h1>
-          <p>{mode === 'edit' ? 'Update event details and related data.' : 'Create a new event and configure all steps.'}</p>
+          <p>{mode === 'edit' ? 'Update event details and enabled features.' : 'Create a new event and configure enabled steps.'}</p>
         </div>
         <button
           type="button"
@@ -138,7 +118,7 @@ export default function AddEditEventPage() {
           categories={categories}
           venues={venues}
           themes={themes}
-          createdBy={currentUser.id}
+          createdBy={access.id}
           initialEventId={mode === 'edit' ? eventId : null}
           onClose={() => navigate('/dashboard/events')}
           onSuccess={() => navigate('/dashboard/events')}

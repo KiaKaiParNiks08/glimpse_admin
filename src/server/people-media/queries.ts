@@ -3,10 +3,13 @@ import prisma from '@/server/prisma';
 import { isEventAdminAssigned } from '@/server/events';
 import { isEventGuest } from '@/server/event-guests';
 import type { AdminSessionUser } from '@/lib/admin-session';
+import { getAdminAccessContext, canContextAccessEvent } from '@/server/access';
 
 export async function adminCanManageEvent(admin: AdminSessionUser, eventId: string): Promise<boolean> {
-  if (admin.role_name === 'super_admin') return true;
-  return isEventAdminAssigned(eventId, admin.id);
+  const ctx = await getAdminAccessContext(admin.id);
+  if (!ctx) return false;
+  if (!ctx.hasPermission('people_media.view')) return false;
+  return canContextAccessEvent(ctx, eventId);
 }
 
 type MyMediaRow = {
@@ -145,23 +148,28 @@ function mapMyMediaItem(row: MyMediaRow) {
 
 async function getRecognitionMeta(userId: string, eventId: string): Promise<RecognitionMeta> {
   try {
-  const [ref, scan, pending] = await Promise.all([
+  const [ref, scan, uncheckedRows] = await Promise.all([
     prisma.user_face_references.findUnique({
       where: { user_id: userId },
-      select: { processing_status: true },
+      select: { processing_status: true, content_sha256: true },
     }),
     prisma.user_event_face_scans.findUnique({
       where: { user_id_event_id: { user_id: userId, event_id: eventId } },
       select: { status: true, scanned_count: true, matched_count: true },
     }),
-    prisma.media_assets.count({
-      where: {
-        event_id: eventId,
-        match_complete: false,
-        processing_status: { in: ['pending', 'processing', 'failed'] },
-      },
-    }),
+    prisma.$queryRaw<{ n: number }[]>`
+      SELECT COUNT(*)::int AS n
+      FROM media_assets ma
+      WHERE ma.event_id = ${eventId}::uuid
+        AND (ma.media_type::text <> 'video' OR ma.thumbnail_storage_key IS NOT NULL)
+        AND NOT EXISTS (
+          SELECT 1 FROM media_asset_user_checks mc
+          WHERE mc.media_asset_id = ma.id
+            AND mc.user_id = ${userId}::uuid
+        )
+    `,
   ]);
+  const pending = uncheckedRows[0]?.n ?? 0;
   const status = scan?.status ?? (ref?.processing_status === 'ready' ? 'pending' : ref?.processing_status) ?? 'pending';
   const processing_complete =
     ref?.processing_status === 'ready' && scan?.status === 'complete' && pending === 0;
@@ -268,6 +276,7 @@ export async function requeueMediaAsset(eventId: string, assetId: string): Promi
   });
   if (result.count > 0) {
     try {
+      await prisma.$executeRaw`DELETE FROM media_asset_user_checks WHERE media_asset_id = ${assetId}::uuid`.catch(() => {});
       const { reopenCompleteScansForEvent } = await import('./scans');
       const { scheduleFaceProcessing } = await import('./schedule');
       await reopenCompleteScansForEvent(eventId);
@@ -288,6 +297,11 @@ export async function requeueFaceReference(eventId: string, userId: string): Pro
   });
   if (result.count > 0) {
     try {
+      await prisma.$executeRaw`
+        DELETE FROM media_asset_user_checks
+        WHERE user_id = ${userId}::uuid
+          AND media_asset_id IN (SELECT id FROM media_assets WHERE event_id = ${eventId}::uuid)
+      `.catch(() => {});
       await prisma.$executeRaw`
         UPDATE user_event_face_scans
         SET status = 'pending', attempt_count = 0, last_error = NULL, next_retry_at = NULL,

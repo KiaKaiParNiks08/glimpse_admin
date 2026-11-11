@@ -3,106 +3,59 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import styles from './admins.module.scss';
-import { UserFormModal, type UserFormUser, type UserFormRole } from './UserFormModal';
+import { UserFormModal } from './UserFormModal';
+import { RolePermissionsModal } from './RolePermissionsModal';
 import { PaginatedTable } from '@/components/PaginatedTable';
-import { adminBearerAuthHeader } from '@/lib/admin-jwt-client';
-import { signOutToLogin } from '@/lib/admin-sign-out';
+import { formatRoleDisplayName } from '@/lib/rbac';
+import { useAdminAccess } from '@/components/auth/AdminAccessContext';
 import {
   getUsersAction,
   getRolesAction,
   updateUserAction,
+  type RoleItem,
+  type UserListItem,
 } from '@/app/actions/admins';
-import { canAccessModule } from '@/lib/rbac';
 import { ContentSkeleton } from '@/components/navigation/ContentSkeleton';
-
-export type UserListItem = {
-  id: string;
-  full_name: string;
-  email: string;
-  role_id: number;
-  is_active: boolean | null;
-  avatar_url: string | null;
-  mobile_number: string | null;
-  country_code: string | null;
-};
-
-type Role = {
-  id: number;
-  name: string;
-};
-
-function formatRoleName(name: string): string {
-  switch (name) {
-    case 'super_admin':
-      return 'Super Admin';
-    case 'event_admin':
-      return 'Event Admin';
-    case 'user':
-      return 'User';
-    default: {
-      if (!name) return '';
-      return name
-        .split('_')
-        .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
-        .join(' ');
-    }
-  }
-}
 
 type FormMode = 'create' | 'edit';
 
-const PAGE_LIMIT = 6;
+const PAGE_LIMIT = 8;
 
 export default function DashboardUsersPage() {
   const router = useRouter();
+  const { access, hasPermission } = useAdminAccess();
   const [users, setUsers] = useState<UserListItem[]>([]);
-  const [roles, setRoles] = useState<Role[]>([]);
+  const [roles, setRoles] = useState<RoleItem[]>([]);
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState('');
-  const [accessChecked, setAccessChecked] = useState(false);
 
   const [formOpen, setFormOpen] = useState(false);
   const [formMode, setFormMode] = useState<FormMode>('create');
   const [selectedUser, setSelectedUser] = useState<UserListItem | null>(null);
+  const [rolesModalOpen, setRolesModalOpen] = useState(false);
 
   const [statusLoadingId, setStatusLoadingId] = useState<string | null>(null);
   const [listRefreshKey, setListRefreshKey] = useState(0);
 
   const debouncedSearch = useDebouncedValue(search, 300);
 
+  const canViewUsers = hasPermission('users.view') || hasPermission('users.manage');
+  const canManageUsers = hasPermission('users.manage');
+  const isSuperAdmin = access?.tier === 'super_admin';
+
   useEffect(() => {
-    if (typeof window === 'undefined') return;
-    const headers = adminBearerAuthHeader();
-    if (!headers.Authorization) {
-      void signOutToLogin(router);
-      return;
+    if (!access) return;
+    if (!canViewUsers) {
+      router.replace('/dashboard');
     }
-
-    fetch('/api/admin/me', { headers })
-      .then(async (r) => {
-        if (!r.ok) throw new Error('NOT_AUTH');
-        type AdminUser = { role_name: string };
-        type AdminMeJson = {
-          data?: { user?: AdminUser } | null;
-          user?: AdminUser;
-        };
-        const json = (await r.json()) as AdminMeJson;
-        const roleName = json.data?.user?.role_name ?? json.user?.role_name;
-        if (!canAccessModule(roleName, 'admins')) {
-          router.replace('/dashboard');
-          return;
-        }
-        setAccessChecked(true);
-      })
-      .catch(() => void signOutToLogin(router));
-  }, [router]);
+  }, [access, canViewUsers, router]);
 
   useEffect(() => {
-    if (!accessChecked) return;
+    if (!access || !canViewUsers) return;
     let cancelled = false;
 
     async function fetchUsers() {
@@ -131,34 +84,28 @@ export default function DashboardUsersPage() {
     }
 
     fetchUsers();
-
     return () => {
       cancelled = true;
     };
-  }, [page, debouncedSearch, listRefreshKey, accessChecked]);
+  }, [access, canViewUsers, page, debouncedSearch, listRefreshKey]);
+
+  async function refreshRoles() {
+    const result = await getRolesAction();
+    if (result.ok && result.data) setRoles(result.data);
+  }
 
   useEffect(() => {
-    if (!accessChecked) return;
+    if (!access || !canViewUsers) return;
     let cancelled = false;
-
-    async function fetchRoles() {
-      try {
-        const result = await getRolesAction();
-        if (cancelled) return;
-        if (result.ok && result.data) setRoles(result.data);
-      } catch {
-        // ignore – roles list will just be empty and fall back to id
-      }
-    }
-
-    fetchRoles();
-
+    getRolesAction().then((result) => {
+      if (!cancelled && result.ok && result.data) setRoles(result.data);
+    });
     return () => {
       cancelled = true;
     };
-  }, [accessChecked]);
+  }, [access, canViewUsers]);
 
-  if (!accessChecked) {
+  if (!access || !canViewUsers) {
     return <ContentSkeleton />;
   }
 
@@ -181,7 +128,6 @@ export default function DashboardUsersPage() {
 
   async function handleToggleStatus(user: UserListItem) {
     const nextActive = !(user.is_active ?? true);
-
     setStatusLoadingId(user.id);
     try {
       const result = await updateUserAction(user.id, { is_active: nextActive });
@@ -193,27 +139,71 @@ export default function DashboardUsersPage() {
         prev.map((u) => (u.id === user.id ? { ...u, is_active: nextActive } : u))
       );
     } catch (e) {
-      const msg = e instanceof Error ? e.message : 'Unable to update user status';
-      alert(msg);
+      alert(e instanceof Error ? e.message : 'Unable to update user status');
     } finally {
       setStatusLoadingId(null);
     }
+  }
+
+  function renderScopeCell(u: UserListItem) {
+    if (u.role_name === 'super_admin') {
+      return <span className={styles.metaPill}>Platform Root</span>;
+    }
+    if (u.role_name === 'support_staff') {
+      return (
+        <span className={styles.metaPill}>
+          {u.assigned_client_ids.length} client(s) assigned
+        </span>
+      );
+    }
+    if (u.role_name === 'client_admin') {
+      return (
+        <span className={styles.metaPill}>
+          Plan: {u.purchase_plan_name ?? 'Default / Full'}
+        </span>
+      );
+    }
+    return (
+      <span className={styles.metaPill}>
+        {u.tenant_owner_name ? `${u.tenant_owner_name} · ` : ''}
+        {u.assigned_event_ids.length} event(s)
+      </span>
+    );
   }
 
   return (
     <div className={styles.page}>
       <div className={styles.headerRow}>
         <div className={styles.headerText}>
-          <h1>Admins</h1>
-          <p>Manage admin users. You can create, edit, and delete admins.</p>
+          <h1>Users, Roles &amp; Access</h1>
+          <p>
+            {isSuperAdmin
+              ? 'Manage Support Staff, Client Admins with Purchase Plans, Custom Roles, and Event Sub-Users.'
+              : access.tier === 'client_admin'
+              ? `Manage your event photographers, coordinators, and team sub-users${access.purchase_plan_name ? ` (Plan: ${access.purchase_plan_name})` : ''}.`
+              : 'Manage assigned client administrators and event team users.'}
+          </p>
         </div>
-        <button
-          type="button"
-          onClick={openCreateForm}
-          className={styles.newUserButton}
-        >
-          + New admin
-        </button>
+        <div className={styles.headerActions}>
+          {isSuperAdmin && (
+            <button
+              type="button"
+              onClick={() => setRolesModalOpen(true)}
+              className={styles.btnSecondary}
+            >
+              Manage Roles &amp; Permissions
+            </button>
+          )}
+          {canManageUsers && (
+            <button
+              type="button"
+              onClick={openCreateForm}
+              className={styles.newUserButton}
+            >
+              + New user
+            </button>
+          )}
+        </div>
       </div>
 
       <div className={styles.controlsRow}>
@@ -229,29 +219,28 @@ export default function DashboardUsersPage() {
         />
       </div>
 
-      {error && (
-        <p className={styles.errorText}>{error}</p>
-      )}
+      {error && <p className={styles.errorText}>{error}</p>}
 
       <PaginatedTable
-        header={(
+        header={
           <tr className={styles.tableHeadRow}>
             <th className={styles.th}>Name</th>
             <th className={styles.th}>Email</th>
             <th className={styles.th}>Role</th>
+            <th className={styles.th}>Plan / Scope</th>
             <th className={styles.th}>Status</th>
             <th className={styles.th}>Phone</th>
-            <th className={styles.thActions}>Actions</th>
+            {canManageUsers && <th className={styles.thActions}>Actions</th>}
           </tr>
-        )}
+        }
         page={page}
         totalPages={totalPages}
         total={total}
         pageSize={PAGE_LIMIT}
-        colSpan={6}
+        colSpan={canManageUsers ? 7 : 6}
         loading={loading}
-        loadingMessage="Loading admins…"
-        emptyMessage="No admins found."
+        loadingMessage="Loading users…"
+        emptyMessage="No users found."
         onPageChange={setPage}
       >
         {users.map((user) => (
@@ -263,10 +252,9 @@ export default function DashboardUsersPage() {
             </td>
             <td className={styles.td}>{user.email}</td>
             <td className={styles.td}>
-              <span className={styles.rolePill}>
-                {formatRoleName(roles.find((r) => r.id === user.role_id)?.name ?? `Role #${user.role_id}`)}
-              </span>
+              <span className={styles.rolePill}>{formatRoleDisplayName(user.role_name)}</span>
             </td>
+            <td className={styles.td}>{renderScopeCell(user)}</td>
             <td className={styles.td}>
               <span
                 className={`${styles.statusPill} ${
@@ -291,31 +279,35 @@ export default function DashboardUsersPage() {
                 <span className={styles.phoneEmpty}>—</span>
               )}
             </td>
-            <td className={styles.td} style={{ textAlign: 'right' }}>
-              <div className={styles.actions}>
-                <button
-                  type="button"
-                  onClick={() => handleToggleStatus(user)}
-                  disabled={statusLoadingId === user.id}
-                  className={`${styles.btnStatus} ${
-                    user.is_active ? styles['btnStatus--active'] : styles['btnStatus--inactive']
-                  }`}
-                >
-                  {statusLoadingId === user.id
-                    ? 'Updating…'
-                    : user.is_active
-                    ? 'Deactivate'
-                    : 'Activate'}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => openEditForm(user)}
-                  className={styles.btnEdit}
-                >
-                  Edit
-                </button>
-              </div>
-            </td>
+            {canManageUsers && (
+              <td className={styles.td} style={{ textAlign: 'right' }}>
+                <div className={styles.actions}>
+                  {user.role_name !== 'super_admin' && (
+                    <button
+                      type="button"
+                      onClick={() => handleToggleStatus(user)}
+                      disabled={statusLoadingId === user.id}
+                      className={`${styles.btnStatus} ${
+                        user.is_active ? styles['btnStatus--active'] : styles['btnStatus--inactive']
+                      }`}
+                    >
+                      {statusLoadingId === user.id
+                        ? 'Updating…'
+                        : user.is_active
+                        ? 'Deactivate'
+                        : 'Activate'}
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => openEditForm(user)}
+                    className={styles.btnEdit}
+                  >
+                    Edit
+                  </button>
+                </div>
+              </td>
+            )}
           </tr>
         ))}
       </PaginatedTable>
@@ -323,12 +315,22 @@ export default function DashboardUsersPage() {
       <UserFormModal
         open={formOpen}
         mode={formMode}
-        user={selectedUser as UserFormUser | null}
-        roles={(roles as UserFormRole[]).filter((r) => r.name !== 'user')}
-        formatRoleName={formatRoleName}
+        user={selectedUser}
+        roles={roles}
+        callerAccess={access}
+        formatRoleName={formatRoleDisplayName}
         onClose={() => setFormOpen(false)}
         onSuccess={handleFormSuccess}
       />
+
+      {isSuperAdmin && (
+        <RolePermissionsModal
+          open={rolesModalOpen}
+          roles={roles}
+          onClose={() => setRolesModalOpen(false)}
+          onSuccess={() => void refreshRoles()}
+        />
+      )}
     </div>
   );
 }

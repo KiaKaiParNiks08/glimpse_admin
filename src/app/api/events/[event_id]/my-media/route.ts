@@ -7,7 +7,10 @@ import { z } from 'zod';
 import { listMyMedia } from '@/server/people-media/queries';
 import { queueExistingFaceReference } from '@/server/people-media/face-reference';
 import { backfillEventMedia } from '@/server/people-media/register';
+import { runUserEventRecognitionNow } from '@/server/people-media/scans';
+import { scheduleFaceProcessing } from '@/server/people-media/schedule';
 import { isEventGuest } from '@/server/event-guests';
+import { getEventEffectiveFeatures } from '@/server/access';
 
 export const maxDuration = 60;
 
@@ -30,12 +33,25 @@ export async function GET(request: Request, context: { params: Promise<{ event_i
       return forbidden('Forbidden');
     }
 
+    const enabledFeatures = await getEventEffectiveFeatures(params.event_id);
+    if (!enabledFeatures.ai_recognition) {
+      return forbidden('AI Face Recognition is not enabled for this event');
+    }
+
     const limit = Math.min(query.limit, 50);
     try {
       await backfillEventMedia(params.event_id);
       await queueExistingFaceReference(query.user_id);
+      const inlineResult = await runUserEventRecognitionNow({
+        userId: query.user_id,
+        eventId: params.event_id,
+        timeBudgetMs: 9_000,
+      });
+      if (!inlineResult.complete) {
+        scheduleFaceProcessing();
+      }
     } catch (error) {
-      console.error('[people-media] my-media backfill failed', error);
+      console.error('[people-media] my-media recognition failed', error);
     }
 
     const result = await listMyMedia({

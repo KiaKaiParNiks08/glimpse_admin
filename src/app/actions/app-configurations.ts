@@ -5,14 +5,13 @@ import {
   listAppConfigurationsQuerySchema,
   patchAppConfigurationSchema,
 } from '@/lib/validations/app-configurations';
-import type { AdminSessionUser } from '@/lib/admin-session';
-import { getAdminSessionFromCookies } from '@/lib/admin-session';
 import {
   createAppConfiguration,
   getAppConfigurations,
   isPrismaUniqueViolation,
   updateAppConfiguration,
 } from '@/server/app-configurations';
+import { requireAdminContextFromCookies } from '@/server/access';
 import { Prisma } from '@prisma/client';
 
 export type AppConfigurationRow = {
@@ -36,13 +35,13 @@ export type MutateAppConfigurationResult =
   | { ok: true; data: AppConfigurationRow }
   | { ok: false; error: string };
 
-async function requireSuperAdminSession(): Promise<
-  { ok: true; session: AdminSessionUser } | { ok: false; error: string }
-> {
-  const session = await getAdminSessionFromCookies();
-  if (!session) return { ok: false, error: 'Not authenticated' };
-  if (session.role_name !== 'super_admin') return { ok: false, error: 'Forbidden' };
-  return { ok: true, session };
+async function requireAppConfigAccess() {
+  const auth = await requireAdminContextFromCookies();
+  if (!auth.ok) return { ok: false as const, error: auth.error };
+  if (!auth.ctx.hasPermission('plans.manage')) {
+    return { ok: false as const, error: 'Forbidden' };
+  }
+  return { ok: true as const, ctx: auth.ctx };
 }
 
 export async function listAppConfigurationsAction(params: {
@@ -51,7 +50,7 @@ export async function listAppConfigurationsAction(params: {
   platform?: string;
   is_active?: boolean;
 }): Promise<ListAppConfigurationsResult> {
-  const gate = await requireSuperAdminSession();
+  const gate = await requireAppConfigAccess();
   if (!gate.ok) return { ok: false, error: gate.error };
 
   const parsed = listAppConfigurationsQuerySchema.safeParse({
@@ -82,7 +81,7 @@ export async function listAppConfigurationsAction(params: {
 export async function createAppConfigurationAction(
   body: unknown
 ): Promise<MutateAppConfigurationResult> {
-  const gate = await requireSuperAdminSession();
+  const gate = await requireAppConfigAccess();
   if (!gate.ok) return { ok: false, error: gate.error };
 
   const parsed = createAppConfigurationSchema.safeParse(body);
@@ -101,7 +100,7 @@ export async function updateAppConfigurationAction(
   id: string,
   body: unknown
 ): Promise<MutateAppConfigurationResult> {
-  const gate = await requireSuperAdminSession();
+  const gate = await requireAppConfigAccess();
   if (!gate.ok) return { ok: false, error: gate.error };
 
   const parsed = patchAppConfigurationSchema.safeParse(body);

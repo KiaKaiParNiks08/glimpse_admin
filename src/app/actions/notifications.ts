@@ -1,18 +1,28 @@
 'use server';
 
 import prisma from '@/server/prisma';
-import { getAdminSessionFromCookies, type AdminSessionUser } from '@/lib/admin-session';
-import { getDeviceTokensForUsers } from '@/server/notifications/service';
+import {
+  requireAdminContextFromCookies,
+  buildAccessibleEventsWhere,
+  canContextAccessEvent,
+  type AdminAccessContext,
+} from '@/server/access';
 import { sendFcmPush } from '@/server/notifications/firebase-http';
 import { appPublicOrigin } from '@/lib/app-share';
+import { createPresignedGetUrl } from '@/lib/s3-presign';
+import { isS3Configured } from '@/lib/upload';
+import { storageKeyFromMediaUrl } from '@/server/people-media/storage';
 
 async function requireAdminSession(): Promise<
-  | { ok: true; session: AdminSessionUser }
+  | { ok: true; session: AdminAccessContext }
   | { ok: false; error: string }
 > {
-  const session = await getAdminSessionFromCookies();
-  if (!session) return { ok: false, error: 'Not authenticated' };
-  return { ok: true, session };
+  const auth = await requireAdminContextFromCookies();
+  if (!auth.ok) return { ok: false, error: auth.error };
+  if (!auth.ctx.hasPermission('notifications.send')) {
+    return { ok: false, error: 'Forbidden: push notifications are disabled for your role or plan' };
+  }
+  return { ok: true, session: auth.ctx };
 }
 
 export interface NotificationEventOption {
@@ -35,6 +45,9 @@ export interface NotificationRecipientItem {
   event_ids: string[];
   event_names: string[];
   joined_at: string | null;
+  /** True only when the user has a valid FCM token ready to receive push notifications. */
+  has_fcm_token: boolean;
+  /** True if the user has logged in from any mobile device (even without an FCM token). */
   has_active_device: boolean;
   device_count: number;
   device_types: string[];
@@ -51,6 +64,7 @@ export type GetNotificationRecipientsResult =
       summary: {
         totalGuests: number;
         reachableCount: number;
+        loggedInWithoutTokenCount: number;
       };
     }
   | { ok: false; error: string };
@@ -63,9 +77,38 @@ export type SendPushNotificationResult =
         deviceTokensCount: number;
         pushSuccessCount: number;
         pushFailureCount: number;
+        missingTokenUsersCount: number;
+        failureSamples: string[];
       };
     }
   | { ok: false; error: string };
+
+/**
+ * Resolve an absolute HTTPS URL that FCM, Android, and iOS can download directly without auth.
+ * When S3 is configured without CloudFront, converts /api/upload/signed?t=... into a direct
+ * 7-day S3 Presigned GET URL so mobile push daemons download images quickly without hitting app proxies.
+ */
+async function resolvePushImageUrl(rawUrl: string | null): Promise<string | undefined> {
+  const imageUrl = (rawUrl || '').trim();
+  if (!imageUrl) return undefined;
+
+  const storageKey = storageKeyFromMediaUrl(imageUrl);
+  if (storageKey && !storageKey.startsWith('uploads/') && isS3Configured() && !process.env.S3_PUBLIC_BASE_URL) {
+    try {
+      return await createPresignedGetUrl(storageKey, 60 * 60 * 24 * 7);
+    } catch (err) {
+      console.warn('[notifications] Failed to presign push image URL, falling back to app origin:', err);
+    }
+  }
+
+  if (imageUrl.startsWith('https://') || imageUrl.startsWith('http://')) {
+    return imageUrl;
+  }
+  if (imageUrl.startsWith('/')) {
+    return `${appPublicOrigin()}${imageUrl}`;
+  }
+  return undefined;
+}
 
 /**
  * Fetch events available to the admin for notifications.
@@ -76,24 +119,11 @@ export async function getEventsForNotificationAction(): Promise<GetNotificationE
   const { session } = sessionRes;
 
   try {
-    let whereCondition: Record<string, unknown> = {
+    const accessWhere = buildAccessibleEventsWhere(session);
+    const whereCondition: Record<string, unknown> = {
       status: { notIn: ['cancelled', 'archived'] },
+      ...(Object.keys(accessWhere).length > 0 ? { AND: [accessWhere] } : {}),
     };
-
-    if (session.role_name === 'event_admin') {
-      const assigned = await prisma.event_admins.findMany({
-        where: { user_id: session.id },
-        select: { event_id: true },
-      });
-      const assignedIds = assigned.map((a) => a.event_id);
-      if (assignedIds.length === 0) {
-        return { ok: true, data: [] };
-      }
-      whereCondition = {
-        id: { in: assignedIds },
-        ...whereCondition,
-      };
-    }
 
     const events = await prisma.events.findMany({
       where: whereCondition,
@@ -135,13 +165,23 @@ export async function getEventGuestsForNotificationAction(params: {
 }): Promise<GetNotificationRecipientsResult> {
   const sessionRes = await requireAdminSession();
   if (!sessionRes.ok) return { ok: false, error: sessionRes.error };
+  const { session } = sessionRes;
 
   const eventIds = params.eventIds.filter(Boolean);
   if (eventIds.length === 0) {
-    return { ok: true, data: [], summary: { totalGuests: 0, reachableCount: 0 } };
+    return {
+      ok: true,
+      data: [],
+      summary: { totalGuests: 0, reachableCount: 0, loggedInWithoutTokenCount: 0 },
+    };
   }
 
   try {
+    const checks = await Promise.all(eventIds.map((id) => canContextAccessEvent(session, id)));
+    if (checks.some((allowed) => !allowed)) {
+      return { ok: false, error: 'Forbidden' };
+    }
+
     const [guests, eventsList] = await Promise.all([
       prisma.event_guests.findMany({
         where: {
@@ -200,9 +240,9 @@ export async function getEventGuestsForNotificationAction(params: {
     >();
     for (const dev of devices) {
       const list = devicesByUser.get(dev.user_id) ?? [];
+      // Only a real FCM token (> 50 chars if legacy in device_id, or explicit fcm_token) can receive pushes.
       const hasFcm = Boolean(
-        dev.fcm_token?.trim() ||
-          (dev.device_id && (dev.device_id.trim().length > 20 || dev.device_type === 'android' || dev.device_type === 'ios'))
+        dev.fcm_token?.trim() || (dev.device_id && dev.device_id.trim().length > 50)
       );
       list.push({
         device_type: dev.device_type,
@@ -217,6 +257,7 @@ export async function getEventGuestsForNotificationAction(params: {
       const u = g.users_event_guests_user_idTousers;
       const userDevs = devicesByUser.get(u.id) ?? [];
       const hasActiveDevice = userDevs.length > 0;
+      const hasFcmToken = userDevs.some((d) => d.has_fcm);
       const formattedMobile = [u.country_code, u.mobile_number].filter(Boolean).join(' ').trim();
       const rawMobile = (u.mobile_number || '').replace(/\D/g, '');
 
@@ -237,6 +278,7 @@ export async function getEventGuestsForNotificationAction(params: {
           event_ids: [g.event_id],
           event_names: [eventNameById.get(g.event_id) || 'Event'],
           joined_at: g.joined_at ? g.joined_at.toISOString() : null,
+          has_fcm_token: hasFcmToken,
           has_active_device: hasActiveDevice,
           device_count: userDevs.length,
           device_types: [...new Set(userDevs.map((d) => d.device_type))],
@@ -245,7 +287,8 @@ export async function getEventGuestsForNotificationAction(params: {
     }
 
     const data = Array.from(userMap.values());
-    const reachableCount = data.filter((d) => d.has_active_device).length;
+    const reachableCount = data.filter((d) => d.has_fcm_token).length;
+    const loggedInWithoutTokenCount = data.filter((d) => d.has_active_device && !d.has_fcm_token).length;
 
     return {
       ok: true,
@@ -253,6 +296,7 @@ export async function getEventGuestsForNotificationAction(params: {
       summary: {
         totalGuests: data.length,
         reachableCount,
+        loggedInWithoutTokenCount,
       },
     };
   } catch (error) {
@@ -297,6 +341,11 @@ export async function sendAdminPushNotificationAction(input: {
   const primaryEventId = eventIds[0];
 
   try {
+    const accessChecks = await Promise.all(eventIds.map((id) => canContextAccessEvent(session, id)));
+    if (accessChecks.some((allowed) => !allowed)) {
+      return { ok: false, error: 'Forbidden for one or more selected events' };
+    }
+
     // Resolve which event each user belongs to among the selected events
     const guestEventRows = await prisma.event_guests.findMany({
       where: {
@@ -343,22 +392,17 @@ export async function sendAdminPushNotificationAction(input: {
       },
     });
 
-    // 3. Resolve absolute URL for FCM (lockscreen push requires public HTTPS URL)
-    let fcmImageUrl: string | undefined = undefined;
-    if (imageUrl) {
-      if (imageUrl.startsWith('http://') || imageUrl.startsWith('https://')) {
-        fcmImageUrl = imageUrl;
-      } else if (imageUrl.startsWith('/')) {
-        const origin = appPublicOrigin();
-        fcmImageUrl = `${origin}${imageUrl}`;
-      }
-    }
+    // 3. Resolve direct HTTPS URL for FCM/APNs
+    const fcmImageUrl = await resolvePushImageUrl(imageUrl);
 
-    // 4. Group tokens by each user's target event
+    // 4. Group tokens by each user's target event & track users missing tokens
     const tokensByEventId = new Map<string, Set<string>>();
+    const usersWithTokens = new Set<string>();
     for (const d of devices) {
-      const token = d.fcm_token?.trim() || (d.device_id?.trim().length > 50 ? d.device_id.trim() : null);
+      const token =
+        d.fcm_token?.trim() || (d.device_id && d.device_id.trim().length > 50 ? d.device_id.trim() : null);
       if (!token) continue;
+      usersWithTokens.add(d.user_id);
       const targetEventId = userEventMap.get(d.user_id) || primaryEventId;
       if (!tokensByEventId.has(targetEventId)) {
         tokensByEventId.set(targetEventId, new Set());
@@ -366,10 +410,13 @@ export async function sendAdminPushNotificationAction(input: {
       tokensByEventId.get(targetEventId)!.add(token);
     }
 
+    const missingTokenUsersCount = userIds.filter((uid) => !usersWithTokens.has(uid)).length;
+
     // 5. Dispatch FCM Push Notifications event-wise
     let pushSuccessCount = 0;
     let pushFailureCount = 0;
     let totalTokensCount = 0;
+    const failureSamplesSet = new Set<string>();
 
     for (const [evtId, tokenSet] of tokensByEventId.entries()) {
       const tokens = Array.from(tokenSet);
@@ -387,12 +434,15 @@ export async function sendAdminPushNotificationAction(input: {
           screen: 'notifications',
           type: 'announcement',
           event_id: evtId,
-          image_url: fcmImageUrl || imageUrl || '',
+          ...(fcmImageUrl ? { image: fcmImageUrl, image_url: fcmImageUrl } : {}),
         },
       });
 
       pushSuccessCount += pushRes.successCount;
       pushFailureCount += pushRes.failureCount;
+      for (const sample of pushRes.failureSamples ?? []) {
+        if (failureSamplesSet.size < 5) failureSamplesSet.add(sample);
+      }
     }
 
     return {
@@ -402,6 +452,8 @@ export async function sendAdminPushNotificationAction(input: {
         deviceTokensCount: totalTokensCount,
         pushSuccessCount,
         pushFailureCount,
+        missingTokenUsersCount,
+        failureSamples: Array.from(failureSamplesSet),
       },
     };
   } catch (error) {

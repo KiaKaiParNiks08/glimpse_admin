@@ -22,14 +22,13 @@ import { getFavoritedItemIds } from '@/server/favorites';
 import { getCurrentHappeningByEventId } from '@/server/current-happening';
 import { sessionIdsViewerCanUpload } from '@/server/session-uploaders';
 import { getEventTeam } from '@/server/event-team';
+import { getEventEffectiveFeatures } from '@/server/access';
 
 /**
  * GET /api/events/[event_id]
  * Returns full event details plus the current phase (pre / ongoing / post, from start_date and end_date),
  * all sessions and the gallery media grouped as "All media" followed by one section per session.
- * `watermark`, `current_happening` and `post_event_report` are omitted when they have no data; the last two
- * are also omitted when the admin did not enable them for the current phase.
- * Admin tokens may pass ?phase= to preview another phase; ?viewer_user_id= adds is_favorite per media item.
+ * Features not included in the event owner's purchased plan (`enabled_features`) are automatically masked.
  */
 export async function GET(
   request: Request,
@@ -72,29 +71,38 @@ export async function GET(
     const previewPhase = getAdminFromAuthorizationHeader(request) ? query.phase : undefined;
     const current = previewPhase ?? actualPhase;
 
-    const [days, mediaRows, team] = await Promise.all([
+    const [days, mediaRows, team, enabledFeatures] = await Promise.all([
       getEventDaysByEventId(event.id),
       getEventDayMediaByEventId(event.id),
       getEventTeam(event.id),
+      getEventEffectiveFeatures(event.id),
     ]);
 
     const sessionIds = days.flatMap((day) => day.event_sessions.map((s) => s.id));
     const admin = getAdminFromAuthorizationHeader(request);
     const isAdmin = Boolean(admin);
     const [favorited, canUploadIds] = await Promise.all([
-      effectiveUserId
+      effectiveUserId && enabledFeatures.mobile_favorites
         ? getFavoritedItemIds(effectiveUserId, 'day_media', mediaRows.map((m) => m.id))
         : Promise.resolve(null),
-      isAdmin
-        ? Promise.resolve(new Set(sessionIds))
-        : sessionIdsViewerCanUpload(sessionIds, effectiveUserId),
+      enabledFeatures.session_media_upload
+        ? isAdmin
+          ? Promise.resolve(new Set(sessionIds))
+          : sessionIdsViewerCanUpload(sessionIds, effectiveUserId)
+        : Promise.resolve(new Set<string>()),
     ]);
+
     const allMedia = mediaRows.map(({ media_key, uploaded_by, ...m }) => {
       const isOwner = Boolean(effectiveUserId && uploaded_by && uploaded_by === effectiveUserId);
+      const canUploadThis = Boolean(
+        enabledFeatures.session_media_upload &&
+          m.event_session_id &&
+          canUploadIds.has(m.event_session_id)
+      );
       return {
         ...m,
         ...(favorited && { is_favorite: favorited.has(m.id) }),
-        can_upload: m.event_session_id ? canUploadIds.has(m.event_session_id) : false,
+        can_upload: canUploadThis,
         can_delete: Boolean(isAdmin || isOwner),
       };
     });
@@ -106,21 +114,23 @@ export async function GET(
       mediaBySession.set(m.event_session_id, list);
     }
 
-    const can_upload_media = canUploadIds.size > 0;
+    const can_upload_media = Boolean(enabledFeatures.session_media_upload && canUploadIds.size > 0);
 
-    const event_sessions = days.flatMap((day) =>
-      day.event_sessions
-        .map((s) => ({
-          ...s,
-          start_time: formatSessionTimeToHHmm(s.start_time),
-          end_time: formatSessionTimeToHHmm(s.end_time),
-          date: day.date,
-          event_day: { id: day.id, title: day.title, date: day.date },
-          media_count: mediaBySession.get(s.id)?.length ?? 0,
-          can_upload: canUploadIds.has(s.id),
-        }))
-        .sort((a, b) => (a.start_time ?? '99:99').localeCompare(b.start_time ?? '99:99'))
-    );
+    const event_sessions = enabledFeatures.event_sessions
+      ? days.flatMap((day) =>
+          day.event_sessions
+            .map((s) => ({
+              ...s,
+              start_time: formatSessionTimeToHHmm(s.start_time),
+              end_time: formatSessionTimeToHHmm(s.end_time),
+              date: day.date,
+              event_day: { id: day.id, title: day.title, date: day.date },
+              media_count: mediaBySession.get(s.id)?.length ?? 0,
+              can_upload: canUploadIds.has(s.id),
+            }))
+            .sort((a, b) => (a.start_time ?? '99:99').localeCompare(b.start_time ?? '99:99'))
+        )
+      : [];
 
     const media_sections = [
       {
@@ -159,12 +169,13 @@ export async function GET(
       show_post_event: event.post_event_pdf_show_post_event,
     };
 
-    const happeningItems = isVisibleInPhase(happeningFlags, current)
-      ? (await getCurrentHappeningByEventId(event.id)).map((item) => ({
-          ...item,
-          photo_count: item.happening_photos.length,
-        }))
-      : [];
+    const happeningItems =
+      enabledFeatures.event_current_happening && isVisibleInPhase(happeningFlags, current)
+        ? (await getCurrentHappeningByEventId(event.id)).map((item) => ({
+            ...item,
+            photo_count: item.happening_photos.length,
+          }))
+        : [];
     const current_happening =
       happeningItems.length > 0
         ? {
@@ -174,7 +185,9 @@ export async function GET(
         : undefined;
 
     const post_event_report =
-      event.post_event_pdf_url && isVisibleInPhase(reportFlags, current)
+      enabledFeatures.event_post_report &&
+      event.post_event_pdf_url &&
+      isVisibleInPhase(reportFlags, current)
         ? {
             title: event.post_event_pdf_title?.trim() || DEFAULT_POST_EVENT_REPORT_TITLE,
             url: event.post_event_pdf_url,
@@ -185,7 +198,7 @@ export async function GET(
           }
         : undefined;
 
-    const watermark = buildEventWatermark(event) ?? undefined;
+    const watermark = enabledFeatures.event_watermark ? buildEventWatermark(event) ?? undefined : undefined;
 
     /* eslint-disable @typescript-eslint/no-unused-vars -- returned as nested objects (only when shown) instead */
     const {
@@ -213,39 +226,43 @@ export async function GET(
     } = event;
     /* eslint-enable @typescript-eslint/no-unused-vars */
 
+    const visibleTeam = enabledFeatures.event_team ? team : null;
     const fallbackOrganizers =
       event.event_organizers && event.event_organizers.length > 0
         ? event.event_organizers
-        : team?.planner
+        : visibleTeam?.planner
         ? [
             {
               id: 'event-planner',
-              name: team.planner.name,
-              logo_url: team.planner.image_url ?? '',
-              contact_email: team.planner.email ?? '',
-              contact_phone: team.planner.phone ?? '',
+              name: visibleTeam.planner.name,
+              logo_url: visibleTeam.planner.image_url ?? '',
+              contact_email: visibleTeam.planner.email ?? '',
+              contact_phone: visibleTeam.planner.phone ?? '',
               website_url: '',
             },
           ]
         : [];
 
-    return ok({
+    const res = ok({
       data: {
         ...eventFields,
         event_organizers: fallbackOrganizers,
-        event_team: team,
-        event_planner: team?.planner ?? null,
-        photographer: team?.photographer ?? null,
+        event_team: visibleTeam,
+        event_planner: visibleTeam?.planner ?? null,
+        photographer: visibleTeam?.photographer ?? null,
         cover_images: event.event_cover_images.map((c) => c.image_url),
         phase: { current, is_preview: previewPhase !== undefined, today, timezone },
         event_sessions,
         can_upload_media,
+        enabled_features: enabledFeatures,
         ...(watermark && { watermark }),
         media_sections,
         ...(current_happening && { current_happening }),
         ...(post_event_report && { post_event_report }),
       },
     });
+    res.headers.set('Cache-Control', 'no-store');
+    return res;
   } catch (e) {
     console.error(e);
     return serverError('Unable to fetch event details');

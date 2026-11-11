@@ -2,8 +2,7 @@
 
 import { qrSvg } from '@/lib/qr-svg';
 import { isShareEventCode, joinUrl } from '@/lib/app-share';
-import { getAdminSessionFromCookies } from '@/lib/admin-session';
-import { isEventAdminAssigned } from '@/server/events';
+import { requireAdminContextFromCookies, canContextAccessEvent } from '@/server/access';
 import prisma from '@/server/prisma';
 
 export type EventShareQrResult =
@@ -11,16 +10,15 @@ export type EventShareQrResult =
   | { ok: false; error: string };
 
 export async function getEventShareQrAction(eventId: string): Promise<EventShareQrResult> {
-  const session = await getAdminSessionFromCookies();
-  if (!session) return { ok: false, error: 'Not authenticated' };
+  const auth = await requireAdminContextFromCookies();
+  if (!auth.ok) return { ok: false, error: auth.error };
   if (!eventId) return { ok: false, error: 'Event ID required' };
 
-  if (session.role_name === 'event_admin') {
-    const allowed = await isEventAdminAssigned(eventId, session.id);
-    if (!allowed) return { ok: false, error: 'Event not found' };
-  } else if (session.role_name !== 'super_admin') {
-    return { ok: false, error: 'Forbidden' };
+  if (!auth.ctx.hasPermission('qr.view')) {
+    return { ok: false, error: 'Forbidden: QR links are disabled for your plan or role' };
   }
+  const allowed = await canContextAccessEvent(auth.ctx, eventId);
+  if (!allowed) return { ok: false, error: 'Event not found' };
 
   const event = await prisma.events.findUnique({
     where: { id: eventId },

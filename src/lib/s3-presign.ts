@@ -80,13 +80,17 @@ export function getStoredObjectUrl(key: string): string {
 
 /**
  * Generate a presigned GET URL for viewing a private object.
- * Use only server-side (e.g. server-to-server). Do not send to the browser.
+ * Use only server-side (e.g. server-to-server or FCM image delivery). Do not expose in static DB URLs.
  */
-export async function createPresignedGetUrl(key: string): Promise<string> {
+export async function createPresignedGetUrl(
+  key: string,
+  expiresInSeconds: number = PRESIGN_GET_EXPIRES_IN
+): Promise<string> {
   const bucket = getBucket();
   const client = getS3Client();
+  const clamped = Math.max(60, Math.min(60 * 60 * 24 * 7, Math.floor(expiresInSeconds)));
   const command = new GetObjectCommand({ Bucket: bucket, Key: key });
-  return getSignedUrl(client, command, { expiresIn: PRESIGN_GET_EXPIRES_IN });
+  return getSignedUrl(client, command, { expiresIn: clamped });
 }
 
 export type GetObjectStreamResult = {

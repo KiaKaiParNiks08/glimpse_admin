@@ -105,12 +105,13 @@ export async function backfillEventRecognition(
   const refCount = (status: string) => refCounts.find((row) => row.processing_status === status)?.n ?? 0;
 
   const guestsMissingRef = await prisma.$queryRaw<{ user_id: string; avatar_url: string | null }[]>`
-    SELECT u.id AS user_id, u.avatar_url
+    SELECT u.id AS user_id, COALESCE(NULLIF(uep.avatar_url, ''), NULLIF(u.avatar_url, '')) AS avatar_url
     FROM event_guests eg
     JOIN users u ON u.id = eg.user_id
+    LEFT JOIN user_event_profiles uep ON uep.user_id = eg.user_id AND uep.event_id = eg.event_id
     LEFT JOIN user_face_references ufr ON ufr.user_id = u.id
     WHERE eg.event_id = ${eventId}::uuid
-      AND u.avatar_url IS NOT NULL
+      AND (u.avatar_url IS NOT NULL OR uep.avatar_url IS NOT NULL)
       AND ufr.user_id IS NULL
   `;
 

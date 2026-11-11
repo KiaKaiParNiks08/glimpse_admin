@@ -5,8 +5,9 @@ import {
   listCommentsQuerySchema,
 } from '@/lib/validations/comments';
 import { parseBody } from '@/lib/validations';
-import { ok, notFound, serverError } from '@/lib/api-response';
+import { ok, forbidden, notFound, serverError } from '@/lib/api-response';
 import { createComment, listComments, postExists } from '@/server/comments';
+import { getPostEventFeedAllowed } from '@/server/access';
 import { notifyCommentAdded } from '@/server/notifications/service';
 
 /**
@@ -25,6 +26,10 @@ export async function GET(
     const { searchParams } = new URL(request.url);
     const [query, queryErr] = parseQuery(searchParams, listCommentsQuerySchema);
     if (queryErr) return queryErr;
+
+    const feedAccess = await getPostEventFeedAllowed(path.post_id);
+    if (!feedAccess.exists) return notFound('Post not found');
+    if (!feedAccess.allowed) return forbidden('Social feed is disabled for this event');
 
     const exists = await postExists(path.post_id);
     if (!exists) return notFound('Post not found');
@@ -56,6 +61,10 @@ export async function POST(
 
     const [body, bodyErr] = await parseBody(request, createCommentBodySchema);
     if (bodyErr) return bodyErr;
+
+    const feedAccess = await getPostEventFeedAllowed(path.post_id);
+    if (!feedAccess.exists) return notFound('Post not found');
+    if (!feedAccess.allowed) return forbidden('Social feed is disabled for this event');
 
     const exists = await postExists(path.post_id);
     if (!exists) return notFound('Post not found');

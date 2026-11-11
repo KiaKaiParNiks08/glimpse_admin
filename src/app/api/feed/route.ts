@@ -4,7 +4,7 @@ import {
   listPostsQuerySchema,
   parseQuery,
 } from '@/lib/validations';
-import { ok, badRequest, notFound, serverError } from '@/lib/api-response';
+import { ok, badRequest, forbidden, notFound, serverError } from '@/lib/api-response';
 import {
   IncompleteUploadError,
   getMediaKind,
@@ -19,6 +19,7 @@ import { createPost, listPosts } from '@/server/posts';
 import prisma from '@/server/prisma';
 import { ensureEventGuest } from '@/server/event-guests';
 import { registerFeedPostMedia } from '@/server/people-media/register';
+import { getEventEffectiveFeatures } from '@/server/access';
 import { notifyNewPostInEvent } from '@/server/notifications/service';
 
 /** Allow a video upload to finish. Body size is set in next.config (middlewareClientMaxBodySize). */
@@ -34,6 +35,12 @@ export async function GET(request: Request) {
     if (err) return err;
 
     const { page, limit } = query;
+    const tokenUser = getUserFromAuthorizationHeader(request);
+    const effectiveEventId = query.event_id ?? tokenUser?.event_id;
+    if (effectiveEventId) {
+      const features = await getEventEffectiveFeatures(effectiveEventId);
+      if (!features.mobile_feed) return forbidden('Social feed is disabled for this event');
+    }
     const { posts, total } = await listPosts(query);
 
     return ok({
@@ -93,6 +100,8 @@ export async function POST(request: NextRequest) {
     if (eventId) {
       const event = await prisma.events.findUnique({ where: { id: eventId }, select: { id: true } });
       if (!event) return notFound('Event not found');
+      const features = await getEventEffectiveFeatures(eventId);
+      if (!features.mobile_feed) return forbidden('Social feed is disabled for this event');
       await ensureEventGuest({ event_id: eventId, user_id: parsed.data.user_id });
     }
 

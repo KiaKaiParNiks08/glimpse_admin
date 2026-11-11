@@ -2,6 +2,7 @@ import { parseQuery } from '@/lib/validations';
 import { listEventHighlightsQuerySchema } from '@/lib/validations/events';
 import { ok, serverError } from '@/lib/api-response';
 import { getEventHighlightsByEventId } from '@/server/event-highlights';
+import { getEventEffectiveFeatures } from '@/server/access';
 
 /**
  * GET /api/events/highlights
@@ -13,6 +14,11 @@ export async function GET(request: Request) {
     const { searchParams } = new URL(request.url);
     const [query, err] = parseQuery(searchParams, listEventHighlightsQuerySchema);
     if (err) return err;
+
+    const features = await getEventEffectiveFeatures(query.event_id);
+    if (!features.event_highlights) {
+      return ok({ data: [] });
+    }
 
     const highlights = await getEventHighlightsByEventId(query.event_id);
     return ok({ data: highlights });

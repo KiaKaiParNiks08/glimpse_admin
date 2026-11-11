@@ -1,6 +1,7 @@
 import type { Prisma } from '@prisma/client';
 import prisma from '@/server/prisma';
 import type { CreateVenueInput, ListVenuesQuery, UpdateVenueInput } from '@/lib/validations/venues';
+import { buildTenantSelectWhere } from '@/server/access';
 
 const venueListSelect = {
   id: true,
@@ -9,6 +10,7 @@ const venueListSelect = {
   city: true,
   state_name: true,
   country: true,
+  tenant_owner_id: true,
   created_at: true,
 } as const;
 
@@ -19,6 +21,7 @@ export type VenueListItem = {
   city: string | null;
   state_name: string | null;
   country: string | null;
+  tenant_owner_id: string | null;
   created_at: Date | null;
 };
 
@@ -26,11 +29,12 @@ export type VenueListItem = {
  * List venues with optional search and pagination.
  */
 export async function listVenues(
-  query: ListVenuesQuery
+  query: ListVenuesQuery,
+  whereOverride?: Prisma.venuesWhereInput
 ): Promise<{ venues: VenueListItem[]; total: number }> {
   const { page, limit, search } = query;
   const skip = (page - 1) * limit;
-  const where: Prisma.venuesWhereInput = search
+  const searchWhere: Prisma.venuesWhereInput = search
     ? {
         OR: [
           { name: { contains: search, mode: 'insensitive' } },
@@ -40,6 +44,12 @@ export async function listVenues(
         ],
       }
     : {};
+
+  const clauses: Prisma.venuesWhereInput[] = [];
+  if (Object.keys(searchWhere).length > 0) clauses.push(searchWhere);
+  if (whereOverride && Object.keys(whereOverride).length > 0) clauses.push(whereOverride);
+  const where: Prisma.venuesWhereInput =
+    clauses.length === 0 ? {} : clauses.length === 1 ? clauses[0] : { AND: clauses };
 
   const [venues, total] = await Promise.all([
     prisma.venues.findMany({
@@ -64,8 +74,11 @@ export type VenueWithSubvenuesSelectItem = {
 /**
  * All venues for event session dropdowns (name order), including sub-venues per parent.
  */
-export async function listVenuesWithSubvenuesForSelect(): Promise<VenueWithSubvenuesSelectItem[]> {
+export async function listVenuesWithSubvenuesForSelect(
+  tenantOwnerId?: string | null
+): Promise<VenueWithSubvenuesSelectItem[]> {
   const rows = await prisma.venues.findMany({
+    where: buildTenantSelectWhere(tenantOwnerId),
     orderBy: { name: 'asc' },
     select: {
       id: true,
@@ -86,7 +99,7 @@ export async function listVenuesWithSubvenuesForSelect(): Promise<VenueWithSubve
 /**
  * Create a venue with nested contacts, facilities, and photos.
  */
-export async function createVenue(data: CreateVenueInput) {
+export async function createVenue(data: CreateVenueInput, tenantOwnerId?: string | null) {
   const { venue_contacts, venue_facilities, venue_photos, venue_subvenues, ...venueData } = data;
   const venue = await prisma.venues.create({
     data: {
@@ -100,6 +113,7 @@ export async function createVenue(data: CreateVenueInput) {
       state_name: venueData.state_name ?? null,
       country: venueData.country ?? null,
       postal_code: venueData.postal_code ?? null,
+      tenant_owner_id: tenantOwnerId ?? null,
       venue_contacts: venue_contacts?.length
         ? {
             create: venue_contacts.map((c) => ({
@@ -150,6 +164,7 @@ export async function createVenue(data: CreateVenueInput) {
       state_name: true,
       country: true,
       postal_code: true,
+      tenant_owner_id: true,
       venue_contacts: { select: { id: true, name: true, image_url: true, phone_number: true, email: true, role: true, is_primary: true } },
       venue_facilities: { select: { id: true, name: true, image_url: true } },
       venue_photos: { orderBy: { sort_order: 'asc' }, select: { id: true, image_url: true, alt_text: true, sort_order: true } },
@@ -256,6 +271,7 @@ export async function updateVenue(venue_id: string, data: UpdateVenueInput) {
       state_name: true,
       country: true,
       postal_code: true,
+      tenant_owner_id: true,
       venue_contacts: { select: { id: true, name: true, image_url: true, phone_number: true, email: true, role: true, is_primary: true } },
       venue_facilities: { select: { id: true, name: true, image_url: true } },
       venue_photos: { orderBy: { sort_order: 'asc' }, select: { id: true, image_url: true, alt_text: true, sort_order: true } },
@@ -346,6 +362,7 @@ export async function getVenueDetailsById(venue_id: string) {
       state_name: true,
       country: true,
       postal_code: true,
+      tenant_owner_id: true,
       venue_contacts: {
         select: {
           id: true,

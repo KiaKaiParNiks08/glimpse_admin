@@ -5,20 +5,33 @@ import { useRouter, usePathname } from 'next/navigation';
 import Link from 'next/link';
 import { useRouteProgress } from '@/components/navigation/NavigationProvider';
 import { ContentSkeleton } from '@/components/navigation/ContentSkeleton';
-import { canAccessModule, moduleFromPathname, MODULE_HREFS, MODULE_LABELS, type AdminModule } from '@/lib/rbac';
+import {
+  canAccessModule,
+  formatRoleDisplayName,
+  moduleFromPathname,
+  MODULE_HREFS,
+  MODULE_LABELS,
+  type AdminModule,
+} from '@/lib/rbac';
 import { setAdminJwtInSessionStorage } from '@/lib/admin-jwt-client';
 import { signOutToLogin } from '@/lib/admin-sign-out';
 import { getAdminTokenFromSessionAction, getMyProfileAction } from '@/app/actions/profile';
+import type { ClientAdminAccess } from '@/server/access';
+import { AdminAccessProvider } from '@/components/auth/AdminAccessContext';
+import { DashboardUploadProvider } from '@/components/upload/DashboardUploadProvider';
+import { UploadProgressDock } from '@/components/upload/UploadProgressDock';
 import styles from './dashboard.module.css';
 
 function getInitials(fullName: string): string {
-  return fullName
-    .trim()
-    .split(/\s+/)
-    .map((s) => s[0])
-    .slice(0, 2)
-    .join('')
-    .toUpperCase() || '?';
+  return (
+    fullName
+      .trim()
+      .split(/\s+/)
+      .map((s) => s[0])
+      .slice(0, 2)
+      .join('')
+      .toUpperCase() || '?'
+  );
 }
 
 function resolveAvatarSrc(avatarUrl?: string | null): string | null {
@@ -40,7 +53,14 @@ export default function DashboardLayout({
   const pathname = usePathname();
   const { pendingHref, navigate } = useRouteProgress();
   const pendingPath = pendingHref?.split('?')[0] ?? null;
-  const [user, setUser] = useState<{ id: string; full_name: string; email: string; role_name: string; avatar_url?: string | null } | null>(null);
+  const [user, setUser] = useState<{
+    id: string;
+    full_name: string;
+    email: string;
+    role_name: string;
+    avatar_url?: string | null;
+  } | null>(null);
+  const [userAccess, setUserAccess] = useState<ClientAdminAccess | null>(null);
   const [profileOpen, setProfileOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [avatarLoadFailed, setAvatarLoadFailed] = useState(false);
@@ -60,6 +80,8 @@ export default function DashboardLayout({
         return <path d="M4 5h6v6H4V5Zm0 8h6v6H4v-6Zm10-8h6v6h-6V5Zm0 8h6v6h-6v-6Z" />;
       case 'admins':
         return <path d="M16 11a4 4 0 1 0-3.999-4A4 4 0 0 0 16 11ZM8 12a3 3 0 1 0-3-3 3 3 0 0 0 3 3Zm8 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4ZM8 14c-.29 0-.62.02-.97.05C5.62 14.24 2 14.94 2 17v3h4v-2c0-1.45.84-2.63 2.35-3.44A9.27 9.27 0 0 0 8 14Z" />;
+      case 'plans':
+        return <path d="M4 4h16a2 2 0 0 1 2 2v3H2V6a2 2 0 0 1 2-2Zm-2 7h20v7a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2v-7Zm4 4v2h5v-2H6Z" />;
       case 'app-config':
         return <path d="m19.14 12.94.04-.94-.04-.94 2.03-1.58a.5.5 0 0 0 .12-.64l-1.92-3.32a.5.5 0 0 0-.6-.22l-2.39.96a7.6 7.6 0 0 0-1.63-.94l-.36-2.54a.5.5 0 0 0-.49-.42h-3.84a.5.5 0 0 0-.49.42l-.36 2.54c-.57.23-1.11.54-1.63.94l-2.39-.96a.5.5 0 0 0-.6.22L2.71 8.84a.5.5 0 0 0 .12.64l2.03 1.58-.04.94.04.94-2.03 1.58a.5.5 0 0 0-.12.64l1.92 3.32a.5.5 0 0 0 .6.22l2.39-.96c.51.4 1.06.71 1.63.94l.36 2.54a.5.5 0 0 0 .49.42h3.84a.5.5 0 0 0 .49-.42l.36-2.54c.57-.23 1.11-.54 1.63-.94l2.39.96a.5.5 0 0 0 .6-.22l1.92-3.32a.5.5 0 0 0-.12-.64l-2.03-1.58ZM12 15.5A3.5 3.5 0 1 1 12 8a3.5 3.5 0 0 1 0 7.5Z" />;
       case 'app-themes':
@@ -92,6 +114,7 @@ export default function DashboardLayout({
           role_name: res.data.role_name,
           avatar_url: res.data.avatar_url,
         });
+        setUserAccess(res.data.access ?? null);
       })
       .catch(goToLogin);
   }, [router]);
@@ -104,10 +127,13 @@ export default function DashboardLayout({
     if (!user) return;
     const currentModule = moduleFromPathname(pathname);
     if (!currentModule) return;
-    if (!canAccessModule(user.role_name, currentModule)) {
+    const allowed = userAccess
+      ? userAccess.modules.includes(currentModule)
+      : canAccessModule(user.role_name, currentModule);
+    if (!allowed) {
       router.replace(MODULE_HREFS.dashboard);
     }
-  }, [pathname, router, user]);
+  }, [pathname, router, user, userAccess]);
 
   useEffect(() => {
     function handleClickOutside(e: MouseEvent) {
@@ -155,133 +181,146 @@ export default function DashboardLayout({
   }
 
   const navItems = (Object.keys(MODULE_HREFS) as Array<keyof typeof MODULE_HREFS>)
-    .filter((m) => canAccessModule(user.role_name, m))
+    .filter((m) =>
+      userAccess ? userAccess.modules.includes(m) : canAccessModule(user.role_name, m)
+    )
     .map((m) => ({ href: MODULE_HREFS[m], label: MODULE_LABELS[m], module: m }));
   const avatarSrc = resolveAvatarSrc(user.avatar_url);
 
   return (
-    <div className={styles.wrapper}>
-      <aside className={`${styles.sidebar} ${sidebarCollapsed ? styles.sidebarCollapsed : ''}`}>
-        <div className={styles.sidebarBrand}>
-          {!sidebarCollapsed && <span>Glimpsapp Admin</span>}
-          <button
-            type="button"
-            className={styles.collapseBtn}
-            onClick={() => setSidebarCollapsed((v) => !v)}
-            aria-label={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-            title={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-          >
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d={sidebarCollapsed ? 'M9 18l6-6-6-6' : 'M15 18l-6-6 6-6'} />
-            </svg>
-          </button>
-        </div>
-        <nav className={styles.sidebarNav}>
-          {navItems.map((item) => {
-            const pending = pendingPath === item.href;
-            return (
-            <Link
-              key={item.href}
-              href={item.href}
-              className={`${styles.navLink} ${pathname === item.href || pending ? styles.navLinkActive : ''}`}
-              title={sidebarCollapsed ? item.label : undefined}
-              aria-busy={pending || undefined}
-              aria-current={pathname === item.href ? 'page' : undefined}
-            >
-              <svg className={styles.navIcon} viewBox="0 0 24 24" fill="currentColor" aria-hidden>
-                {renderNavIcon(item.module)}
-              </svg>
-              {!sidebarCollapsed && <span>{item.label}</span>}
-            </Link>
-            );
-          })}
-        </nav>
-      </aside>
-
-      <div className={styles.mainArea}>
-        <header className={styles.header}>
-          <div className={styles.profileWrap} ref={dropdownRef}>
-            <button
-              type="button"
-              className={styles.profileTrigger}
-              onClick={() => setProfileOpen((o) => !o)}
-              aria-expanded={profileOpen}
-              aria-haspopup="true"
-            >
-              {avatarSrc && !avatarLoadFailed ? (
-                // eslint-disable-next-line @next/next/no-img-element -- dynamic profile image URL from backend
-                <img
-                  src={avatarSrc}
-                  alt={user.full_name}
-                  className={styles.avatarImg}
-                  onError={() => setAvatarLoadFailed(true)}
-                />
-              ) : (
-                <span className={styles.avatar}>{getInitials(user.full_name)}</span>
-              )}
-              <span className={styles.profileName}>{user.full_name}</span>
-              <svg
-                className={styles.chevron}
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-                strokeWidth={2}
+    <AdminAccessProvider access={userAccess}>
+      <DashboardUploadProvider>
+        <div className={styles.wrapper}>
+          <aside className={`${styles.sidebar} ${sidebarCollapsed ? styles.sidebarCollapsed : ''}`}>
+            <div className={styles.sidebarBrand}>
+              {!sidebarCollapsed && <span>Glimpsapp Admin</span>}
+              <button
+                type="button"
+                className={styles.collapseBtn}
+                onClick={() => setSidebarCollapsed((v) => !v)}
+                aria-label={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+                title={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
               >
-                <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
-              </svg>
-            </button>
-            {profileOpen && (
-              <div className={styles.dropdown}>
-                <div className={styles.dropdownEmail}>{user.email}</div>
-                <button
-                  type="button"
-                  className={styles.profileBtn}
-                  onClick={() => {
-                    setProfileOpen(false);
-                    navigate('/dashboard/profile');
-                  }}
-                  aria-busy={pendingHref === '/dashboard/profile' || undefined}
-                >
-                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <circle cx="12" cy="8" r="4" />
-                    <path d="M4 20c0-4 3.6-6 8-6s8 2 8 6" />
-                  </svg>
-                  Profile
-                </button>
-                <button
-                  type="button"
-                  className={styles.profileBtn}
-                  onClick={() => {
-                    setProfileOpen(false);
-                    navigate('/dashboard/change-password');
-                  }}
-                  aria-busy={pendingHref === '/dashboard/change-password' || undefined}
-                >
-                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <rect x="3" y="11" width="18" height="10" rx="2" ry="2" />
-                    <path d="M7 11V7a5 5 0 0 1 10 0v4" />
-                  </svg>
-                  Change password
-                </button>
-                <button
-                  type="button"
-                  className={styles.logoutBtn}
-                  onClick={handleSignOut}
-                >
-                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
-                    <polyline points="16 17 21 12 16 7" />
-                    <line x1="21" y1="12" x2="9" y2="12" />
-                  </svg>
-                  Log out
-                </button>
-              </div>
-            )}
-          </div>
-        </header>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d={sidebarCollapsed ? 'M9 18l6-6-6-6' : 'M15 18l-6-6 6-6'} />
+                </svg>
+              </button>
+            </div>
+            <nav className={styles.sidebarNav}>
+              {navItems.map((item) => {
+                const pending = pendingPath === item.href;
+                return (
+                  <Link
+                    key={item.href}
+                    href={item.href}
+                    className={`${styles.navLink} ${pathname === item.href || pending ? styles.navLinkActive : ''}`}
+                    title={sidebarCollapsed ? item.label : undefined}
+                    aria-busy={pending || undefined}
+                    aria-current={pathname === item.href ? 'page' : undefined}
+                  >
+                    <svg className={styles.navIcon} viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+                      {renderNavIcon(item.module)}
+                    </svg>
+                    {!sidebarCollapsed && <span>{item.label}</span>}
+                  </Link>
+                );
+              })}
+            </nav>
+          </aside>
 
-        <div className={styles.content}>{children}</div>
-      </div>
-    </div>
+          <div className={styles.mainArea}>
+            <header className={styles.header}>
+              <div className={styles.profileWrap} ref={dropdownRef}>
+                <button
+                  type="button"
+                  className={styles.profileTrigger}
+                  onClick={() => setProfileOpen((o) => !o)}
+                  aria-expanded={profileOpen}
+                  aria-haspopup="true"
+                >
+                  {avatarSrc && !avatarLoadFailed ? (
+                    // eslint-disable-next-line @next/next/no-img-element -- dynamic profile image URL from backend
+                    <img
+                      src={avatarSrc}
+                      alt={user.full_name}
+                      className={styles.avatarImg}
+                      onError={() => setAvatarLoadFailed(true)}
+                    />
+                  ) : (
+                    <span className={styles.avatar}>{getInitials(user.full_name)}</span>
+                  )}
+                  <span className={styles.profileName}>{user.full_name}</span>
+                  <svg
+                    className={styles.chevron}
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                    strokeWidth={2}
+                  >
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+                  </svg>
+                </button>
+                {profileOpen && (
+                  <div className={styles.dropdown}>
+                    <div className={styles.dropdownEmail}>
+                      <div>{user.email}</div>
+                      <div style={{ fontSize: '0.72rem', opacity: 0.78, marginTop: '0.15rem' }}>
+                        {formatRoleDisplayName(user.role_name)}
+                        {userAccess?.purchase_plan_name ? ` · ${userAccess.purchase_plan_name}` : ''}
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      className={styles.profileBtn}
+                      onClick={() => {
+                        setProfileOpen(false);
+                        navigate('/dashboard/profile');
+                      }}
+                      aria-busy={pendingHref === '/dashboard/profile' || undefined}
+                    >
+                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <circle cx="12" cy="8" r="4" />
+                        <path d="M4 20c0-4 3.6-6 8-6s8 2 8 6" />
+                      </svg>
+                      Profile
+                    </button>
+                    <button
+                      type="button"
+                      className={styles.profileBtn}
+                      onClick={() => {
+                        setProfileOpen(false);
+                        navigate('/dashboard/change-password');
+                      }}
+                      aria-busy={pendingHref === '/dashboard/change-password' || undefined}
+                    >
+                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <rect x="3" y="11" width="18" height="10" rx="2" ry="2" />
+                        <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+                      </svg>
+                      Change password
+                    </button>
+                    <button
+                      type="button"
+                      className={styles.logoutBtn}
+                      onClick={handleSignOut}
+                    >
+                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+                        <polyline points="16 17 21 12 16 7" />
+                        <line x1="21" y1="12" x2="9" y2="12" />
+                      </svg>
+                      Log out
+                    </button>
+                  </div>
+                )}
+              </div>
+            </header>
+
+            <div className={styles.content}>{children}</div>
+          </div>
+          <UploadProgressDock />
+        </div>
+      </DashboardUploadProvider>
+    </AdminAccessProvider>
   );
 }

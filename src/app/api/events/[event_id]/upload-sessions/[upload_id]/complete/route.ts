@@ -9,6 +9,7 @@ import { ensureEventGuest } from '@/server/event-guests';
 import { registerFeedPostMedia } from '@/server/people-media/register';
 import { notifyNewPostInEvent } from '@/server/notifications/service';
 import { assembleUploadSession, cleanupUploadSession } from '@/server/upload-sessions';
+import { getEventEffectiveFeatures } from '@/server/access';
 import prisma from '@/server/prisma';
 
 function isUuid(val: string): boolean {
@@ -50,6 +51,7 @@ export async function POST(
     }
 
     const kind = body.kind;
+    const enabledFeatures = await getEventEffectiveFeatures(event_id);
     const projectRoot = process.cwd();
     const effectiveUserId = user ? user.id : body.user_id || admin!.id;
 
@@ -57,6 +59,9 @@ export async function POST(
     // 1. FEED POST COMPLETION
     // =========================================================================
     if (kind === 'feed_post') {
+      if (!enabledFeatures.mobile_feed) {
+        return forbidden('Social feed is disabled for this event');
+      }
       const uploadIds: string[] = Array.isArray(body.upload_ids) ? body.upload_ids.filter(Boolean) : [];
       if (uploadIds.length === 0) {
         return badRequest('upload_ids must contain at least one upload_id');
@@ -200,6 +205,9 @@ export async function POST(
     // 2. SESSION MEDIA COMPLETION
     // =========================================================================
     if (kind === 'session_media') {
+      if (!enabledFeatures.session_media_upload) {
+        return forbidden('Session media upload is disabled for this event');
+      }
       const sessionId = body.session_id;
       if (!sessionId || !isUuid(sessionId)) {
         return badRequest('Valid session_id UUID is required');

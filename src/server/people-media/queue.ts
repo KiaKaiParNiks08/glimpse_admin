@@ -162,6 +162,14 @@ export function workerHasMore(result: ProcessBatchResult & { has_more: boolean }
 }
 
 export function workerBaseUrl(): string | null {
+  if (process.env.VERCEL_ENV === 'production') {
+    const prod =
+      process.env.APP_PUBLIC_URL?.trim() ||
+      (process.env.VERCEL_PROJECT_PRODUCTION_URL?.trim()
+        ? `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL.trim().replace(/^https?:\/\//, '')}`
+        : '');
+    if (prod) return prod.replace(/\/$/, '');
+  }
   const vercel = process.env.VERCEL_URL?.trim();
   if (vercel) return `https://${vercel.replace(/^https?:\/\//, '')}`;
   const base = process.env.APP_BASE_URL?.trim() || process.env.APP_PUBLIC_URL?.trim();
@@ -169,10 +177,12 @@ export function workerBaseUrl(): string | null {
 }
 
 export function workerAuthHeaders(): Record<string, string> {
+  const bypass = process.env.VERCEL_AUTOMATION_BYPASS_SECRET?.trim();
+  const extra: Record<string, string> = bypass ? { 'x-vercel-protection-bypass': bypass } : {};
   const secret = process.env.FACE_WORKER_SECRET?.trim();
-  if (secret) return { 'x-face-worker-secret': secret };
+  if (secret) return { ...extra, 'x-face-worker-secret': secret };
   const cron = process.env.CRON_SECRET?.trim();
-  if (cron) return { authorization: `Bearer ${cron}` };
+  if (cron) return { ...extra, authorization: `Bearer ${cron}` };
   return {};
 }
 

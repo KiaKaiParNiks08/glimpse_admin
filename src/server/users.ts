@@ -1,6 +1,9 @@
 import { createHash } from 'crypto';
 import type { Prisma } from '@prisma/client';
+
+
 import prisma from '@/server/prisma';
+import { ensureRbacBootstrapped } from '@/server/seed-rbac';
 import type { CreateUserInput, ListUsersQuery, UpdateUserInput } from '@/lib/validations/users';
 
 export const userSelect = {
@@ -109,7 +112,7 @@ export async function getUserById(user_id: string): Promise<UserSelect | null> {
 }
 
 /** Allowed role names for admin login (SuperAdmin and Event Admin). */
-export const ADMIN_ROLE_NAMES = ['super_admin', 'event_admin'] as const;
+export const ADMIN_ROLE_NAMES = ['super_admin', 'support_staff', 'client_admin', 'event_admin', 'photographer', 'coordinator'] as const;
 
 export type AdminRoleName = (typeof ADMIN_ROLE_NAMES)[number];
 
@@ -129,6 +132,7 @@ export async function findUserByEmailAndVerifyPassword(
   password: string
 ): Promise<AdminLoginResult | null> {
   const normalizedEmail = email.trim().toLowerCase();
+  await ensureRbacBootstrapped();
   const user = await prisma.users.findUnique({
     where: { email: normalizedEmail },
     select: {

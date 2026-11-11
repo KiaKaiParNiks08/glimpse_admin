@@ -7,6 +7,7 @@ import {
 import { forbidden, notFound, badRequest, serverError, ok } from '@/lib/api-response';
 import { getUserFromAuthorizationHeader } from '@/lib/jwt';
 import { deletePostOwnedByUser, getPostLikedUsers, updatePostCaption } from '@/server/posts';
+import { getPostEventFeedAllowed } from '@/server/access';
 
 async function readDeleteInput(request: Request) {
   const url = new URL(request.url);
@@ -53,6 +54,10 @@ export async function DELETE(
     if (!parsed.success) {
       return badRequest('Validation failed', parsed.error.flatten().fieldErrors);
     }
+
+    const feedAccess = await getPostEventFeedAllowed(path.post_id, parsed.data.event_id);
+    if (!feedAccess.exists) return notFound('Post not found');
+    if (!feedAccess.allowed) return forbidden('Social feed is disabled for this event');
 
     const result = await deletePostOwnedByUser(path.post_id, parsed.data.user_id, parsed.data.event_id);
     if (result === 'not_found') return notFound('Post not found');
@@ -110,6 +115,10 @@ export async function PATCH(
       return badRequest('Validation failed', { user_id: ['Required'] });
     }
 
+    const feedAccess = await getPostEventFeedAllowed(path.post_id, parsed.data.event_id);
+    if (!feedAccess.exists) return notFound('Post not found');
+    if (!feedAccess.allowed) return forbidden('Social feed is disabled for this event');
+
     const result = await updatePostCaption({
       postId: path.post_id,
       userId: parsed.data.user_id,
@@ -137,6 +146,10 @@ export async function GET(
     const params = await context.params;
     const [path, pathErr] = parseParams(params, deletePostPathSchema);
     if (pathErr) return pathErr;
+
+    const feedAccess = await getPostEventFeedAllowed(path.post_id);
+    if (!feedAccess.exists) return notFound('Post not found');
+    if (!feedAccess.allowed) return forbidden('Social feed is disabled for this event');
 
     const result = await getPostLikedUsers(path.post_id);
     if (result === 'not_found') return notFound('Post not found');

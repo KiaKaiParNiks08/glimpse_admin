@@ -1,9 +1,11 @@
+import type { Prisma } from '@prisma/client';
 import prisma from '@/server/prisma';
 import type {
   CreateAppThemeInput,
   ListAppThemesQuery,
   UpdateAppThemeInput,
 } from '@/lib/validations/app-themes';
+import { buildTenantSelectWhere } from '@/server/access';
 
 export type AppThemeListItem = {
   id: string;
@@ -12,6 +14,7 @@ export type AppThemeListItem = {
   secondary_color: string;
   button_primary_color: string;
   button_secondary_color: string;
+  tenant_owner_id: string | null;
   created_at?: Date | null;
   updated_at?: Date | null;
 };
@@ -23,18 +26,23 @@ const appThemeSelect = {
   secondary_color: true,
   button_primary_color: true,
   button_secondary_color: true,
+  tenant_owner_id: true,
   created_at: true,
   updated_at: true,
 } as const;
 
-export async function listAppThemesForSelect(): Promise<AppThemeListItem[]> {
+export async function listAppThemesForSelect(tenantOwnerId?: string | null): Promise<AppThemeListItem[]> {
   return prisma.app_themes.findMany({
+    where: buildTenantSelectWhere(tenantOwnerId),
     orderBy: { name: 'asc' },
     select: appThemeSelect,
   });
 }
 
-export async function createAppTheme(data: CreateAppThemeInput): Promise<AppThemeListItem> {
+export async function createAppTheme(
+  data: CreateAppThemeInput,
+  tenantOwnerId?: string | null
+): Promise<AppThemeListItem> {
   const row = await prisma.app_themes.create({
     data: {
       name: data.name.trim(),
@@ -42,23 +50,33 @@ export async function createAppTheme(data: CreateAppThemeInput): Promise<AppThem
       secondary_color: data.secondary_color,
       button_primary_color: data.button_primary_color,
       button_secondary_color: data.button_secondary_color,
+      tenant_owner_id: tenantOwnerId ?? null,
     },
     select: appThemeSelect,
   });
   return row;
 }
 
-export async function getAppThemes(query: ListAppThemesQuery) {
+export async function getAppThemes(
+  query: ListAppThemesQuery,
+  whereOverride?: Prisma.app_themesWhereInput
+) {
   const { page, limit, search } = query;
   const skip = (page - 1) * limit;
-  const where = search?.trim()
+  const searchWhere: Prisma.app_themesWhereInput = search?.trim()
     ? {
         name: {
           contains: search.trim(),
           mode: 'insensitive' as const,
         },
       }
-    : undefined;
+    : {};
+
+  const clauses: Prisma.app_themesWhereInput[] = [];
+  if (Object.keys(searchWhere).length > 0) clauses.push(searchWhere);
+  if (whereOverride && Object.keys(whereOverride).length > 0) clauses.push(whereOverride);
+  const where: Prisma.app_themesWhereInput | undefined =
+    clauses.length === 0 ? undefined : clauses.length === 1 ? clauses[0] : { AND: clauses };
 
   const [rows, total] = await Promise.all([
     prisma.app_themes.findMany({

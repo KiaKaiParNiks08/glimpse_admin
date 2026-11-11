@@ -7,12 +7,14 @@ import type {
   CreateExploreItemInput,
   UpdateExploreItemInput,
 } from '@/lib/validations/explore';
+import { buildTenantSelectWhere } from '@/server/access';
 
 const categoryListSelect = {
   id: true,
   title: true,
   description: true,
   background_url: true,
+  tenant_owner_id: true,
   created_at: true,
   updated_at: true,
   _count: { select: { explore_items: true } },
@@ -23,6 +25,7 @@ export type ExploreCategoryListItem = {
   title: string;
   description: string | null;
   background_url: string | null;
+  tenant_owner_id: string | null;
   created_at: Date | null;
   updated_at: Date | null;
   _count: { explore_items: number };
@@ -62,11 +65,12 @@ export type ExploreItemRow = {
  * List explore categories with optional search and pagination.
  */
 export async function listExploreCategories(
-  query: ListExploreCategoriesQuery
+  query: ListExploreCategoriesQuery,
+  whereOverride?: Prisma.explore_categoriesWhereInput
 ): Promise<{ categories: ExploreCategoryListItem[]; total: number }> {
   const { page, limit, search } = query;
   const skip = (page - 1) * limit;
-  const where: Prisma.explore_categoriesWhereInput = search
+  const searchWhere: Prisma.explore_categoriesWhereInput = search
     ? {
         OR: [
           { title: { contains: search, mode: 'insensitive' } },
@@ -74,6 +78,12 @@ export async function listExploreCategories(
         ],
       }
     : {};
+
+  const clauses: Prisma.explore_categoriesWhereInput[] = [];
+  if (Object.keys(searchWhere).length > 0) clauses.push(searchWhere);
+  if (whereOverride && Object.keys(whereOverride).length > 0) clauses.push(whereOverride);
+  const where: Prisma.explore_categoriesWhereInput =
+    clauses.length === 0 ? {} : clauses.length === 1 ? clauses[0] : { AND: clauses };
 
   const [categories, total] = await Promise.all([
     prisma.explore_categories.findMany({
@@ -100,6 +110,7 @@ export async function getExploreCategoryById(category_id: string) {
       title: true,
       description: true,
       background_url: true,
+      tenant_owner_id: true,
       created_at: true,
       updated_at: true,
       explore_items: {
@@ -114,12 +125,16 @@ export async function getExploreCategoryById(category_id: string) {
 /**
  * Create an explore category.
  */
-export async function createExploreCategory(data: CreateExploreCategoryInput) {
+export async function createExploreCategory(
+  data: CreateExploreCategoryInput,
+  tenantOwnerId?: string | null
+) {
   const category = await prisma.explore_categories.create({
     data: {
       title: data.title,
       description: data.description ?? null,
       background_url: data.background_url ?? null,
+      tenant_owner_id: tenantOwnerId ?? null,
     },
     select: categoryListSelect,
   });
@@ -230,8 +245,9 @@ export async function deleteExploreItem(item_id: string): Promise<boolean> {
 /**
  * List all explore categories with their items (for event mapping step).
  */
-export async function listAllExploreCategoriesWithItems() {
+export async function listAllExploreCategoriesWithItems(tenantOwnerId?: string | null) {
   return prisma.explore_categories.findMany({
+    where: buildTenantSelectWhere(tenantOwnerId),
     orderBy: { title: 'asc' },
     select: {
       id: true,

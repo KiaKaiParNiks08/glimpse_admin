@@ -1,11 +1,9 @@
 import { parseBody } from '@/lib/validations';
 import { adminLoginRequestSchema } from '@/lib/validations/auth';
 import { ok, forbidden, serverError } from '@/lib/api-response';
-import {
-  findUserByEmailAndVerifyPassword,
-  ADMIN_ROLE_NAMES,
-} from '@/server/users';
-// Legacy HMAC session token helper is no longer used (we now store JWT in cookie).
+import { isAdminRole } from '@/lib/rbac';
+import { findUserByEmailAndVerifyPassword } from '@/server/users';
+import { getAdminAccessContext, toClientAdminAccess } from '@/server/access';
 import { createAdminJwtToken, getAdminJwtTtlSeconds } from '@/lib/jwt';
 import { isRequestHttps } from '@/lib/request-https';
 
@@ -23,41 +21,35 @@ export async function POST(request: Request) {
       return forbidden('Invalid email or password');
     }
 
-    const allowedRoles = new Set(ADMIN_ROLE_NAMES);
-    if (!allowedRoles.has(user.role_name as (typeof ADMIN_ROLE_NAMES)[number])) {
-      return forbidden(
-        'Access denied. Only SuperAdmin and Event Admin can sign in here.'
-      );
+    if (!isAdminRole(user.role_name)) {
+      return forbidden('Access denied. Guest accounts cannot sign in to the admin portal.');
+    }
+
+    const accessCtx = await getAdminAccessContext(user.id);
+    if (!accessCtx) {
+      return forbidden('Account is inactive or not permitted.');
     }
 
     const jwtToken = createAdminJwtToken({
       id: user.id,
       full_name: user.full_name,
       email: user.email,
-      role_name: user.role_name as 'super_admin' | 'event_admin',
+      role_name: user.role_name,
     });
 
     const res = ok(
       {
-        user: {
-          id: user.id,
-          full_name: user.full_name,
-          email: user.email,
-          role_name: user.role_name,
-        },
+        user: toClientAdminAccess(accessCtx),
         token: jwtToken,
       },
       'Success'
     );
 
-    // Store the JWT in the admin cookie so server-side middleware can validate it too.
-    // (We still return the JWT in the response body for browser-side Bearer usage.)
     res.cookies.set(COOKIE_NAME, jwtToken, {
       httpOnly: true,
       sameSite: 'lax',
       secure: isRequestHttps(request),
       path: '/',
-      // Expire together with the JWT inside it.
       maxAge: getAdminJwtTtlSeconds(),
     });
 

@@ -6,6 +6,7 @@ import {
 } from '@/lib/validations';
 import { ok, forbidden, notFound, serverError } from '@/lib/api-response';
 import { isEventGuest } from '@/server/event-guests';
+import { getEventEffectiveFeatures } from '@/server/access';
 import { favoriteTargetExists, listFavorites, setFavorite } from '@/server/favorites';
 
 /**
@@ -20,6 +21,10 @@ export async function GET(request: Request) {
 
     if (!(await isEventGuest(query.event_id, query.user_id))) {
       return forbidden('User is not a guest of this event');
+    }
+    const features = await getEventEffectiveFeatures(query.event_id);
+    if (!features.mobile_favorites) {
+      return forbidden('Favorites feature is disabled for this event');
     }
 
     const { items, total } = await listFavorites(query);
@@ -44,6 +49,10 @@ export async function POST(request: Request) {
 
     if (!(await isEventGuest(body.event_id, body.user_id))) {
       return forbidden('User is not a guest of this event');
+    }
+    const features = await getEventEffectiveFeatures(body.event_id);
+    if (!features.mobile_favorites) {
+      return forbidden('Favorites feature is disabled for this event');
     }
 
     // Removing never needs the target to exist, so stale favorites can always be cleared.

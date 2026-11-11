@@ -1,6 +1,10 @@
 import type { Prisma } from '@prisma/client';
 import prisma from '@/server/prisma';
-import type { AdminRoleName } from '@/lib/rbac';
+import {
+  buildAccessibleEventsWhere,
+  buildMasterDataWhere,
+  type AdminAccessContext,
+} from '@/server/access';
 
 export type DashboardStats = {
   eventsByStatus: { status: string; count: number }[];
@@ -23,16 +27,6 @@ export type DashboardDateRange = {
   start: Date;
   end: Date;
 };
-
-function eventWhereForViewer(
-  role_name: AdminRoleName,
-  viewer_user_id: string
-): Prisma.eventsWhereInput {
-  if (role_name === 'event_admin') {
-    return { event_admins: { some: { user_id: viewer_user_id } } };
-  }
-  return {};
-}
 
 function monthStartUTC(date: Date): Date {
   return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), 1, 0, 0, 0, 0));
@@ -78,18 +72,39 @@ function monthBinsForRange(dateRange: DashboardDateRange): {
   return bins;
 }
 
+function andWhere<T extends Record<string, unknown>>(
+  base: T,
+  extra: T
+): T {
+  const baseKeys = Object.keys(base);
+  const extraKeys = Object.keys(extra);
+  if (baseKeys.length === 0) return extra;
+  if (extraKeys.length === 0) return base;
+  return { AND: [base, extra] } as unknown as T;
+}
+
 /**
- * Aggregates for the admin dashboard. Event admins only see stats for events they are assigned to.
+ * Aggregates for the admin dashboard scoped to the authenticated admin's tier, tenant, and assignments.
  */
-export async function getDashboardStats(viewer: {
-  id: string;
-  role_name: AdminRoleName;
-}, dateRange: DashboardDateRange): Promise<DashboardStats> {
-  const eventWhere = eventWhereForViewer(viewer.role_name, viewer.id);
-  const eventWhereWithDate: Prisma.eventsWhereInput = {
-    ...eventWhere,
+export async function getDashboardStats(
+  viewer: AdminAccessContext,
+  dateRange: DashboardDateRange
+): Promise<DashboardStats> {
+  const eventWhere = buildAccessibleEventsWhere(viewer);
+  const createdRange: Prisma.eventsWhereInput = {
     created_at: { gte: dateRange.start, lte: dateRange.end },
   };
+  const eventWhereWithDate = andWhere(eventWhere, createdRange);
+
+  const masterWhere = buildMasterDataWhere(viewer);
+  const venuesWhere = andWhere(
+    masterWhere as Prisma.venuesWhereInput,
+    { created_at: { gte: dateRange.start, lte: dateRange.end } }
+  );
+  const categoriesWhere = andWhere(
+    masterWhere as Prisma.explore_categoriesWhereInput,
+    { created_at: { gte: dateRange.start, lte: dateRange.end } }
+  );
 
   const monthBins = monthBinsForRange(dateRange);
 
@@ -111,28 +126,20 @@ export async function getDashboardStats(viewer: {
     Promise.all(
       monthBins.map(async (bin) => {
         const count = await prisma.events.count({
-          where: {
-            ...eventWhere,
+          where: andWhere(eventWhere, {
             created_at: { gte: bin.effectiveStart, lte: bin.effectiveEnd },
-          },
+          }),
         });
         return { month: bin.month, count };
-      }),
+      })
     ),
     prisma.events.count({ where: eventWhereWithDate }),
-    prisma.venues.count({
-      where: {
-        created_at: { gte: dateRange.start, lte: dateRange.end },
-      },
-    }),
-    prisma.explore_categories.count({
-      where: {
-        created_at: { gte: dateRange.start, lte: dateRange.end },
-      },
-    }),
+    prisma.venues.count({ where: venuesWhere }),
+    prisma.explore_categories.count({ where: categoriesWhere }),
     prisma.explore_items.count({
       where: {
         created_at: { gte: dateRange.start, lte: dateRange.end },
+        ...(Object.keys(masterWhere).length > 0 ? { explore_categories: masterWhere } : {}),
       },
     }),
     prisma.events.findMany({
@@ -165,7 +172,7 @@ export async function getDashboardStats(viewer: {
     totalEventAdminAssignments: totalEventAdminAssignmentsInRange,
   };
 
-  if (viewer.role_name === 'super_admin') {
+  if (viewer.tier === 'super_admin') {
     const [superAdmins, eventAdmins] = await Promise.all([
       prisma.users.count({
         where: {
@@ -178,7 +185,7 @@ export async function getDashboardStats(viewer: {
         where: {
           is_active: true,
           created_at: { gte: dateRange.start, lte: dateRange.end },
-          roles: { name: 'event_admin' },
+          roles: { name: { in: ['client_admin', 'event_admin'] } },
         },
       }),
     ]);

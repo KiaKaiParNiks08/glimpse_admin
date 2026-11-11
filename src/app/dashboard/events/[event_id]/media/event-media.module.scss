@@ -345,6 +345,54 @@
   max-width: 100%;
 }
 
+.dropZone {
+  border: 2px dashed #cbd5e1;
+  border-radius: 0.75rem;
+  padding: 1rem 1.1rem;
+  background: #ffffff;
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+  transition: border-color 0.15s ease, background-color 0.15s ease;
+}
+
+.dropZoneActive {
+  border-color: #1b4372;
+  background: #eff6ff;
+}
+
+.excludedBanner {
+  border: 1px solid #fde68a;
+  background: #fffbeb;
+  color: #78350f;
+  border-radius: 0.65rem;
+  padding: 0.6rem 0.8rem;
+  font-size: 0.8125rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.queuePreviewList {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  max-height: 7rem;
+  overflow-y: auto;
+}
+
+.queuePreviewChip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.2rem 0.55rem;
+  border-radius: 999px;
+  border: 1px solid #cbd5e1;
+  background: #f8fafc;
+  color: #0f172a;
+  font-size: 0.75rem;
+}
+
 .mediaFull {
   max-width: 100%;
   max-height: calc(92vh - 7rem);

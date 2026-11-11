@@ -259,6 +259,8 @@ export interface EventFormProps {
   onPostEventPdfChanged?: (next: { url: string; originalName: string | null; uploadedAt: string | null; thumbnailUrl?: string | null }) => void;
   postEventReportSettings?: PostEventReportSettings;
   onPostEventReportSettingsChange?: (next: PostEventReportSettings) => void;
+  canManageThemes?: boolean;
+  canManagePostEventReport?: boolean;
 }
 
 export function EventForm({
@@ -278,6 +280,8 @@ export function EventForm({
   onPostEventPdfChanged,
   postEventReportSettings,
   onPostEventReportSettingsChange,
+  canManageThemes = true,
+  canManagePostEventReport = true,
 }: EventFormProps) {
   const [values, setValues] = useState<EventFormValues>(emptyValues());
   const [error, setError] = useState<string | null>(null);
@@ -626,6 +630,7 @@ export function EventForm({
             <button
               type="button"
               className={styles.themeAddBtn}
+              hidden={!canManageThemes}
               onClick={() => setThemeModalOpen(true)}
             >
               Add new theme…
@@ -651,7 +656,7 @@ export function EventForm({
           />
         </div>
 
-        {mode === 'edit' && event?.id && (
+        {mode === 'edit' && event?.id && canManagePostEventReport && (
           <div className={styles.field} style={{ marginTop: '0.75rem' }}>
             <PostEventPdfUploadField
               eventId={event.id}

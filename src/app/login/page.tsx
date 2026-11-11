@@ -58,7 +58,7 @@ export default function LoginPage() {
       <div className={styles.loginCard}>
         <h1 className={styles.loginTitle}>Glimpsapp Admin</h1>
         <p className={styles.loginSubtitle}>
-          Sign in as <strong>SuperAdmin</strong> or <strong>Event Admin</strong>
+          Sign in with your <strong>Admin</strong>, <strong>Planner</strong>, or <strong>Team</strong> account
         </p>
 
         <form onSubmit={handleSubmit} className={styles.loginForm}>

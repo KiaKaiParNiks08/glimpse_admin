@@ -1,22 +1,35 @@
 import { forbidden, notFound, ok, serverError } from '@/lib/api-response';
-import { getAdminFromAuthorizationHeader } from '@/lib/jwt';
+import {
+  canContextAccessEvent,
+  getAdminContextFromRequest,
+  getEventEffectiveFeatures,
+} from '@/server/access';
 import { eventPeopleMediaQuerySchema, peopleMediaRetrySchema } from '@/lib/validations/people-media';
 import { parseBody, parseParams, parseQuery } from '@/lib/validations/parse';
 import { uuidSchema } from '@/lib/validations/common';
 import { z } from 'zod';
 import prisma from '@/server/prisma';
 import { backfillEventRecognition } from '@/server/people-media/event-backfill';
-import { adminCanManageEvent, listEventPeopleMedia, requeueFaceReference, requeueMediaAsset } from '@/server/people-media/queries';
+import { listEventPeopleMedia, requeueFaceReference, requeueMediaAsset } from '@/server/people-media/queries';
 import { scheduleFaceProcessing } from '@/server/people-media/schedule';
 
 const paramsSchema = z.object({ event_id: uuidSchema });
 
 async function requireAdmin(request: Request, eventId: string) {
-  const admin = getAdminFromAuthorizationHeader(request);
-  if (!admin) return { error: forbidden('Not authenticated'), event: null };
+  const ctx = await getAdminContextFromRequest(request);
+  if (!ctx) return { error: forbidden('Not authenticated'), event: null };
+  if (!ctx.hasPermission('people_media.view')) {
+    return { error: forbidden('Forbidden: AI face recognition is not enabled for your role or plan'), event: null };
+  }
   const event = await prisma.events.findUnique({ where: { id: eventId }, select: { id: true, title: true } });
   if (!event) return { error: notFound('Event not found'), event: null };
-  if (!(await adminCanManageEvent(admin, eventId))) return { error: forbidden('Forbidden'), event: null };
+  if (!(await canContextAccessEvent(ctx, eventId))) return { error: forbidden('Forbidden'), event: null };
+  if (ctx.tier !== 'super_admin') {
+    const features = await getEventEffectiveFeatures(eventId);
+    if (!features.ai_recognition) {
+      return { error: forbidden('AI Face Recognition is not enabled on this event plan'), event: null };
+    }
+  }
   return { error: null, event };
 }
 

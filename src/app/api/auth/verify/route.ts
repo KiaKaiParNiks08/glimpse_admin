@@ -3,6 +3,7 @@ import { ok, badRequest, serverError } from '@/lib/api-response';
 import { prisma, verifyOtpForUser } from '@/server';
 import { createUserJwtToken } from '@/lib/jwt';
 import { toAuthCategoryFields } from '@/server/auth-login';
+import { getEventEffectiveFeatures } from '@/server/access';
 import { upsertUserDevice } from '@/server/user-devices';
 
 type GuestEventRow = {
@@ -71,13 +72,15 @@ export async function POST(request: Request) {
       user_id: body.user_id,
       event_id: guest.event_id,
     });
+    const enabled_features = await getEventEffectiveFeatures(guest.event_id);
 
-    return ok(
+    const res = ok(
       {
         user_id: body.user_id,
         event_id: guest.event_id,
         token,
         expires_at,
+        enabled_features,
         ...toAuthCategoryFields(
           guest.event_category_id && guest.event_category && guest.event_type
             ? { id: guest.event_category_id, name: guest.event_category, slug: guest.event_type }
@@ -86,6 +89,8 @@ export async function POST(request: Request) {
       },
       'OTP verified successfully'
     );
+    res.headers.set('Cache-Control', 'no-store');
+    return res;
   } catch (e) {
     console.error(e);
     return serverError('OTP verification failed');

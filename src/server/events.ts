@@ -7,7 +7,7 @@ import type {
   UpdateEventInput,
 } from '@/lib/validations/events';
 
-const EVENT_ADMIN_ROLE_NAME = 'event_admin' as const;
+
 let weddingFieldsSupported: boolean | null = null;
 
 function isUnknownWeddingFieldError(error: unknown): boolean {
@@ -59,6 +59,7 @@ const eventListSelect = {
   created_at: true,
   category_id: true,
   main_venue_id: true,
+  tenant_owner_id: true,
   event_categories: {
     select: { id: true, name: true, slug: true },
   },
@@ -81,6 +82,7 @@ export type EventListItem = {
   created_at: Date | null;
   category_id: string;
   main_venue_id: string | null;
+  tenant_owner_id: string | null;
   event_categories: { id: string; name: string; slug: string };
   venues: { id: string; name: string } | null;
 };
@@ -90,7 +92,7 @@ export type EventListItem = {
  */
 export async function listEvents(
   query: ListEventsQuery,
-  options?: { viewer_user_id?: string }
+  options?: { viewer_user_id?: string; whereOverride?: Prisma.eventsWhereInput }
 ): Promise<{ events: EventListItem[]; total: number }> {
   const { page, limit, search, status, category_id } = query;
   const skip = (page - 1) * limit;
@@ -105,7 +107,9 @@ export async function listEvents(
   }
   if (status?.trim()) where.status = status.trim();
   if (category_id) where.category_id = category_id;
-  if (options?.viewer_user_id) {
+  if (options?.whereOverride && Object.keys(options.whereOverride).length > 0) {
+    where.AND = [options.whereOverride];
+  } else if (options?.viewer_user_id) {
     where.event_admins = { some: { user_id: options.viewer_user_id } };
   }
 
@@ -204,6 +208,7 @@ export async function getEventById(eventId: string) {
     start_date: true,
     end_date: true,
     main_venue_id: true,
+    tenant_owner_id: true,
     status: true,
     created_by: true,
     created_at: true,
@@ -276,6 +281,7 @@ export async function getEventByCode(eventCode: string) {
       id: true,
       event_code: true,
       main_venue_id: true,
+    tenant_owner_id: true,
       email_suffix: true,
       event_categories: { select: authCategorySelect },
     },
@@ -291,6 +297,7 @@ const authEventSelect = {
   end_date: true,
   cover_image: true,
   main_venue_id: true,
+  tenant_owner_id: true,
   email_suffix: true,
   event_categories: { select: authCategorySelect },
 } as const;
@@ -321,6 +328,7 @@ export async function listEventsByEmailSuffix(email: string) {
       end_date: true,
       cover_image: true,
       main_venue_id: true,
+    tenant_owner_id: true,
       email_suffix: true,
       event_categories: { select: authCategorySelect },
     },
@@ -462,6 +470,7 @@ export async function createEvent(data: CreateEventInput) {
     start_date: new Date(data.start_date),
     end_date: new Date(data.end_date),
     main_venue_id: data.main_venue_id ?? null,
+    tenant_owner_id: data.tenant_owner_id ?? null,
     status: data.status ?? 'draft',
     created_by: data.created_by,
     ...(organizerName
@@ -1164,11 +1173,15 @@ export type AdminUserOption = {
 /**
  * List admin users (super_admin + event_admin) for select/assignment UIs.
  */
-export async function listAdminUsersForSelect(): Promise<AdminUserOption[]> {
+export async function listAdminUsersForSelect(tenantOwnerId?: string | null): Promise<AdminUserOption[]> {
+  const tenantFilter: Prisma.usersWhereInput = tenantOwnerId
+    ? { OR: [{ id: tenantOwnerId }, { tenant_owner_id: tenantOwnerId }] }
+    : {};
   const users = await prisma.users.findMany({
     where: {
       is_active: true,
-      roles: { name: EVENT_ADMIN_ROLE_NAME },
+      roles: { name: { notIn: ['user', 'super_admin'] } },
+      ...tenantFilter,
     },
     orderBy: [{ full_name: 'asc' }, { email: 'asc' }],
     select: {
@@ -1209,11 +1222,19 @@ export async function setEventAdmins(
   await prisma.event_admins.deleteMany({ where: { event_id: eventId } });
   if (adminUserIds.length === 0) return;
 
-  // Server-side guard: only allow assigning users with role "event_admin".
+  // Server-side guard: only allow assigning active tenant admins/sub-users (never guest or super_admin).
+  const eventRow = await prisma.events.findUnique({
+    where: { id: eventId },
+    select: { tenant_owner_id: true },
+  });
+  const tenantFilter: Prisma.usersWhereInput = eventRow?.tenant_owner_id
+    ? { OR: [{ id: eventRow.tenant_owner_id }, { tenant_owner_id: eventRow.tenant_owner_id }] }
+    : {};
   const allowed = await prisma.users.findMany({
     where: {
       id: { in: adminUserIds },
-      roles: { name: EVENT_ADMIN_ROLE_NAME },
+      roles: { name: { notIn: ['user', 'super_admin'] } },
+      ...tenantFilter,
     },
     select: { id: true },
   });

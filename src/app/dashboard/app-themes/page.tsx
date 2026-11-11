@@ -3,9 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { PaginatedTable } from '@/components/PaginatedTable';
-import { adminBearerAuthHeader } from '@/lib/admin-jwt-client';
-import { signOutToLogin } from '@/lib/admin-sign-out';
-import { canAccessModule } from '@/lib/rbac';
+import { useAdminAccess } from '@/components/auth/AdminAccessContext';
 import {
   deleteAppThemeAction,
   listAppThemesAction,
@@ -35,6 +33,7 @@ function formatDate(value: string | Date | null | undefined): string {
 
 export default function AppThemesPage() {
   const router = useRouter();
+  const { access, hasPermission } = useAdminAccess();
   const [rows, setRows] = useState<AppThemeRow[]>([]);
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
@@ -42,39 +41,22 @@ export default function AppThemesPage() {
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [accessChecked, setAccessChecked] = useState(false);
   const [formOpen, setFormOpen] = useState(false);
   const [formMode, setFormMode] = useState<'create' | 'edit'>('create');
   const [selectedRow, setSelectedRow] = useState<AppThemeRow | null>(null);
   const [listRefreshKey, setListRefreshKey] = useState(0);
   const [deletingId, setDeletingId] = useState<string | null>(null);
 
-  useEffect(() => {
-    if (typeof window === 'undefined') return;
-    const headers = adminBearerAuthHeader();
-    if (!headers.Authorization) {
-      void signOutToLogin(router);
-      return;
-    }
-
-    fetch('/api/admin/me', { headers })
-      .then(async (r) => {
-        if (!r.ok) throw new Error('NOT_AUTH');
-        type AdminUser = { role_name: string };
-        type AdminMeJson = { data?: { user?: AdminUser } | null; user?: AdminUser };
-        const json = (await r.json()) as AdminMeJson;
-        const roleName = json.data?.user?.role_name ?? json.user?.role_name;
-        if (!canAccessModule(roleName, 'app-themes')) {
-          router.replace('/dashboard');
-          return;
-        }
-        setAccessChecked(true);
-      })
-      .catch(() => void signOutToLogin(router));
-  }, [router]);
+  const canView = hasPermission('app_themes.view') || hasPermission('app_themes.manage');
+  const canManage = hasPermission('app_themes.manage');
 
   useEffect(() => {
-    if (!accessChecked) return;
+    if (!access) return;
+    if (!canView) router.replace('/dashboard');
+  }, [access, canView, router]);
+
+  useEffect(() => {
+    if (!access || !canView) return;
     let cancelled = false;
 
     async function load() {
@@ -105,7 +87,7 @@ export default function AppThemesPage() {
     return () => {
       cancelled = true;
     };
-  }, [accessChecked, page, search, listRefreshKey]);
+  }, [access, canView, page, search, listRefreshKey]);
 
   function openCreate() {
     setFormMode('create');
@@ -143,7 +125,14 @@ export default function AppThemesPage() {
     }
   }
 
-  if (!accessChecked) {
+  function canEditRow(row: AppThemeRow): boolean {
+    if (!canManage || !access) return false;
+    if (access.tier === 'super_admin' || access.tier === 'super_staff') return true;
+    const ownerId = access.tenant_owner_id ?? access.id;
+    return row.tenant_owner_id != null && row.tenant_owner_id === ownerId;
+  }
+
+  if (!access || !canView) {
     return (
       <div className={styles.page}>
         <ContentSkeleton />
@@ -156,11 +145,13 @@ export default function AppThemesPage() {
       <div className={styles.headerRow}>
         <div className={styles.headerText}>
           <h1>App themes</h1>
-          <p>Manage reusable app color themes used during event creation.</p>
+          <p>Use platform app color themes or create custom color themes for your events.</p>
         </div>
-        <button type="button" className={styles.primaryButton} onClick={openCreate}>
-          + New theme
-        </button>
+        {canManage && (
+          <button type="button" className={styles.primaryButton} onClick={openCreate}>
+            + New theme
+          </button>
+        )}
       </div>
 
       <div className={styles.controlsRow}>
@@ -181,6 +172,7 @@ export default function AppThemesPage() {
         header={
           <tr className={styles.tableHeadRow}>
             <th>Name</th>
+            <th>Scope</th>
             <th>Primary</th>
             <th>Secondary</th>
             <th>Button Primary</th>
@@ -193,45 +185,57 @@ export default function AppThemesPage() {
         totalPages={totalPages}
         total={total}
         pageSize={PAGE_LIMIT}
-        colSpan={7}
+        colSpan={8}
         loading={loading}
         loadingMessage="Loading themes…"
         emptyMessage="No app themes yet."
         onPageChange={setPage}
       >
-        {rows.map((r) => (
-          <tr key={r.id} className={styles.rowDivider}>
-            <td className={styles.td}>{r.name}</td>
-            <td className={styles.td}>
-              <ColorSwatch color={r.primary_color} />
-            </td>
-            <td className={styles.td}>
-              <ColorSwatch color={r.secondary_color} />
-            </td>
-            <td className={styles.td}>
-              <ColorSwatch color={r.button_primary_color} />
-            </td>
-            <td className={styles.td}>
-              <ColorSwatch color={r.button_secondary_color} />
-            </td>
-            <td className={`${styles.td} ${styles.tdMuted}`}>{formatDate(r.updated_at)}</td>
-            <td className={styles.td} style={{ textAlign: 'right' }}>
-              <div className={styles.actions}>
-                <button type="button" className={styles.btnEdit} onClick={() => openEdit(r)}>
-                  Edit
-                </button>
-                <button
-                  type="button"
-                  className={styles.btnDelete}
-                  disabled={deletingId === r.id}
-                  onClick={() => handleDelete(r)}
-                >
-                  {deletingId === r.id ? 'Deleting…' : 'Delete'}
-                </button>
-              </div>
-            </td>
-          </tr>
-        ))}
+        {rows.map((r) => {
+          const mutable = canEditRow(r);
+          return (
+            <tr key={r.id} className={styles.rowDivider}>
+              <td className={styles.td}>{r.name}</td>
+              <td className={styles.td}>
+                <span style={{ fontSize: '0.74rem', color: r.tenant_owner_id ? '#1e40af' : '#475569' }}>
+                  {r.tenant_owner_id ? 'Private' : 'Global'}
+                </span>
+              </td>
+              <td className={styles.td}>
+                <ColorSwatch color={r.primary_color} />
+              </td>
+              <td className={styles.td}>
+                <ColorSwatch color={r.secondary_color} />
+              </td>
+              <td className={styles.td}>
+                <ColorSwatch color={r.button_primary_color} />
+              </td>
+              <td className={styles.td}>
+                <ColorSwatch color={r.button_secondary_color} />
+              </td>
+              <td className={`${styles.td} ${styles.tdMuted}`}>{formatDate(r.updated_at)}</td>
+              <td className={styles.td} style={{ textAlign: 'right' }}>
+                {mutable ? (
+                  <div className={styles.actions}>
+                    <button type="button" className={styles.btnEdit} onClick={() => openEdit(r)}>
+                      Edit
+                    </button>
+                    <button
+                      type="button"
+                      className={styles.btnDelete}
+                      disabled={deletingId === r.id}
+                      onClick={() => handleDelete(r)}
+                    >
+                      {deletingId === r.id ? 'Deleting…' : 'Delete'}
+                    </button>
+                  </div>
+                ) : (
+                  <span style={{ fontSize: '0.75rem', color: '#94a3b8' }}>Global read-only</span>
+                )}
+              </td>
+            </tr>
+          );
+        })}
       </PaginatedTable>
 
       <AppThemeFormModal

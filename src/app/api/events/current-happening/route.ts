@@ -2,6 +2,7 @@ import { parseQuery } from '@/lib/validations';
 import { listCurrentHappeningQuerySchema } from '@/lib/validations/events';
 import { ok, serverError } from '@/lib/api-response';
 import { getCurrentHappeningByEventId } from '@/server/current-happening';
+import { getEventEffectiveFeatures } from '@/server/access';
 
 /**
  * GET /api/events/current-happening
@@ -13,6 +14,11 @@ export async function GET(request: Request) {
     const { searchParams } = new URL(request.url);
     const [query, err] = parseQuery(searchParams, listCurrentHappeningQuerySchema);
     if (err) return err;
+
+    const features = await getEventEffectiveFeatures(query.event_id);
+    if (!features.event_current_happening) {
+      return ok({ data: [] });
+    }
 
     const rows = await getCurrentHappeningByEventId(query.event_id);
     const data = rows.map((row) => ({

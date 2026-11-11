@@ -2,6 +2,7 @@ import { authSwitchEventRequestSchema, parseBody } from '@/lib/validations';
 import { forbidden, notFound, ok, serverError } from '@/lib/api-response';
 import { createUserJwtToken, getUserFromAuthorizationHeader } from '@/lib/jwt';
 import { isEventGuest } from '@/server/event-guests';
+import { getEventEffectiveFeatures } from '@/server/access';
 import { upsertUserDevice } from '@/server/user-devices';
 
 /**
@@ -30,15 +31,19 @@ export async function POST(request: Request) {
     }
 
     const issued = createUserJwtToken({ user_id: user.id, event_id: body.event_id });
-    return ok(
+    const enabled_features = await getEventEffectiveFeatures(body.event_id);
+    const res = ok(
       {
         user_id: user.id,
         event_id: body.event_id,
         token: issued.token,
         expires_at: issued.expires_at,
+        enabled_features,
       },
       'Event switched'
     );
+    res.headers.set('Cache-Control', 'no-store');
+    return res;
   } catch (error) {
     console.error('POST /api/auth/switch-event', error);
     return serverError('Unable to switch event');

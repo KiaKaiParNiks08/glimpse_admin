@@ -1,22 +1,25 @@
 'use client';
 
-import { use, useEffect, useMemo, useRef, useState } from 'react';
+import { use, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import styles from './event-media.module.scss';
 import {
   addSessionUploaderAction,
-  createEventDayMediaAction,
   deleteEventDayMediaAction,
   deleteEventDayMediaBulkAction,
   getEventDaysForMediaAction,
   removeSessionUploaderAction,
   saveMediaPanelSessionAction,
-  uploadSessionMediaFileAction,
+  type EventMediaPermissions,
 } from '@/app/actions/event-day-media';
+import { IMAGE_AND_VIDEO_UPLOAD_LIMITS_NOTE } from '@/lib/upload-client';
 import {
-  IMAGE_AND_VIDEO_UPLOAD_LIMITS_NOTE,
-  precheckUploadFile,
-} from '@/lib/upload-client';
+  extractFilesFromDataTransfer,
+  partitionMediaFiles,
+  type ExcludedFileItem,
+  type PreparedMediaCandidate,
+} from '@/lib/media-upload-prep';
+import { useDashboardUploads } from '@/components/upload/DashboardUploadProvider';
 import { WATERMARK_POSITION_LABELS, type EventWatermark } from '@/lib/watermark';
 import { WatermarkOverlay } from '@/components/WatermarkOverlay';
 import { ContentSkeleton } from '@/components/navigation/ContentSkeleton';
@@ -124,6 +127,14 @@ function buildGalleryTargets(days: EventDay[]): GalleryTarget[] {
   });
 }
 
+const DEFAULT_PERMS: EventMediaPermissions = {
+  can_view: true,
+  can_upload: false,
+  can_delete: false,
+  can_manage_sessions: false,
+  can_manage_uploaders: false,
+};
+
 export default function EventDayMediaPage({
   params,
 }: {
@@ -131,10 +142,13 @@ export default function EventDayMediaPage({
 }) {
   const { event_id: eventId } = use(params);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const folderInputRef = useRef<HTMLInputElement>(null);
+  const { jobs, enqueueSessionMediaUpload, subscribeToSessionCommits } = useDashboardUploads();
 
   const [event, setEvent] = useState<EventDetails | null>(null);
   const [days, setDays] = useState<EventDay[]>([]);
   const [uploaders, setUploaders] = useState<SessionUploader[]>([]);
+  const [permissions, setPermissions] = useState<EventMediaPermissions>(DEFAULT_PERMS);
   const [selectedKey, setSelectedKey] = useState<string>('');
   const [uploaderDraft, setUploaderDraft] = useState('');
   const [uploadScope, setUploadScope] = useState<'all' | 'specific'>('specific');
@@ -152,8 +166,11 @@ export default function EventDayMediaPage({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
-  const [uploading, setUploading] = useState(false);
+  // Staged flattened individual media files (folders are never stored or displayed)
+  const [stagedCandidates, setStagedCandidates] = useState<PreparedMediaCandidate[]>([]);
+  const [excludedPrecheck, setExcludedPrecheck] = useState<ExcludedFileItem[]>([]);
+  const [dragOver, setDragOver] = useState(false);
+
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [bulkDeleting, setBulkDeleting] = useState(false);
   const [lightboxIndex, setLightboxIndex] = useState<number | null>(null);
@@ -186,6 +203,19 @@ export default function EventDayMediaPage({
   const selectedCount = selectedMediaIds.size;
   const allSelected = dayMedia.length > 0 && selectedCount === dayMedia.length;
 
+  const activeJobsForEvent = useMemo(
+    () => jobs.filter((j) => j.eventId === eventId && j.status === 'running'),
+    [jobs, eventId]
+  );
+
+  const attachFolderAttributes = useCallback((el: HTMLInputElement | null) => {
+    folderInputRef.current = el;
+    if (el) {
+      el.setAttribute('webkitdirectory', '');
+      el.setAttribute('directory', '');
+    }
+  }, []);
+
   function closeLightbox() {
     setLightboxIndex(null);
   }
@@ -206,6 +236,20 @@ export default function EventDayMediaPage({
     });
   }
 
+  const refreshQuietly = useCallback(async () => {
+    if (!eventId) return;
+    try {
+      const res = await getEventDaysForMediaAction(eventId);
+      if (!res.ok) return;
+      setEvent(res.event);
+      setDays(res.days as unknown as EventDay[]);
+      setUploaders(res.uploaders);
+      setPermissions(res.permissions);
+    } catch {
+      // ignore silent refresh errors
+    }
+  }, [eventId]);
+
   async function load() {
     setLoading(true);
     setError(null);
@@ -215,6 +259,7 @@ export default function EventDayMediaPage({
       setEvent(res.event);
       setDays(res.days as unknown as EventDay[]);
       setUploaders(res.uploaders);
+      setPermissions(res.permissions);
       setSelectedMediaIds(new Set());
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Unable to load');
@@ -225,9 +270,18 @@ export default function EventDayMediaPage({
 
   useEffect(() => {
     if (!eventId) return;
-    load();
+    void load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [eventId]);
+
+  useEffect(() => {
+    const unsub = subscribeToSessionCommits((commitEvent) => {
+      if (commitEvent.eventId === eventId) {
+        void refreshQuietly();
+      }
+    });
+    return unsub;
+  }, [eventId, refreshQuietly, subscribeToSessionCommits]);
 
   useEffect(() => {
     if (selectedSessionId) {
@@ -259,6 +313,50 @@ export default function EventDayMediaPage({
     return () => window.removeEventListener('keydown', onKeyDown);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [lightboxIndex, dayMedia.length]);
+
+  function handleIncomingFiles(rawFiles: File[]) {
+    setError(null);
+    const { accepted, excluded } = partitionMediaFiles(rawFiles);
+    setStagedCandidates((prev) => {
+      const next = [...prev];
+      const existingSig = new Set(prev.map((c) => `${c.file.name}:${c.file.size}`));
+      for (const candidate of accepted) {
+        const sig = `${candidate.file.name}:${candidate.file.size}`;
+        if (!existingSig.has(sig)) {
+          existingSig.add(sig);
+          next.push(candidate);
+        }
+      }
+      return next;
+    });
+    setExcludedPrecheck((prev) => [...prev, ...excluded]);
+  }
+
+  function handleStartBackgroundUpload() {
+    if (!selectedSessionId) {
+      alert('Select a session first.');
+      return;
+    }
+    if (stagedCandidates.length === 0 && excludedPrecheck.length === 0) {
+      alert('Choose files or a folder containing images/videos.');
+      return;
+    }
+
+    enqueueSessionMediaUpload({
+      eventId,
+      eventTitle: event?.title || 'Event',
+      sessionId: selectedSessionId,
+      sessionLabel: selectedTargetLabel || 'Session',
+      startingOrder: dayMedia.length,
+      candidates: stagedCandidates,
+      preExcluded: excludedPrecheck,
+    });
+
+    setStagedCandidates([]);
+    setExcludedPrecheck([]);
+    if (fileInputRef.current) fileInputRef.current.value = '';
+    if (folderInputRef.current) folderInputRef.current.value = '';
+  }
 
   function toggleGrantSession(sessionId: string) {
     setGrantSessionIds((prev) => {
@@ -363,69 +461,6 @@ export default function EventDayMediaPage({
     }
   }
 
-  async function handleUpload() {
-    if (!selectedSessionId) {
-      alert('Select a session first.');
-      return;
-    }
-    if (selectedFiles.length === 0) {
-      alert('Choose one or more files to upload.');
-      return;
-    }
-
-    setUploading(true);
-    setError(null);
-    const uploaded: Array<{ media_key: string; media_url: string; media_type: 'image' | 'video' }> = [];
-    const failures: string[] = [];
-    try {
-      for (const file of selectedFiles) {
-        try {
-          const pre = await precheckUploadFile(file);
-          if (!pre.ok) throw new Error(pre.error);
-
-          const body = new FormData();
-          body.append('file', file);
-          body.append('event_id', eventId);
-          body.append('event_session_id', selectedSessionId);
-          if (pre.videoDurationSec != null) {
-            body.append('video_duration_sec', String(pre.videoDurationSec));
-          }
-          const uploadedFile = await uploadSessionMediaFileAction(body);
-          if (!uploadedFile.ok) throw new Error(uploadedFile.error);
-
-          uploaded.push(uploadedFile.data);
-        } catch (error) {
-          failures.push(`${file.name}: ${error instanceof Error ? error.message : 'Upload failed'}`);
-        }
-      }
-
-      let saved = false;
-      if (uploaded.length > 0) {
-        const createRes = await createEventDayMediaAction({
-          eventId,
-          eventSessionId: selectedSessionId,
-          items: uploaded.map((item, index) => ({
-            ...item,
-            display_order: dayMedia.length + index,
-          })),
-        });
-        if (!createRes.ok) failures.push(createRes.error);
-        else saved = true;
-      }
-
-      if (saved) {
-        setSelectedFiles([]);
-        if (fileInputRef.current) fileInputRef.current.value = '';
-      }
-      await load();
-      if (failures.length > 0) setError(failures.join(' '));
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Upload failed');
-    } finally {
-      setUploading(false);
-    }
-  }
-
   async function handleDelete(mediaId: string) {
     if (!confirm('Delete this media? This will remove it from S3 and the database.')) return;
     setDeletingId(mediaId);
@@ -468,6 +503,9 @@ export default function EventDayMediaPage({
     return <ContentSkeleton variant="cards" />;
   }
 
+  const imageCount = stagedCandidates.filter((c) => c.kind === 'image').length;
+  const videoCount = stagedCandidates.filter((c) => c.kind === 'video').length;
+
   return (
     <div className={styles.page}>
       <div className={styles.headerRow}>
@@ -476,9 +514,10 @@ export default function EventDayMediaPage({
           <p>
             {event?.title ? (
               <>
-                Manage session-wise images/videos for <strong>{event.title}</strong>. Add guest
-                mobiles{event.is_corporate ? ' or emails' : ''} who may upload to a session from the
-                app.
+                Manage session-wise images/videos for <strong>{event.title}</strong>.
+                {permissions.can_manage_uploaders
+                  ? ` Add guest mobiles${event.is_corporate ? ' or emails' : ''} who may upload to a session from the app.`
+                  : ''}
               </>
             ) : (
               'Manage session-wise images/videos.'
@@ -517,20 +556,24 @@ export default function EventDayMediaPage({
           )}
         </select>
 
-        <button type="button" className={styles.btnPrimary} onClick={openNewSessionForm}>
-          Add session
-        </button>
-        {selectedTarget?.mediaPanelOnly && (
-          <button type="button" className={styles.btnSecondary} onClick={openEditSessionForm}>
-            Edit session
-          </button>
+        {permissions.can_manage_sessions && (
+          <>
+            <button type="button" className={styles.btnPrimary} onClick={openNewSessionForm}>
+              Add session
+            </button>
+            {selectedTarget?.mediaPanelOnly && (
+              <button type="button" className={styles.btnSecondary} onClick={openEditSessionForm}>
+                Edit session
+              </button>
+            )}
+          </>
         )}
-        <Link className={styles.btnSecondary} href={`/dashboard/events`}>
+        <Link className={styles.btnSecondary} href="/dashboard/events">
           Events
         </Link>
       </div>
 
-      {sessionFormOpen && (
+      {permissions.can_manage_sessions && sessionFormOpen && (
         <div className={styles.uploadCard}>
           <div style={{ color: '#0f172a', fontWeight: 600 }}>
             {sessionForm.id ? 'Edit session' : 'Add session'}
@@ -586,7 +629,7 @@ export default function EventDayMediaPage({
         </div>
       )}
 
-      {sessionChoices.length > 0 && (
+      {permissions.can_manage_uploaders && sessionChoices.length > 0 && (
         <div className={styles.uploadCard}>
           <div>
             <div style={{ color: '#0f172a', fontWeight: 600 }}>Who can upload from the app</div>
@@ -683,103 +726,211 @@ export default function EventDayMediaPage({
         </div>
       )}
 
-      <div className={styles.uploadCard}>
-        <div>
-          <div style={{ color: '#e2e8f0', fontWeight: 600 }}>Upload media</div>
-          <div className={styles.hint}>
-            Supported: images and videos. Files are sent to the server, then saved on this session.{' '}
-            {IMAGE_AND_VIDEO_UPLOAD_LIMITS_NOTE}
-          </div>
-          <div className={styles.hint}>
-            {watermark
-              ? `Watermark: ${WATERMARK_POSITION_LABELS[watermark.position]}, ${watermark.opacity}% opacity — shown on top of images (files are not changed).`
-              : 'No watermark set. Add one in the event wizard, step "Gallery watermark".'}
-          </div>
-          {selectedTarget && !selectedSessionId && (
+      {permissions.can_upload && (
+        <div className={styles.uploadCard}>
+          <div>
+            <div style={{ color: '#0f172a', fontWeight: 600 }}>Upload files or folder</div>
             <div className={styles.hint}>
-              These were uploaded day-wise before sessions were used. New uploads go to a session.
+              Select individual images/videos or an entire folder (nested folders are automatically
+              flattened—only photos and videos are uploaded; unsupported files and 18+ content are
+              excluded automatically). {IMAGE_AND_VIDEO_UPLOAD_LIMITS_NOTE}
             </div>
-          )}
-        </div>
-        <div className={styles.uploadRow}>
-          <input
-            ref={fileInputRef}
-            className={styles.fileInput}
-            type="file"
-            multiple
-            accept="image/*,video/*"
-            disabled={uploading || !selectedSessionId}
-            onChange={async (e) => {
-              const list = Array.from(e.target.files ?? []);
-              e.target.value = '';
-              setError(null);
-              for (const file of list) {
-                const pre = await precheckUploadFile(file);
-                if (!pre.ok) {
-                  setError(`${file.name}: ${pre.error}`);
-                  setSelectedFiles([]);
-                  return;
-                }
-              }
-              setSelectedFiles(list);
+            <div className={styles.hint}>
+              Uploads run concurrently in the background, so you can switch pages without interrupting them.
+            </div>
+            <div className={styles.hint}>
+              {watermark
+                ? `Watermark: ${WATERMARK_POSITION_LABELS[watermark.position]}, ${watermark.opacity}% opacity — shown on top of images (files are not changed).`
+                : 'No watermark set. Add one in the event wizard, step "Gallery watermark".'}
+            </div>
+            {selectedTarget && !selectedSessionId && (
+              <div className={styles.hint}>
+                These were uploaded day-wise before sessions were used. Choose a session to upload new media.
+              </div>
+            )}
+          </div>
+
+          <div
+            className={`${styles.dropZone} ${dragOver ? styles.dropZoneActive : ''}`}
+            onDragOver={(e) => {
+              e.preventDefault();
+              if (!selectedSessionId) return;
+              setDragOver(true);
             }}
-          />
-          <button
-            type="button"
-            className={styles.btnPrimary}
-            onClick={handleUpload}
-            disabled={uploading || !selectedSessionId || selectedFiles.length === 0}
-          >
-            {uploading ? 'Uploading…' : `Upload (${selectedFiles.length || 0})`}
-          </button>
-          <button
-            type="button"
-            className={styles.btnSecondary}
-            onClick={() => {
-              setSelectedFiles([]);
-              if (fileInputRef.current) fileInputRef.current.value = '';
+            onDragLeave={() => setDragOver(false)}
+            onDrop={async (e) => {
+              e.preventDefault();
+              setDragOver(false);
+              if (!selectedSessionId) return;
+              const droppedFiles = await extractFilesFromDataTransfer(e.dataTransfer);
+              handleIncomingFiles(droppedFiles);
             }}
-            disabled={uploading || selectedFiles.length === 0}
           >
-            Clear
-          </button>
+            <div className={styles.uploadRow}>
+              <input
+                ref={fileInputRef}
+                type="file"
+                multiple
+                accept="image/*,video/*"
+                hidden
+                disabled={!selectedSessionId}
+                onChange={(e) => {
+                  const list = Array.from(e.target.files ?? []);
+                  e.target.value = '';
+                  handleIncomingFiles(list);
+                }}
+              />
+              <input
+                ref={attachFolderAttributes}
+                type="file"
+                multiple
+                hidden
+                disabled={!selectedSessionId}
+                onChange={(e) => {
+                  const list = Array.from(e.target.files ?? []);
+                  e.target.value = '';
+                  handleIncomingFiles(list);
+                }}
+              />
+
+              <button
+                type="button"
+                className={styles.btnSecondary}
+                disabled={!selectedSessionId}
+                onClick={() => fileInputRef.current?.click()}
+              >
+                Choose Files
+              </button>
+              <button
+                type="button"
+                className={styles.btnSecondary}
+                disabled={!selectedSessionId}
+                onClick={() => folderInputRef.current?.click()}
+              >
+                Choose Folder
+              </button>
+              <span className={styles.hint}>or drag &amp; drop files / folders here</span>
+
+              <button
+                type="button"
+                className={styles.btnPrimary}
+                onClick={handleStartBackgroundUpload}
+                disabled={!selectedSessionId || (stagedCandidates.length === 0 && excludedPrecheck.length === 0)}
+                style={{ marginLeft: 'auto' }}
+              >
+                {stagedCandidates.length > 0
+                  ? `Start Upload (${stagedCandidates.length})`
+                  : 'Start Upload'}
+              </button>
+              {(stagedCandidates.length > 0 || excludedPrecheck.length > 0) && (
+                <button
+                  type="button"
+                  className={styles.btnSecondary}
+                  onClick={() => {
+                    setStagedCandidates([]);
+                    setExcludedPrecheck([]);
+                    if (fileInputRef.current) fileInputRef.current.value = '';
+                    if (folderInputRef.current) folderInputRef.current.value = '';
+                  }}
+                >
+                  Clear
+                </button>
+              )}
+            </div>
+
+            {stagedCandidates.length > 0 && (
+              <>
+                <div className={styles.hint}>
+                  Ready to upload: <strong>{imageCount}</strong> image(s), <strong>{videoCount}</strong> video(s)
+                  {' '}(18+ safety scan runs before saving).
+                </div>
+                <div className={styles.queuePreviewList}>
+                  {stagedCandidates.slice(0, 30).map((c, idx) => (
+                    <span key={`${c.file.name}-${idx}`} className={styles.queuePreviewChip}>
+                      {c.kind === 'video' ? '🎬' : '🖼️'} {c.file.name}
+                    </span>
+                  ))}
+                  {stagedCandidates.length > 30 && (
+                    <span className={styles.queuePreviewChip}>
+                      +{stagedCandidates.length - 30} more item(s)
+                    </span>
+                  )}
+                </div>
+              </>
+            )}
+
+            {excludedPrecheck.length > 0 && (
+              <div className={styles.excludedBanner}>
+                <strong>
+                  Excluded {excludedPrecheck.length} non-media / oversized file(s) — only valid images &amp; videos proceed:
+                </strong>
+                <div>
+                  {excludedPrecheck
+                    .slice(0, 6)
+                    .map((item) => `${item.name} (${item.reason})`)
+                    .join('; ')}
+                  {excludedPrecheck.length > 6 ? ` (+${excludedPrecheck.length - 6} more)` : ''}
+                </div>
+              </div>
+            )}
+
+            {activeJobsForEvent.length > 0 && (
+              <div className={styles.hint} style={{ color: '#1b4372', fontWeight: 600 }}>
+                Background upload active ({activeJobsForEvent[0]!.processedCount}/
+                {activeJobsForEvent[0]!.totalFiles} checked · {activeJobsForEvent[0]!.uploadedCount} saved) —
+                gallery updates automatically as batches finish.
+              </div>
+            )}
+          </div>
         </div>
-      </div>
+      )}
 
       <div>
         <div className={styles.galleryToolbar}>
           <div className={styles.galleryLeft}>
-            <div style={{ color: '#e2e8f0', fontWeight: 600 }}>
-              Gallery {selectedTarget ? <span style={{ color: '#94a3b8', fontWeight: 400 }}>({selectedTargetLabel})</span> : null}
+            <div style={{ color: '#0f172a', fontWeight: 600 }}>
+              Gallery{' '}
+              {selectedTarget ? (
+                <span style={{ color: '#64748b', fontWeight: 400 }}>({selectedTargetLabel})</span>
+              ) : null}
             </div>
-            <span className={styles.selectedCount}>
-              Selected: {selectedCount}
-            </span>
+            {permissions.can_delete && (
+              <span className={styles.selectedCount}>Selected: {selectedCount}</span>
+            )}
           </div>
           <div className={styles.galleryRight}>
+            {permissions.can_delete && (
+              <>
+                <button
+                  type="button"
+                  className={styles.btnSecondary}
+                  onClick={() => {
+                    if (dayMedia.length === 0) return;
+                    setSelectedMediaIds((prev) => {
+                      if (prev.size === dayMedia.length) return new Set();
+                      return new Set(dayMedia.map((m) => m.id));
+                    });
+                  }}
+                  disabled={dayMedia.length === 0 || deletingId !== null || bulkDeleting}
+                >
+                  {allSelected ? 'Clear selection' : 'Select all'}
+                </button>
+                <button
+                  type="button"
+                  className={styles.btnDanger}
+                  onClick={handleBulkDelete}
+                  disabled={selectedCount === 0 || deletingId !== null || bulkDeleting}
+                >
+                  {bulkDeleting ? 'Deleting…' : `Delete selected (${selectedCount})`}
+                </button>
+              </>
+            )}
             <button
               type="button"
               className={styles.btnSecondary}
-              onClick={() => {
-                if (dayMedia.length === 0) return;
-                setSelectedMediaIds((prev) => {
-                  if (prev.size === dayMedia.length) return new Set();
-                  return new Set(dayMedia.map((m) => m.id));
-                });
-              }}
-              disabled={dayMedia.length === 0 || uploading || deletingId !== null || bulkDeleting}
+              onClick={load}
+              disabled={deletingId !== null || bulkDeleting}
             >
-              {allSelected ? 'Clear selection' : 'Select all'}
-            </button>
-            <button
-              type="button"
-              className={styles.btnDanger}
-              onClick={handleBulkDelete}
-              disabled={selectedCount === 0 || uploading || deletingId !== null || bulkDeleting}
-            >
-              {bulkDeleting ? 'Deleting…' : `Delete selected (${selectedCount})`}
-            </button>
-            <button type="button" className={styles.btnSecondary} onClick={load} disabled={uploading || deletingId !== null || bulkDeleting}>
               Refresh
             </button>
           </div>
@@ -789,22 +940,24 @@ export default function EventDayMediaPage({
           <div className={styles.grid}>
             {dayMedia.map((m, idx) => (
               <div key={m.id} className={styles.card}>
-                <input
-                  type="checkbox"
-                  className={styles.selectCheckbox}
-                  checked={selectedMediaIds.has(m.id)}
-                  onChange={(e) => {
-                    const checked = e.target.checked;
-                    setSelectedMediaIds((prev) => {
-                      const next = new Set(prev);
-                      if (checked) next.add(m.id);
-                      else next.delete(m.id);
-                      return next;
-                    });
-                  }}
-                  onClick={(e) => e.stopPropagation()}
-                  aria-label="Select media"
-                />
+                {permissions.can_delete && (
+                  <input
+                    type="checkbox"
+                    className={styles.selectCheckbox}
+                    checked={selectedMediaIds.has(m.id)}
+                    onChange={(e) => {
+                      const checked = e.target.checked;
+                      setSelectedMediaIds((prev) => {
+                        const next = new Set(prev);
+                        if (checked) next.add(m.id);
+                        else next.delete(m.id);
+                        return next;
+                      });
+                    }}
+                    onClick={(e) => e.stopPropagation()}
+                    aria-label="Select media"
+                  />
+                )}
                 <button
                   type="button"
                   className={styles.thumbButton}
@@ -833,21 +986,23 @@ export default function EventDayMediaPage({
                     </>
                   )}
                 </button>
-                <div className={styles.actionsRow}>
-                  <button
-                    type="button"
-                    className={styles.btnDanger}
-                    onClick={() => handleDelete(m.id)}
-                    disabled={deletingId === m.id || uploading || bulkDeleting}
-                  >
-                    {deletingId === m.id ? 'Deleting…' : 'Delete'}
-                  </button>
-                </div>
+                {permissions.can_delete && (
+                  <div className={styles.actionsRow}>
+                    <button
+                      type="button"
+                      className={styles.btnDanger}
+                      onClick={() => handleDelete(m.id)}
+                      disabled={deletingId === m.id || bulkDeleting}
+                    >
+                      {deletingId === m.id ? 'Deleting…' : 'Delete'}
+                    </button>
+                  </div>
+                )}
               </div>
             ))}
           </div>
         ) : (
-          <p style={{ color: '#94a3b8' }}>No media for this session yet.</p>
+          <p style={{ color: '#64748b' }}>No media for this session yet.</p>
         )}
       </div>
 
@@ -911,4 +1066,3 @@ export default function EventDayMediaPage({
     </div>
   );
 }
-

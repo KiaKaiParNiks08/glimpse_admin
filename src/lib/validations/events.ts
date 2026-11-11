@@ -85,6 +85,7 @@ const baseEventSchema = z.object({
   main_venue_id: uuidSchema.optional().nullable(),
   status: z.string().max(20).default('draft'),
   created_by: uuidSchema,
+  tenant_owner_id: uuidSchema.optional().nullable(),
   organizer_name: z.string().max(200).optional().nullable(),
   organizer_logo_url: storedMediaUrlSchema,
   organizer_contact_email: z.string().max(150).optional().nullable(),

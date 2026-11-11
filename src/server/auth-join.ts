@@ -5,6 +5,8 @@ import { ensureEventGuest, isEventGuest } from '@/server/event-guests';
 import prisma from '@/server/prisma';
 import { upsertUserDevice } from '@/server/user-devices';
 import { getVenueContactForEvent } from '@/server/venues';
+import { getEventEffectiveFeatures } from '@/server/access';
+import type { FeatureMap } from '@/lib/rbac';
 
 const joinEventSelect = {
   id: true,
@@ -51,6 +53,7 @@ export type JoinEventResult =
         secondary_color: string | null;
         button_primary_color: string | null;
         button_secondary_color: string | null;
+        enabled_features: FeatureMap;
       };
     }
   | { ok: false; status: 400 | 404 | 409; message: string };
@@ -150,6 +153,7 @@ export async function joinAuthenticatedUserToEvent(input: {
   }
 
   const issued = createUserJwtToken({ user_id: input.userId, event_id: event.id });
+  const enabled_features = await getEventEffectiveFeatures(event.id);
   const category = toAuthCategoryFields(event.event_categories);
   const theme = event.app_themes;
   return {
@@ -166,6 +170,7 @@ export async function joinAuthenticatedUserToEvent(input: {
       secondary_color: theme?.secondary_color ?? null,
       button_primary_color: theme?.button_primary_color ?? null,
       button_secondary_color: theme?.button_secondary_color ?? null,
+      enabled_features,
     },
   };
 }

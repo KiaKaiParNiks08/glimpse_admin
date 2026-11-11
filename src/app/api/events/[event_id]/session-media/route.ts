@@ -8,6 +8,7 @@ import { SESSION_MEDIA_PAGE_SIZE, listSessionMediaPage } from '@/server/event-da
 import prisma from '@/server/prisma';
 import { sessionIdsViewerCanUpload } from '@/server/session-uploaders';
 import { getAdminFromAuthorizationHeader, getUserFromAuthorizationHeader } from '@/lib/jwt';
+import { getEventEffectiveFeatures } from '@/server/access';
 
 const paramsSchema = z.object({ event_id: uuidSchema });
 
@@ -43,14 +44,18 @@ export async function GET(request: Request, context: { params: Promise<{ event_i
           })
         : [];
 
+    const enabledFeatures = await getEventEffectiveFeatures(params.event_id);
+
     const [canUploadIds, favorited] = await Promise.all([
-      isAdmin
-        ? Promise.resolve(new Set(sessionRows.map((row) => row.id)))
-        : sessionIdsViewerCanUpload(
-            sessionRows.map((row) => row.id),
-            effectiveUserId
-          ),
-      effectiveUserId
+      enabledFeatures.session_media_upload
+        ? isAdmin
+          ? Promise.resolve(new Set(sessionRows.map((row) => row.id)))
+          : sessionIdsViewerCanUpload(
+              sessionRows.map((row) => row.id),
+              effectiveUserId
+            )
+        : Promise.resolve(new Set<string>()),
+      effectiveUserId && enabledFeatures.mobile_favorites
         ? getFavoritedItemIds(effectiveUserId, 'day_media', rows.map((row) => row.id))
         : Promise.resolve(null),
     ]);
@@ -69,7 +74,7 @@ export async function GET(request: Request, context: { params: Promise<{ event_i
       };
     });
 
-    return ok({
+    const res = ok({
       data,
       meta: {
         page: query.page,
@@ -81,6 +86,8 @@ export async function GET(request: Request, context: { params: Promise<{ event_i
           : canUploadIds.size > 0,
       },
     });
+    res.headers.set('Cache-Control', 'no-store');
+    return res;
   } catch (error) {
     console.error(error);
     return serverError('Unable to fetch session media');

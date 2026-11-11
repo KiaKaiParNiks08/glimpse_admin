@@ -1,7 +1,6 @@
 import { NextRequest } from 'next/server';
 import { ok, badRequest, forbidden, notFound, serverError } from '@/lib/api-response';
-import { getAdminFromAuthorizationHeader } from '@/lib/jwt';
-import { isEventAdminAssigned } from '@/server/events';
+import { canContextAccessEvent, getAdminContextFromRequest } from '@/server/access';
 import prisma from '@/server/prisma';
 import { createEventDayMedia } from '@/server/event-day-media';
 
@@ -30,17 +29,19 @@ export async function POST(
   context: { params: Promise<{ event_id: string; event_day_id: string }> }
 ) {
   try {
-    const admin = getAdminFromAuthorizationHeader(request);
-    if (!admin) return forbidden('Not authenticated');
+    const ctx = await getAdminContextFromRequest(request);
+    if (!ctx) return forbidden('Not authenticated');
+    if (!ctx.hasPermission('media.upload')) {
+      return forbidden('Forbidden: media upload is disabled for your role or plan');
+    }
 
     const params = await context.params;
     const eventId = params.event_id;
     const eventDayId = params.event_day_id;
     if (!isUuid(eventId) || !isUuid(eventDayId)) return badRequest('Invalid event/day id');
 
-    if (admin.role_name === 'event_admin') {
-      const allowed = await isEventAdminAssigned(eventId, admin.id);
-      if (!allowed) return notFound('Event not found');
+    if (!(await canContextAccessEvent(ctx, eventId))) {
+      return notFound('Event not found');
     }
 
     const day = await prisma.event_days.findFirst({
@@ -93,7 +94,7 @@ export async function POST(
         media_url: it.media_url,
         media_type: it.media_type,
         display_order: it.display_order ?? null,
-        uploaded_by: admin.id,
+        uploaded_by: ctx.id,
       }))
     );
 
@@ -103,4 +104,3 @@ export async function POST(
     return serverError('Unable to save event day media');
   }
 }
-

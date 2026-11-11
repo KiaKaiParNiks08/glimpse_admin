@@ -4,6 +4,7 @@ import { getAdminFromAuthorizationHeader, getUserFromAuthorizationHeader } from 
 import { uuidSchema } from '@/lib/validations/common';
 import { parseParams } from '@/lib/validations';
 import { createUploadSession } from '@/server/upload-sessions';
+import { getEventEffectiveFeatures } from '@/server/access';
 import prisma from '@/server/prisma';
 
 const paramsSchema = z.object({
@@ -54,6 +55,20 @@ export async function POST(
     const parsed = createUploadSessionSchema.safeParse(bodyJson);
     if (!parsed.success) {
       return badRequest('Invalid upload session parameters', parsed.error.flatten().fieldErrors);
+    }
+
+    const features = await getEventEffectiveFeatures(params.event_id);
+    if (
+      (parsed.data.purpose === 'session_media' || parsed.data.purpose === 'session_thumbnail') &&
+      !features.session_media_upload
+    ) {
+      return forbidden('Session media upload is disabled for this event');
+    }
+    if (
+      (parsed.data.purpose === 'feed_media' || parsed.data.purpose === 'feed_thumbnail') &&
+      !features.mobile_feed
+    ) {
+      return forbidden('Feed is disabled for this event');
     }
 
     const session = await createUploadSession({

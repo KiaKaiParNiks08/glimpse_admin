@@ -1,5 +1,6 @@
 'use server';
 
+import prisma from '@/server/prisma';
 import {
   listVenuesQuerySchema,
   createVenueSchema,
@@ -17,6 +18,12 @@ import {
   updateVenue,
   deleteVenue,
 } from '@/server/venues';
+import {
+  requireAdminContextFromCookies,
+  buildMasterDataWhere,
+  canContextMutateMasterAsset,
+  masterAssetCreateOwnerId,
+} from '@/server/access';
 
 /** Convert Prisma Decimal, Date, etc. to plain JSON-serializable values for client. */
 function toPlainValue(val: unknown): unknown {
@@ -41,6 +48,7 @@ export type VenueListItem = {
   city: string | null;
   state_name: string | null;
   country: string | null;
+  tenant_owner_id: string | null;
   created_at: string | null;
 };
 
@@ -71,6 +79,12 @@ export async function getVenuesAction(params: {
   limit?: number;
   search?: string;
 }): Promise<GetVenuesResult> {
+  const auth = await requireAdminContextFromCookies();
+  if (!auth.ok) return { ok: false, error: auth.error };
+  if (!auth.ctx.hasPermission('venues.view') && !auth.ctx.hasPermission('venues.manage')) {
+    return { ok: false, error: 'Forbidden' };
+  }
+
   const parsed = listVenuesQuerySchema.safeParse({
     page: params.page ?? 1,
     limit: params.limit ?? 20,
@@ -81,7 +95,10 @@ export async function getVenuesAction(params: {
   }
 
   try {
-    const { venues, total } = await listVenues(parsed.data as ListVenuesQuery);
+    const { venues, total } = await listVenues(
+      parsed.data as ListVenuesQuery,
+      buildMasterDataWhere(auth.ctx)
+    );
     const limit = parsed.data.limit;
     const list = venues.map((v) => ({
       ...v,
@@ -105,9 +122,26 @@ export async function getVenuesAction(params: {
 
 export async function getVenueByIdAction(venueId: string): Promise<VenueDetailsResult> {
   if (!venueId) return { ok: false, error: 'Venue ID required' };
+  const auth = await requireAdminContextFromCookies();
+  if (!auth.ok) return { ok: false, error: auth.error };
+  if (!auth.ctx.hasPermission('venues.view') && !auth.ctx.hasPermission('venues.manage')) {
+    return { ok: false, error: 'Forbidden' };
+  }
+
   try {
     const venue = await getVenueDetailsById(venueId);
     if (!venue) return { ok: false, error: 'Venue not found' };
+    if (
+      venue.tenant_owner_id &&
+      auth.ctx.tier !== 'super_admin' &&
+      !(
+        auth.ctx.tier === 'super_staff' &&
+        auth.ctx.assigned_client_ids.includes(venue.tenant_owner_id)
+      ) &&
+      venue.tenant_owner_id !== (auth.ctx.tenant_owner_id ?? auth.ctx.id)
+    ) {
+      return { ok: false, error: 'Venue not found' };
+    }
     return { ok: true, data: toPlainValue(venue) as Awaited<ReturnType<typeof getVenueDetailsById>> };
   } catch (e) {
     console.error(e);
@@ -116,6 +150,12 @@ export async function getVenueByIdAction(venueId: string): Promise<VenueDetailsR
 }
 
 export async function createVenueAction(body: CreateVenueInput): Promise<CreateVenueResult> {
+  const auth = await requireAdminContextFromCookies();
+  if (!auth.ok) return { ok: false, error: auth.error };
+  if (!auth.ctx.hasPermission('venues.manage')) {
+    return { ok: false, error: 'Forbidden: venue management is disabled for your role or plan' };
+  }
+
   const parsed = createVenueSchema.safeParse(body);
   if (!parsed.success) {
     const msg = parsed.error.flatten().formErrors[0] ?? 'Validation failed';
@@ -123,7 +163,7 @@ export async function createVenueAction(body: CreateVenueInput): Promise<CreateV
   }
 
   try {
-    const venue = await createVenue(parsed.data);
+    const venue = await createVenue(parsed.data, masterAssetCreateOwnerId(auth.ctx));
     return { ok: true, data: toPlainValue(venue) as Awaited<ReturnType<typeof createVenue>> };
   } catch (e) {
     console.error(e);
@@ -136,6 +176,18 @@ export async function updateVenueAction(
   body: UpdateVenueInput
 ): Promise<UpdateVenueResult> {
   if (!venueId) return { ok: false, error: 'Venue ID required' };
+  const auth = await requireAdminContextFromCookies();
+  if (!auth.ok) return { ok: false, error: auth.error };
+
+  const existing = await prisma.venues.findUnique({
+    where: { id: venueId },
+    select: { id: true, tenant_owner_id: true },
+  });
+  if (!existing) return { ok: false, error: 'Venue not found' };
+  if (!canContextMutateMasterAsset(auth.ctx, existing.tenant_owner_id, 'venues.manage')) {
+    return { ok: false, error: 'Forbidden: you cannot modify this venue' };
+  }
+
   const parsed = updateVenueSchema.safeParse(body);
   if (!parsed.success) {
     const msg = parsed.error.flatten().formErrors[0] ?? 'Validation failed';
@@ -154,6 +206,18 @@ export async function updateVenueAction(
 
 export async function deleteVenueAction(venueId: string): Promise<DeleteVenueResult> {
   if (!venueId) return { ok: false, error: 'Venue ID required' };
+  const auth = await requireAdminContextFromCookies();
+  if (!auth.ok) return { ok: false, error: auth.error };
+
+  const existing = await prisma.venues.findUnique({
+    where: { id: venueId },
+    select: { id: true, tenant_owner_id: true },
+  });
+  if (!existing) return { ok: false, error: 'Venue not found' };
+  if (!canContextMutateMasterAsset(auth.ctx, existing.tenant_owner_id, 'venues.manage')) {
+    return { ok: false, error: 'Forbidden: you cannot delete this venue' };
+  }
+
   try {
     const deleted = await deleteVenue(venueId);
     if (!deleted) return { ok: false, error: 'Venue not found' };

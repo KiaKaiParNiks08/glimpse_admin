@@ -2,6 +2,7 @@ import { parseQuery } from '@/lib/validations';
 import { listExploreItemsQuerySchema } from '@/lib/validations/events';
 import { ok, serverError } from '@/lib/api-response';
 import { getExploreItemsByEventAndCategory } from '@/server/explore-items';
+import { getEventEffectiveFeatures } from '@/server/access';
 
 /**
  * GET /api/events/explore-items
@@ -13,6 +14,11 @@ export async function GET(request: Request) {
     const { searchParams } = new URL(request.url);
     const [query, err] = parseQuery(searchParams, listExploreItemsQuerySchema);
     if (err) return err;
+
+    const features = await getEventEffectiveFeatures(query.event_id);
+    if (!features.event_explore) {
+      return ok({ data: [] });
+    }
 
     const items = await getExploreItemsByEventAndCategory(
       query.event_id,

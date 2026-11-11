@@ -1,8 +1,7 @@
 'use server';
 
 import prisma from '@/server/prisma';
-import { getAdminSessionFromCookies } from '@/lib/admin-session';
-import { isEventAdminAssigned, getEventById } from '@/server/events';
+import { getEventById } from '@/server/events';
 import { getEventDaysByEventId } from '@/server/event-days';
 import { createPresignedUpload } from '@/lib/s3-presign';
 import { IncompleteUploadError, saveUploadedFile } from '@/lib/upload';
@@ -21,18 +20,25 @@ import {
   removeSessionUploader,
   type SessionUploader,
 } from '@/server/session-uploaders';
+import {
+  requireAdminContextFromCookies,
+  canContextAccessEvent,
+  type AdminAccessContext,
+} from '@/server/access';
+import type { PermissionKey } from '@/lib/rbac';
 
-type AdminViewer = { id: string; role_name: 'super_admin' | 'event_admin' };
-
-async function requireAdmin(): Promise<{ ok: true; admin: AdminViewer } | { ok: false; error: string }> {
-  const session = await getAdminSessionFromCookies();
-  if (!session) return { ok: false, error: 'Not authenticated' };
-  return { ok: true, admin: { id: session.id, role_name: session.role_name } };
-}
-
-async function canAccessEvent(eventId: string, viewer: AdminViewer): Promise<boolean> {
-  if (viewer.role_name === 'super_admin') return true;
-  return isEventAdminAssigned(eventId, viewer.id);
+async function requireMediaAccess(
+  eventId: string,
+  requiredPerms: PermissionKey[]
+): Promise<{ ok: true; ctx: AdminAccessContext } | { ok: false; error: string }> {
+  const auth = await requireAdminContextFromCookies();
+  if (!auth.ok) return { ok: false, error: auth.error };
+  if (!requiredPerms.some((p) => auth.ctx.hasPermission(p))) {
+    return { ok: false, error: 'Forbidden: insufficient permissions or plan feature disabled' };
+  }
+  const allowed = await canContextAccessEvent(auth.ctx, eventId);
+  if (!allowed) return { ok: false, error: 'Event not found' };
+  return { ok: true, ctx: auth.ctx };
 }
 
 function normalizeDecimal(value: unknown): number | null {
@@ -46,6 +52,14 @@ function normalizeDecimal(value: unknown): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
+export type EventMediaPermissions = {
+  can_view: boolean;
+  can_upload: boolean;
+  can_delete: boolean;
+  can_manage_sessions: boolean;
+  can_manage_uploaders: boolean;
+};
+
 export type GetEventDaysForMediaResult =
   | {
       ok: true;
@@ -57,6 +71,7 @@ export type GetEventDaysForMediaResult =
       };
       days: Awaited<ReturnType<typeof getEventDaysByEventId>>;
       uploaders: SessionUploader[];
+      permissions: EventMediaPermissions;
     }
   | { ok: false; error: string };
 
@@ -68,10 +83,13 @@ async function findEventSession(eventId: string, eventSessionId: string) {
 }
 
 export async function getEventDaysForMediaAction(eventId: string): Promise<GetEventDaysForMediaResult> {
-  const auth = await requireAdmin();
+  const auth = await requireMediaAccess(eventId, [
+    'media.view',
+    'media.upload',
+    'sessions.view',
+    'events.view',
+  ]);
   if (!auth.ok) return { ok: false, error: auth.error };
-  const allowed = await canAccessEvent(eventId, auth.admin);
-  if (!allowed) return { ok: false, error: 'Event not found' };
 
   const event = await getEventById(eventId);
   if (!event) return { ok: false, error: 'Event not found' };
@@ -103,6 +121,13 @@ export async function getEventDaysForMediaAction(eventId: string): Promise<GetEv
     },
     days: normalizedDays,
     uploaders,
+    permissions: {
+      can_view: true,
+      can_upload: auth.ctx.hasPermission('media.upload'),
+      can_delete: auth.ctx.hasPermission('media.delete'),
+      can_manage_sessions: auth.ctx.hasPermission('sessions.manage'),
+      can_manage_uploaders: auth.ctx.hasPermission('media.delete') || auth.ctx.hasPermission('events.edit'),
+    },
   };
 }
 
@@ -114,10 +139,8 @@ export async function addSessionUploaderAction(input: {
   country_code?: string;
   email?: string;
 }): Promise<{ ok: true; data: SessionUploader[] } | { ok: false; error: string }> {
-  const auth = await requireAdmin();
+  const auth = await requireMediaAccess(input.eventId, ['media.delete', 'events.edit']);
   if (!auth.ok) return { ok: false, error: auth.error };
-  const allowed = await canAccessEvent(input.eventId, auth.admin);
-  if (!allowed) return { ok: false, error: 'Event not found' };
   try {
     const data = await grantSessionUpload({
       eventId: input.eventId,
@@ -144,10 +167,8 @@ export async function removeSessionUploaderAction(input: {
   eventId: string;
   uploaderId: string;
 }): Promise<{ ok: true } | { ok: false; error: string }> {
-  const auth = await requireAdmin();
+  const auth = await requireMediaAccess(input.eventId, ['media.delete', 'events.edit']);
   if (!auth.ok) return { ok: false, error: auth.error };
-  const allowed = await canAccessEvent(input.eventId, auth.admin);
-  if (!allowed) return { ok: false, error: 'Event not found' };
   const removed = await removeSessionUploader(input);
   if (!removed) return { ok: false, error: 'Uploader not found' };
   return { ok: true };
@@ -165,11 +186,8 @@ export async function presignEventDayMediaUploadAction(input: {
   fileSize: number;
   videoDurationSec?: number;
 }): Promise<PresignEventDayMediaResult> {
-  const auth = await requireAdmin();
+  const auth = await requireMediaAccess(input.eventId, ['media.upload']);
   if (!auth.ok) return { ok: false, error: auth.error };
-
-  const allowed = await canAccessEvent(input.eventId, auth.admin);
-  if (!allowed) return { ok: false, error: 'Event not found' };
 
   const session = await findEventSession(input.eventId, input.eventSessionId);
   if (!session) return { ok: false, error: 'Session not found' };
@@ -212,13 +230,10 @@ export type UploadSessionMediaFileResult =
  * The browser does not PUT to S3. Vercel blocks that direct upload.
  */
 export async function uploadSessionMediaFileAction(formData: FormData): Promise<UploadSessionMediaFileResult> {
-  const auth = await requireAdmin();
-  if (!auth.ok) return { ok: false, error: auth.error };
-
   const eventId = String(formData.get('event_id') ?? '').trim();
   const eventSessionId = String(formData.get('event_session_id') ?? '').trim();
-  const allowed = await canAccessEvent(eventId, auth.admin);
-  if (!allowed) return { ok: false, error: 'Event not found' };
+  const auth = await requireMediaAccess(eventId, ['media.upload']);
+  if (!auth.ok) return { ok: false, error: auth.error };
 
   const session = await findEventSession(eventId, eventSessionId);
   if (!session) return { ok: false, error: 'Session not found' };
@@ -271,11 +286,8 @@ export async function createEventDayMediaAction(input: {
     display_order?: number;
   }>;
 }): Promise<CreateEventDayMediaActionResult> {
-  const auth = await requireAdmin();
+  const auth = await requireMediaAccess(input.eventId, ['media.upload']);
   if (!auth.ok) return { ok: false, error: auth.error };
-
-  const allowed = await canAccessEvent(input.eventId, auth.admin);
-  if (!allowed) return { ok: false, error: 'Event not found' };
 
   const session = await findEventSession(input.eventId, input.eventSessionId);
   if (!session) return { ok: false, error: 'Session not found' };
@@ -292,7 +304,7 @@ export async function createEventDayMediaAction(input: {
         media_url: it.media_url,
         media_type: it.media_type,
         display_order: it.display_order ?? i,
-        uploaded_by: auth.admin.id,
+        uploaded_by: auth.ctx.id,
       }))
     );
     return { ok: true, data: created };
@@ -311,11 +323,8 @@ export async function deleteEventDayMediaAction(input: {
   eventId: string;
   mediaId: string;
 }): Promise<DeleteEventDayMediaActionResult> {
-  const auth = await requireAdmin();
+  const auth = await requireMediaAccess(input.eventId, ['media.delete']);
   if (!auth.ok) return { ok: false, error: auth.error };
-
-  const allowed = await canAccessEvent(input.eventId, auth.admin);
-  if (!allowed) return { ok: false, error: 'Event not found' };
 
   const media = await prisma.event_day_media.findFirst({
     where: { id: input.mediaId, event_days: { event_id: input.eventId } },
@@ -335,18 +344,14 @@ export async function deleteEventDayMediaBulkAction(input: {
   eventId: string;
   mediaIds: string[];
 }): Promise<DeleteEventDayMediaBulkActionResult> {
-  const auth = await requireAdmin();
+  const auth = await requireMediaAccess(input.eventId, ['media.delete']);
   if (!auth.ok) return { ok: false, error: auth.error };
-
-  const allowed = await canAccessEvent(input.eventId, auth.admin);
-  if (!allowed) return { ok: false, error: 'Event not found' };
 
   const ids = Array.isArray(input.mediaIds)
     ? Array.from(new Set(input.mediaIds.filter((x) => typeof x === 'string' && x.trim()))).slice(0, 200)
     : [];
   if (ids.length === 0) return { ok: false, error: 'No media selected' };
 
-  // Ensure all IDs belong to this event.
   const rows = await prisma.event_day_media.findMany({
     where: {
       id: { in: ids },
@@ -356,7 +361,6 @@ export async function deleteEventDayMediaBulkAction(input: {
   });
   if (rows.length !== ids.length) return { ok: false, error: 'Some selected media were not found' };
 
-  // Delete S3 objects + DB rows one-by-one to preserve current delete semantics.
   for (const id of ids) {
     await deleteEventDayMediaById(id);
   }
@@ -384,10 +388,8 @@ export async function saveMediaPanelSessionAction(input: {
   start_time?: string | null;
   end_time?: string | null;
 }): Promise<{ ok: true; sessionId: string } | { ok: false; error: string }> {
-  const auth = await requireAdmin();
+  const auth = await requireMediaAccess(input.eventId, ['sessions.manage']);
   if (!auth.ok) return { ok: false, error: auth.error };
-  const allowed = await canAccessEvent(input.eventId, auth.admin);
-  if (!allowed) return { ok: false, error: 'Event not found' };
 
   const title = input.title.trim();
   if (!title) return { ok: false, error: 'Enter a session title' };
@@ -448,4 +450,3 @@ export async function saveMediaPanelSessionAction(input: {
     return { ok: false, error: 'Unable to save session' };
   }
 }
-

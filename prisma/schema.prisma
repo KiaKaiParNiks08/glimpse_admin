@@ -324,6 +324,8 @@ model app_themes {
   updated_at             DateTime? @default(now()) @db.Timestamptz(6)
   button_primary_color   String    @db.VarChar(20)
   button_secondary_color String    @db.VarChar(20)
+  tenant_owner_id        String?   @db.Uuid
+  tenant_owner           users?    @relation("AppThemeTenantOwner", fields: [tenant_owner_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
   events                 events[]
 
   @@index([name], map: "idx_app_themes_name")
@@ -344,6 +346,7 @@ model events {
   main_venue_id                        String?               @db.Uuid
   status                               String                @default("draft") @db.VarChar(20)
   created_by                           String                @db.Uuid
+  tenant_owner_id                      String?               @db.Uuid
   created_at                           DateTime?             @default(now()) @db.Timestamptz(6)
   updated_at                           DateTime?             @default(now()) @db.Timestamptz(6)
   e_invite_pdf_url                     String?
@@ -391,6 +394,7 @@ model events {
   app_themes                           app_themes?           @relation(fields: [app_theme_id], references: [id], onUpdate: NoAction, map: "fk_event_app_theme")
   event_categories                     event_categories      @relation(fields: [category_id], references: [id], onUpdate: NoAction, map: "fk_event_category")
   users                                users                 @relation(fields: [created_by], references: [id], onUpdate: NoAction, map: "fk_event_created_by")
+  tenant_owner                         users?                @relation("EventTenantOwner", fields: [tenant_owner_id], references: [id], onDelete: SetNull, onUpdate: NoAction, map: "fk_event_tenant_owner")
   venues                               venues?               @relation(fields: [main_venue_id], references: [id], onUpdate: NoAction, map: "fk_event_main_venue")
   events_admin                         events_admin[]
   user_favorites                       user_favorites[]
@@ -401,6 +405,7 @@ model events {
 
   @@index([category_id], map: "idx_events_category_id")
   @@index([created_by], map: "idx_events_created_by")
+  @@index([tenant_owner_id], map: "idx_events_tenant_owner_id")
   @@index([main_venue_id], map: "idx_events_main_venue_id")
   @@index([app_theme_id], map: "idx_events_app_theme_id")
   @@index([slug], map: "idx_events_slug")
@@ -427,6 +432,8 @@ model explore_categories {
   title          String          @unique @db.VarChar(150)
   description    String?
   background_url String?
+  tenant_owner_id String?        @db.Uuid
+  tenant_owner   users?          @relation("ExploreCatTenantOwner", fields: [tenant_owner_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
   created_at     DateTime?       @default(now()) @db.Timestamptz(6)
   updated_at     DateTime?       @default(now()) @db.Timestamptz(6)
   explore_items  explore_items[]
@@ -537,8 +544,43 @@ model roles {
   id          Int       @id @default(autoincrement())
   name        String    @unique @db.VarChar(50)
   description String?
+  scope       String    @default("tenant") @db.VarChar(20)
+  is_system   Boolean   @default(false)
+  permissions Json      @default("[]")
   created_at  DateTime? @default(now()) @db.Timestamp(6)
   users       users[]
+}
+
+model purchase_plans {
+  id            String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name          String    @db.VarChar(100)
+  slug          String    @unique @db.VarChar(100)
+  description   String?
+  features      Json      @default("{}")
+  max_events    Int?
+  max_sub_users Int?
+  is_active     Boolean   @default(true)
+  is_default    Boolean   @default(false)
+  created_by    String?   @db.Uuid
+  created_at    DateTime? @default(now()) @db.Timestamptz(6)
+  updated_at    DateTime? @default(now()) @db.Timestamptz(6)
+  creator       users?    @relation("PlanCreatedBy", fields: [created_by], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  users         users[]   @relation("UserPurchasePlan")
+}
+
+model staff_client_assignments {
+  id             String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  staff_user_id  String    @db.Uuid
+  client_user_id String    @db.Uuid
+  assigned_by    String?   @db.Uuid
+  created_at     DateTime? @default(now()) @db.Timestamptz(6)
+  staff_user     users     @relation("StaffAssignments", fields: [staff_user_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  client_user    users     @relation("ClientAssignments", fields: [client_user_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  assigner       users?    @relation("AssignedByStaff", fields: [assigned_by], references: [id], onDelete: SetNull, onUpdate: NoAction)
+
+  @@unique([staff_user_id, client_user_id], map: "unique_staff_client_assignment")
+  @@index([staff_user_id], map: "idx_staff_client_staff_id")
+  @@index([client_user_id], map: "idx_staff_client_client_id")
 }
 
 model user_otps {
@@ -599,8 +641,13 @@ model users {
   created_at                                           DateTime?               @default(now()) @db.Timestamp(6)
   updated_at                                           DateTime?               @default(now()) @db.Timestamp(6)
   avatar_url                                           String?
-  mobile_number                                        String?                 @db.VarChar(20)
+  mobile_number                                        String?                    @db.VarChar(20)
   instagram_id                                         String?
+  parent_user_id                                       String?                    @db.Uuid
+  tenant_owner_id                                      String?                    @db.Uuid
+  purchase_plan_id                                     String?                    @db.Uuid
+  feature_overrides                                    Json?
+  custom_permissions                                   Json?
   comments                                             comments[]
   event_admins_event_admins_assigned_byTousers         event_admins[]          @relation("event_admins_assigned_byTousers")
   event_admins_event_admins_user_idTousers             event_admins[]          @relation("event_admins_user_idTousers")
@@ -625,9 +672,24 @@ model users {
   media_assets                                         media_assets[]
   user_event_face_scans                                user_event_face_scans[]
   user_event_profiles                                  user_event_profiles[]
-  roles                                                roles                   @relation(fields: [role_id], references: [id], onUpdate: NoAction)
+  roles                                                roles                      @relation(fields: [role_id], references: [id], onUpdate: NoAction)
+  parent_user                                          users?                     @relation("UserParent", fields: [parent_user_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  child_users                                          users[]                    @relation("UserParent")
+  tenant_owner                                         users?                     @relation("UserTenantOwner", fields: [tenant_owner_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  tenant_members                                       users[]                    @relation("UserTenantOwner")
+  purchase_plan                                        purchase_plans?            @relation("UserPurchasePlan", fields: [purchase_plan_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  purchase_plans_created                               purchase_plans[]           @relation("PlanCreatedBy")
+  staff_assignments                                    staff_client_assignments[] @relation("StaffAssignments")
+  client_assignments                                   staff_client_assignments[] @relation("ClientAssignments")
+  assigned_staff_links                                 staff_client_assignments[] @relation("AssignedByStaff")
+  owned_events                                         events[]                   @relation("EventTenantOwner")
+  owned_venues                                         venues[]                   @relation("VenueTenantOwner")
+  owned_app_themes                                     app_themes[]               @relation("AppThemeTenantOwner")
+  owned_explore_categories                             explore_categories[]       @relation("ExploreCatTenantOwner")
 
   @@index([role_id], map: "idx_users_role_id")
+  @@index([parent_user_id], map: "idx_users_parent_user_id")
+  @@index([tenant_owner_id], map: "idx_users_tenant_owner_id")
 }
 
 model venue_contacts {
@@ -694,6 +756,8 @@ model venues {
   state_name       String?            @db.VarChar(100)
   country          String?            @db.VarChar(100)
   postal_code      String?            @db.VarChar(20)
+  tenant_owner_id  String?            @db.Uuid
+  tenant_owner     users?             @relation("VenueTenantOwner", fields: [tenant_owner_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
   created_at       DateTime?          @default(now()) @db.Timestamptz(6)
   updated_at       DateTime?          @default(now()) @db.Timestamptz(6)
   event_sessions   event_sessions[]

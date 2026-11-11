@@ -8,7 +8,7 @@ import {
 import { readStoredMedia } from './storage';
 
 export type ProfileFaceCheck =
-  | { ok: true; first: boolean }
+  | { ok: true; first: boolean; verified?: boolean }
   | { ok: false; message: string };
 
 const DIFFERENT_PERSON =
@@ -62,7 +62,7 @@ export async function verifyProfileFace(userId: string, nextBytes: Buffer): Prom
 
   const minSimilarity = rekognitionProfileUpdateMinSimilarity();
   const compared = await compareFacePhotos(stored, nextBytes, minSimilarity);
-  if (compared.ok) return { ok: true, first: false };
+  if (compared.ok) return { ok: true, first: false, verified: true };
   if (compared.reason === 'too_large') {
     return { ok: false, message: 'Use a profile photo under 5 MB so the face can be checked.' };
   }
@@ -77,7 +77,7 @@ export async function verifyProfileFace(userId: string, nextBytes: Buffer): Prom
 async function checkFirstProfileFace(nextBytes: Buffer): Promise<ProfileFaceCheck> {
   const detected = await detectSingleProfileFace(nextBytes);
   if (detected === 'unavailable') return { ok: true, first: true };
-  if (detected === 'one') return { ok: true, first: true };
+  if (detected === 'one') return { ok: true, first: true, verified: true };
   if (detected === 'too_large') {
     return { ok: false, message: 'Use a profile photo under 5 MB so the face can be checked.' };
   }

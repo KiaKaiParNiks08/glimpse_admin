@@ -1,6 +1,6 @@
 import type { NextRequest } from 'next/server';
 import { NextResponse } from 'next/server';
-import { isEventAdminAssigned } from '@/server/events';
+import { canContextAccessEvent, getAdminAccessContext } from '@/server/access';
 import { isFaceWorkerAuthorized, isVercelCronAuthorized } from '@/lib/face-worker-auth';
 import { getAdminFromAuthorizationHeader, getUserFromAuthorizationHeader } from '@/lib/jwt';
 
@@ -8,9 +8,7 @@ function isUuidLike(val: string): boolean {
   return /^[0-9a-fA-F-]{36}$/.test(val);
 }
 
-
 function isPublicApiPath(pathname: string): boolean {
-  // Public endpoints (no admin JWT required).
   if (pathname === '/api/admin/login') return true;
   if (pathname === '/api/docs/openapi') return true;
   if (pathname === '/api/auth') return true;
@@ -27,9 +25,6 @@ function getEventIdFromRequest(request: NextRequest): string | null {
   const { pathname, searchParams } = request.nextUrl;
   const segments = pathname.split('/').filter(Boolean);
 
-  // Matches:
-  // - /api/events/<eventId>
-  // - /api/events/<eventId>/days
   const eventIdFromPath =
     segments.length >= 3 && segments[0] === 'api' && segments[1] === 'events'
       ? segments[2]
@@ -66,14 +61,12 @@ export async function middleware(request: NextRequest) {
     return NextResponse.json({ message: 'Not authenticated', data: null }, { status: 401 });
   }
 
-  if (isEventsApi) {
-    // event_admin can only access event APIs for events they are assigned to.
+  if (isEventsApi && adminUser) {
+    // Non-super-admin accounts can only access event APIs within their tenant / assignments.
     const eventIdCandidate = getEventIdFromRequest(request);
-
-    // If no eventId can be determined, allow request and let route validation handle it.
-    if (eventIdCandidate && userAuth.role_name === 'event_admin') {
-      const allowed = await isEventAdminAssigned(eventIdCandidate, userAuth.id);
-      if (!allowed) {
+    if (eventIdCandidate && adminUser.role_name !== 'super_admin') {
+      const ctx = await getAdminAccessContext(adminUser.id);
+      if (!ctx || !(await canContextAccessEvent(ctx, eventIdCandidate))) {
         return NextResponse.json({ message: 'Forbidden', data: null }, { status: 403 });
       }
     }
@@ -86,4 +79,3 @@ export const config = {
   matcher: ['/api/:path*'],
   runtime: 'nodejs',
 };
-

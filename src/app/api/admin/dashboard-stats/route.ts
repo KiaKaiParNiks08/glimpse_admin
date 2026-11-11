@@ -1,5 +1,5 @@
 import { badRequest, forbidden, ok } from '@/lib/api-response';
-import { getAdminFromAuthorizationHeader } from '@/lib/jwt';
+import { getAdminContextFromRequest } from '@/server/access';
 import { getDashboardStats } from '@/server/dashboard-stats';
 import { parseQuery } from '@/lib/validations';
 import { z } from 'zod';
@@ -26,11 +26,8 @@ function parseUtcYmdToStartEnd(dateYmd: string): { start: Date; end: Date } {
 }
 
 export async function GET(request: Request) {
-  const admin = getAdminFromAuthorizationHeader(request);
-  if (!admin) return forbidden('Not authenticated');
-  if (admin.role_name !== 'super_admin' && admin.role_name !== 'event_admin') {
-    return forbidden('Forbidden');
-  }
+  const ctx = await getAdminContextFromRequest(request);
+  if (!ctx) return forbidden('Not authenticated');
 
   const { searchParams } = new URL(request.url);
   const [query, err] = parseQuery(searchParams, dashboardStatsQuerySchema);
@@ -58,10 +55,7 @@ export async function GET(request: Request) {
     dateRange = { start, end };
   }
 
-  const stats = await getDashboardStats({
-    id: admin.id,
-    role_name: admin.role_name,
-  }, dateRange);
+  const stats = await getDashboardStats(ctx, dateRange);
 
   return ok(stats, 'Success');
 }

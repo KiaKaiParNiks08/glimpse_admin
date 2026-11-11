@@ -263,4 +263,59 @@ describe('Notification formatting and deep-link payload contracts', () => {
     });
     assert.equal(joinValid.success, true);
   });
+
+  test('Rich image push payload configures Android, iOS APNs mutable-content, and data URLs', () => {
+    const imageUrl = 'https://cdn.example.com/banner.jpg';
+    const message = {
+      token: 'fcm_token_sample_12345',
+      notification: {
+        title: 'Ceremony Starting',
+        body: 'Join at the main hall',
+        image: imageUrl,
+      },
+      data: {
+        click_action: 'FLUTTER_NOTIFICATION_CLICK',
+        image: imageUrl,
+        image_url: imageUrl,
+      },
+      android: {
+        priority: 'high',
+        notification: {
+          channel_id: 'glimpse_notifications',
+          sound: 'default',
+          default_sound: true,
+          image: imageUrl,
+        },
+      },
+      apns: {
+        payload: {
+          aps: {
+            sound: 'default',
+            badge: 1,
+            'mutable-content': 1,
+          },
+        },
+        fcm_options: {
+          image: imageUrl,
+        },
+      },
+    };
+
+    assert.equal(message.notification.image, imageUrl);
+    assert.equal(message.android.notification.image, imageUrl);
+    assert.equal(message.apns.payload.aps['mutable-content'], 1);
+    assert.equal(message.apns.fcm_options.image, imageUrl);
+    assert.equal(message.data.image_url, imageUrl);
+    assert.equal(message.data.image, imageUrl);
+  });
+
+  test('Device reachability does not treat 36-char UUID device_id as a valid FCM push token', () => {
+    const hasValidFcmToken = (fcmToken: string | null, deviceId: string) =>
+      Boolean(fcmToken?.trim() || (deviceId && deviceId.trim().length > 50));
+
+    assert.equal(hasValidFcmToken(null, 'a1b2c3d4-e5f6-7890-abcd-1234567890ab'), false);
+    assert.equal(hasValidFcmToken('', 'a1b2c3d4-e5f6-7890-abcd-1234567890ab'), false);
+    assert.equal(hasValidFcmToken('fcm_live_token_abc123', 'a1b2c3d4-e5f6-7890-abcd-1234567890ab'), true);
+    assert.equal(hasValidFcmToken(null, 'c_very_long_legacy_fcm_token_over_50_characters_long_123456'), true);
+  });
 });

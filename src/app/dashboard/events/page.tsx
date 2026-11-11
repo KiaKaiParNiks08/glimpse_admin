@@ -7,22 +7,20 @@ import { CurrentHappeningModal } from './CurrentHappeningModal';
 import { EventShareQrModal } from './EventShareQrModal';
 import { adminBearerAuthHeader } from '@/lib/admin-jwt-client';
 import { useRouteProgress } from '@/components/navigation/NavigationProvider';
+import { useAdminAccess } from '@/components/auth/AdminAccessContext';
 import Link from 'next/link';
 import {
   getEventsAction,
   deleteEventAction,
   updateEventAction,
-  getEventCategoriesAction,
-  getVenuesForSelectAction,
   type EventListItem,
-  type EventCategoryOption,
-  type VenueOption,
 } from '@/app/actions/events';
 
 const PAGE_LIMIT = 10;
 
 export default function DashboardEventsPage() {
   const { pendingHref, navigate } = useRouteProgress();
+  const { access, hasPermission, hasFeature } = useAdminAccess();
   const [events, setEvents] = useState<EventListItem[]>([]);
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
@@ -31,55 +29,25 @@ export default function DashboardEventsPage() {
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
-  const [currentUser, setCurrentUser] = useState<{ id: string; full_name: string; email: string; role_name: string } | null>(null);
 
   const [selectedEventId, setSelectedEventId] = useState<string | null>(null);
   const [selectedEventTitle, setSelectedEventTitle] = useState('');
   const [currentHappeningOpen, setCurrentHappeningOpen] = useState(false);
   const [shareQrOpen, setShareQrOpen] = useState(false);
   const [listRefreshKey, setListRefreshKey] = useState(0);
-  const [categories, setCategories] = useState<EventCategoryOption[]>([]);
-  const [venues, setVenues] = useState<VenueOption[]>([]);
   const [updatingStatusId, setUpdatingStatusId] = useState<string | null>(null);
 
   const debouncedSearch = useDebouncedValue(search, 300);
 
-  useEffect(() => {
-    if (typeof window === 'undefined') return;
-    const headers = adminBearerAuthHeader();
-    if (!headers.Authorization) {
-      setCurrentUser(null);
-      return;
-    }
-
-    fetch('/api/admin/me', { headers })
-      .then(async (r) => {
-        if (!r.ok) return;
-        type AdminUser = { id: string; full_name: string; email: string; role_name: string };
-        type AdminMeJson = {
-          data?: { user?: AdminUser } | null;
-          user?: AdminUser;
-        };
-        const json = (await r.json()) as AdminMeJson;
-        setCurrentUser(json.data?.user ?? json.user ?? null);
-      })
-      .catch(() => setCurrentUser(null));
-  }, []);
-
-  // Preload categories and venues for the create/edit form
-  useEffect(() => {
-    let cancelled = false;
-    Promise.all([getEventCategoriesAction(), getVenuesForSelectAction()]).then(
-      ([catRes, venRes]) => {
-        if (cancelled) return;
-        if (catRes.ok) setCategories(catRes.data);
-        if (venRes.ok) setVenues(venRes.data);
-      }
-    );
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+  const canCreate = hasPermission('events.create') && hasFeature('event_basic');
+  const canEdit = hasPermission('events.edit');
+  const canDelete = hasPermission('events.delete');
+  const canHappening = hasPermission('happening.manage') && hasFeature('event_current_happening');
+  const canQr = hasPermission('qr.view') && hasFeature('event_qr');
+  const canMedia = hasPermission('media.view') || hasPermission('media.upload');
+  const canPeopleMedia = hasPermission('people_media.view') && hasFeature('ai_recognition');
+  const canNotify = hasPermission('notifications.send') && hasFeature('push_notifications');
+  const canExportGuests = hasPermission('guests.export') && hasFeature('event_guests_export');
 
   useEffect(() => {
     let cancelled = false;
@@ -117,8 +85,8 @@ export default function DashboardEventsPage() {
   }, [page, debouncedSearch, statusFilter, listRefreshKey]);
 
   function openCreateForm() {
-    if (currentUser?.role_name === 'event_admin') {
-      alert('Event Admin can’t create events. They can only edit assigned events.');
+    if (!canCreate) {
+      alert('Your role or purchase plan does not allow creating events.');
       return;
     }
     navigate('/dashboard/events/addEditEvent?mode=create');
@@ -216,14 +184,17 @@ export default function DashboardEventsPage() {
       <div className={styles.headerRow}>
         <div className={styles.headerText}>
           <h1>Events</h1>
-          <p>Manage events, dates, categories, and main venue.</p>
+          <p>
+            Manage your scoped events, dates, sessions, and enabled event features.
+            {access?.purchase_plan_name ? ` (Plan: ${access.purchase_plan_name})` : ''}
+          </p>
         </div>
-        {currentUser?.role_name !== 'event_admin' && (
+        {canCreate && (
           <button
             type="button"
             onClick={openCreateForm}
             className={styles.newEventButton}
-            disabled={!currentUser}
+            disabled={!access}
             aria-busy={pendingHref === '/dashboard/events/addEditEvent?mode=create' || undefined}
           >
             + New event
@@ -294,7 +265,7 @@ export default function DashboardEventsPage() {
               <select
                 value={ev.status}
                 onChange={(e) => handleStatusChange(ev.id, e.target.value)}
-                disabled={updatingStatusId === ev.id}
+                disabled={!canEdit || updatingStatusId === ev.id}
                 className={`${styles.statusSelect} ${
                   ev.status === 'published'
                     ? styles.published
@@ -304,7 +275,7 @@ export default function DashboardEventsPage() {
                         ? styles.archived
                         : styles.draft
                 }`}
-                title="Change status"
+                title={canEdit ? 'Change status' : 'Read-only status'}
               >
                 <option value="draft">Draft</option>
                 <option value="published">Published</option>
@@ -331,51 +302,70 @@ export default function DashboardEventsPage() {
             </td>
             <td className={styles.td} style={{ textAlign: 'right' }}>
               <div className={styles.actions}>
-                <button
-                  type="button"
-                  onClick={() => openEditForm(ev)}
-                  className={styles.btnEdit}
-                  aria-busy={
-                    pendingHref ===
-                      `/dashboard/events/addEditEvent?mode=edit&eventId=${encodeURIComponent(ev.id)}` ||
-                    undefined
-                  }
-                >
-                  Edit
-                </button>
-                <button
-                  type="button"
-                  onClick={() => openCurrentHappening(ev)}
-                  className={styles.btnEdit}
-                >
-                  Happening
-                </button>
-                <button
-                  type="button"
-                  className={styles.btnEdit}
-                  onClick={() => {
-                    setSelectedEventId(ev.id);
-                    setSelectedEventTitle(ev.title);
-                    setShareQrOpen(true);
-                  }}
-                >
-                  QR
-                </button>
-                <Link
-                  href={`/dashboard/events/${ev.id}/media`}
-                  className={styles.btnEdit}
-                  title="Manage day-wise media"
-                >
-                  Media
-                </Link>
-                <Link
-                  href={`/dashboard/events/${ev.id}/people-media`}
-                  className={styles.btnEdit}
-                  title="Face processing status and matches"
-                >
-                  People
-                </Link>
-                {currentUser?.role_name === 'super_admin' && (
+                {canEdit && (
+                  <button
+                    type="button"
+                    onClick={() => openEditForm(ev)}
+                    className={styles.btnEdit}
+                    aria-busy={
+                      pendingHref ===
+                        `/dashboard/events/addEditEvent?mode=edit&eventId=${encodeURIComponent(ev.id)}` ||
+                      undefined
+                    }
+                  >
+                    Edit
+                  </button>
+                )}
+                {canHappening && (
+                  <button
+                    type="button"
+                    onClick={() => openCurrentHappening(ev)}
+                    className={styles.btnEdit}
+                  >
+                    Happening
+                  </button>
+                )}
+                {canQr && (
+                  <button
+                    type="button"
+                    className={styles.btnEdit}
+                    onClick={() => {
+                      setSelectedEventId(ev.id);
+                      setSelectedEventTitle(ev.title);
+                      setShareQrOpen(true);
+                    }}
+                  >
+                    QR
+                  </button>
+                )}
+                {canMedia && (
+                  <Link
+                    href={`/dashboard/events/${ev.id}/media`}
+                    className={styles.btnEdit}
+                    title="Manage session media"
+                  >
+                    Media
+                  </Link>
+                )}
+                {canPeopleMedia && (
+                  <Link
+                    href={`/dashboard/events/${ev.id}/people-media`}
+                    className={styles.btnEdit}
+                    title="Face processing status and matches"
+                  >
+                    People
+                  </Link>
+                )}
+                {canNotify && (
+                  <Link
+                    href={`/dashboard/events/${ev.id}/notifications`}
+                    className={styles.btnEdit}
+                    title="Send push notification for this event"
+                  >
+                    Notify
+                  </Link>
+                )}
+                {canExportGuests && (
                   <button
                     type="button"
                     onClick={() => handleExportGuests(ev)}
@@ -385,7 +375,7 @@ export default function DashboardEventsPage() {
                     Export users
                   </button>
                 )}
-                {currentUser?.role_name !== 'event_admin' && (
+                {canDelete && (
                   <button
                     type="button"
                     onClick={() => handleDelete(ev)}
@@ -406,7 +396,7 @@ export default function DashboardEventsPage() {
         onClose={() => setShareQrOpen(false)}
       />
 
-      {currentUser && (
+      {access && (
         <CurrentHappeningModal
           open={currentHappeningOpen}
           eventId={selectedEventId}

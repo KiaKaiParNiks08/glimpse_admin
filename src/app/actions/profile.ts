@@ -7,6 +7,11 @@ import {
 } from '@/lib/admin-session';
 import { updateUserSchema } from '@/lib/validations/users';
 import { findUserByMobileNumber, getUserById, updateUser } from '@/server/users';
+import {
+  getAdminAccessContext,
+  toClientAdminAccess,
+  type ClientAdminAccess,
+} from '@/server/access';
 
 export type MyProfile = {
   id: string;
@@ -17,6 +22,7 @@ export type MyProfile = {
   country_code: string | null;
   avatar_url: string | null;
   instagram_id: string | null;
+  access?: ClientAdminAccess;
 };
 
 export type GetMyProfileResult =
@@ -45,12 +51,6 @@ async function getSessionUser() {
   return session;
 }
 
-function roleNameFromId(roleId: number): string {
-  if (roleId === 1) return 'super_admin';
-  if (roleId === 2) return 'event_admin';
-  return 'admin';
-}
-
 /**
  * The admin JWT from the session cookie, so a tab without one in sessionStorage
  * (e.g. a newly opened tab) can call the Bearer-protected `/api/*` routes.
@@ -68,19 +68,23 @@ export async function getMyProfileAction(): Promise<GetMyProfileResult> {
   if (!session) return { ok: false, error: 'Not authenticated' };
 
   try {
-    const user = await getUserById(session.id);
-    if (!user) return { ok: false, error: 'User not found' };
+    const [user, ctx] = await Promise.all([
+      getUserById(session.id),
+      getAdminAccessContext(session.id),
+    ]);
+    if (!user || !ctx) return { ok: false, error: 'User not found' };
     return {
       ok: true,
       data: {
         id: user.id,
         full_name: user.full_name,
         email: user.email,
-        role_name: roleNameFromId(user.role_id),
+        role_name: ctx.role_name,
         mobile_number: user.mobile_number,
         country_code: user.country_code,
         avatar_url: user.avatar_url,
         instagram_id: user.instagram_id,
+        access: toClientAdminAccess(ctx),
       },
     };
   } catch (e) {
@@ -116,6 +120,7 @@ export async function updateMyProfileAction(
 
     const user = await updateUser(session.id, parsed.data);
     if (!user) return { ok: false, error: 'User not found' };
+    const ctx = await getAdminAccessContext(session.id);
 
     return {
       ok: true,
@@ -123,11 +128,12 @@ export async function updateMyProfileAction(
         id: user.id,
         full_name: user.full_name,
         email: user.email,
-        role_name: roleNameFromId(user.role_id),
+        role_name: ctx?.role_name ?? session.role_name,
         mobile_number: user.mobile_number,
         country_code: user.country_code,
         avatar_url: user.avatar_url,
         instagram_id: user.instagram_id,
+        ...(ctx ? { access: toClientAdminAccess(ctx) } : {}),
       },
     };
   } catch (e) {

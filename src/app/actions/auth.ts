@@ -1,10 +1,8 @@
 'use server';
 
 import { adminLoginRequestSchema } from '@/lib/validations/auth';
-import {
-  findUserByEmailAndVerifyPassword,
-  ADMIN_ROLE_NAMES,
-} from '@/server/users';
+import { isAdminRole } from '@/lib/rbac';
+import { findUserByEmailAndVerifyPassword } from '@/server/users';
 
 export type AdminLoginResult =
   | { ok: true; user: { id: string; full_name: string; email: string; role_name: string } }
@@ -29,11 +27,10 @@ export async function adminLoginAction(
       return { ok: false, error: 'Invalid email or password' };
     }
 
-    const allowedRoles = new Set(ADMIN_ROLE_NAMES);
-    if (!allowedRoles.has(user.role_name as (typeof ADMIN_ROLE_NAMES)[number])) {
+    if (!isAdminRole(user.role_name)) {
       return {
         ok: false,
-        error: 'Access denied. Only SuperAdmin and Event Admin can sign in here.',
+        error: 'Access denied. Guest accounts cannot sign in to the admin portal.',
       };
     }
 

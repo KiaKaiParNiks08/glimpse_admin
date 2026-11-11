@@ -83,7 +83,9 @@ export async function POST(
     let face_reference = null;
     if (faceCheck.first) {
       try {
-        face_reference = await enrollStoredFaceReference(user.id, saved.storageKey);
+        face_reference = await enrollStoredFaceReference(user.id, saved.storageKey, {
+          verifiedSingleFace: faceCheck.verified === true,
+        });
       } catch (error) {
         console.error('[profile-picture] face reference was not enrolled', error);
         face_reference = {

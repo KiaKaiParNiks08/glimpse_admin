@@ -4,7 +4,10 @@ import { getUserFromAuthorizationHeader } from '@/lib/jwt';
 import { joinAuthenticatedUserToEvent } from '@/server/auth-join';
 
 function joinEventJson(status: number, body: Record<string, unknown>) {
-  return NextResponse.json(body, { status });
+  return NextResponse.json(body, {
+    status,
+    headers: { 'Cache-Control': 'no-store' },
+  });
 }
 
 /**

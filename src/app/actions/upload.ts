@@ -1,5 +1,6 @@
 'use server';
 
+import sharp from 'sharp';
 import {
   generateS3Key,
   getStoredObjectUrl,
@@ -92,6 +93,59 @@ export async function uploadFileServerAction(
     ) {
       return { ok: false, error: message };
     }
+    return { ok: false, error: message };
+  }
+}
+
+/**
+ * Notification image upload: converts WebP/oversized images into a fast-loading JPEG/PNG (< 800 KB)
+ * so Android BigPictureStyle and iOS UNNotificationAttachment render reliably.
+ */
+export async function uploadNotificationImageAction(
+  formData: FormData
+): Promise<UploadFileResult> {
+  const file = formData.get('file');
+  if (!isFileLike(file)) {
+    return { ok: false, error: 'No image file provided' };
+  }
+
+  const mimeType = (file.type || '').split(';')[0].trim().toLowerCase() || 'application/octet-stream';
+  const kind = getMediaKind(mimeType);
+  if (kind !== 'image') {
+    return { ok: false, error: 'Invalid file type. Use an image (JPEG, PNG, GIF, WebP).' };
+  }
+
+  const validationError = validateMediaFile({ type: mimeType, size: file.size }, 'image');
+  if (validationError) {
+    return { ok: false, error: validationError };
+  }
+
+  try {
+    const rawBuffer = Buffer.from(await file.arrayBuffer());
+    let outBuffer: Buffer = rawBuffer;
+    let outMime = mimeType;
+
+    // Android FCM recommends <= 1MB; iOS UNNotificationAttachment requires JPEG/PNG/GIF (no WebP).
+    if (mimeType === 'image/webp' || rawBuffer.length > 800 * 1024) {
+      try {
+        outBuffer = await sharp(rawBuffer)
+          .rotate()
+          .resize({ width: 1200, height: 1200, fit: 'inside', withoutEnlargement: true })
+          .jpeg({ quality: 84 })
+          .toBuffer();
+        outMime = 'image/jpeg';
+      } catch (err) {
+        console.warn('[uploadNotificationImageAction] sharp optimization skipped, using original buffer:', err);
+      }
+    }
+
+    const key = generateS3Key('uploads', outMime);
+    await putObjectFromBuffer(key, outBuffer, outMime);
+    const url = getStoredObjectUrl(key);
+    return { ok: true, url };
+  } catch (e) {
+    const message = e instanceof Error ? e.message : 'Upload failed';
+    console.error('[uploadNotificationImageAction]', e);
     return { ok: false, error: message };
   }
 }

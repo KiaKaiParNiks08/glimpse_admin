@@ -1,8 +1,9 @@
 import { parseQuery } from '@/lib/validations';
 import { eventTeamQuerySchema } from '@/lib/validations/events';
-import { badRequest, notFound, ok, serverError } from '@/lib/api-response';
+import { badRequest, forbidden, notFound, ok, serverError } from '@/lib/api-response';
 import { getUserFromAuthorizationHeader } from '@/lib/jwt';
 import { getEventTeam } from '@/server/event-team';
+import { getEventEffectiveFeatures } from '@/server/access';
 
 /**
  * GET /api/events/team?event_id=
@@ -21,9 +22,15 @@ export async function GET(request: Request) {
       return badRequest('event_id is required as a query parameter or via an authenticated Bearer token');
     }
 
-    const team = await getEventTeam(eventId);
+    const [team, features] = await Promise.all([
+      getEventTeam(eventId),
+      getEventEffectiveFeatures(eventId),
+    ]);
     if (!team) return notFound('Event not found');
-    return ok(team);
+    if (!features.event_team) return forbidden('Event team is disabled for this event');
+    const res = ok(team);
+    res.headers.set('Cache-Control', 'no-store');
+    return res;
   } catch (e) {
     console.error(e);
     return serverError('Unable to fetch event team');

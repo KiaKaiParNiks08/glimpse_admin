@@ -1,5 +1,6 @@
 'use server';
 
+import prisma from '@/server/prisma';
 import {
   listExploreCategoriesQuerySchema,
   createExploreCategorySchema,
@@ -25,6 +26,12 @@ import {
   deleteExploreItem,
   listAllExploreCategoriesWithItems,
 } from '@/server/explore-categories';
+import {
+  requireAdminContextFromCookies,
+  buildMasterDataWhere,
+  canContextMutateMasterAsset,
+  masterAssetCreateOwnerId,
+} from '@/server/access';
 
 function toPlainValue(val: unknown): unknown {
   if (val === null || val === undefined) return val;
@@ -46,6 +53,7 @@ export type ExploreCategoryListItem = {
   title: string;
   description: string | null;
   background_url: string | null;
+  tenant_owner_id: string | null;
   created_at: string | null;
   updated_at: string | null;
   _count: { explore_items: number };
@@ -134,6 +142,15 @@ export async function getExploreCategoriesAction(params: {
   limit?: number;
   search?: string;
 }): Promise<GetExploreCategoriesResult> {
+  const auth = await requireAdminContextFromCookies();
+  if (!auth.ok) return { ok: false, error: auth.error };
+  if (
+    !auth.ctx.hasPermission('explore_categories.view') &&
+    !auth.ctx.hasPermission('explore_categories.manage')
+  ) {
+    return { ok: false, error: 'Forbidden' };
+  }
+
   const parsed = listExploreCategoriesQuerySchema.safeParse({
     page: params.page ?? 1,
     limit: params.limit ?? 20,
@@ -142,7 +159,10 @@ export async function getExploreCategoriesAction(params: {
   if (!parsed.success) return { ok: false, error: 'Invalid parameters' };
 
   try {
-    const { categories, total } = await listExploreCategories(parsed.data as ListExploreCategoriesQuery);
+    const { categories, total } = await listExploreCategories(
+      parsed.data as ListExploreCategoriesQuery,
+      buildMasterDataWhere(auth.ctx)
+    );
     const limit = parsed.data.limit;
     return {
       ok: true,
@@ -164,9 +184,29 @@ export async function getExploreCategoryByIdAction(
   categoryId: string
 ): Promise<GetExploreCategoryByIdResult> {
   if (!categoryId) return { ok: false, error: 'Category ID required' };
+  const auth = await requireAdminContextFromCookies();
+  if (!auth.ok) return { ok: false, error: auth.error };
+  if (
+    !auth.ctx.hasPermission('explore_categories.view') &&
+    !auth.ctx.hasPermission('explore_categories.manage')
+  ) {
+    return { ok: false, error: 'Forbidden' };
+  }
+
   try {
     const category = await getExploreCategoryById(categoryId);
     if (!category) return { ok: false, error: 'Category not found' };
+    if (
+      category.tenant_owner_id &&
+      auth.ctx.tier !== 'super_admin' &&
+      !(
+        auth.ctx.tier === 'super_staff' &&
+        auth.ctx.assigned_client_ids.includes(category.tenant_owner_id)
+      ) &&
+      category.tenant_owner_id !== (auth.ctx.tenant_owner_id ?? auth.ctx.id)
+    ) {
+      return { ok: false, error: 'Category not found' };
+    }
     return { ok: true, data: toPlainValue(category) as Awaited<ReturnType<typeof getExploreCategoryById>> };
   } catch (e) {
     console.error(e);
@@ -177,13 +217,19 @@ export async function getExploreCategoryByIdAction(
 export async function createExploreCategoryAction(
   body: CreateExploreCategoryInput
 ): Promise<CreateExploreCategoryResult> {
+  const auth = await requireAdminContextFromCookies();
+  if (!auth.ok) return { ok: false, error: auth.error };
+  if (!auth.ctx.hasPermission('explore_categories.manage')) {
+    return { ok: false, error: 'Forbidden: explore category management is disabled for your role or plan' };
+  }
+
   const parsed = createExploreCategorySchema.safeParse(body);
   if (!parsed.success) {
     const msg = parsed.error.flatten().formErrors[0] ?? 'Validation failed';
     return { ok: false, error: msg };
   }
   try {
-    const category = await createExploreCategory(parsed.data);
+    const category = await createExploreCategory(parsed.data, masterAssetCreateOwnerId(auth.ctx));
     return { ok: true, data: mapCategoryToList(category) as ExploreCategoryListItem };
   } catch (e) {
     console.error(e);
@@ -196,6 +242,18 @@ export async function updateExploreCategoryAction(
   body: UpdateExploreCategoryInput
 ): Promise<UpdateExploreCategoryResult> {
   if (!categoryId) return { ok: false, error: 'Category ID required' };
+  const auth = await requireAdminContextFromCookies();
+  if (!auth.ok) return { ok: false, error: auth.error };
+
+  const existing = await prisma.explore_categories.findUnique({
+    where: { id: categoryId },
+    select: { id: true, tenant_owner_id: true },
+  });
+  if (!existing) return { ok: false, error: 'Category not found' };
+  if (!canContextMutateMasterAsset(auth.ctx, existing.tenant_owner_id, 'explore_categories.manage')) {
+    return { ok: false, error: 'Forbidden: you cannot modify this category' };
+  }
+
   const parsed = updateExploreCategorySchema.safeParse(body);
   if (!parsed.success) {
     const msg = parsed.error.flatten().formErrors[0] ?? 'Validation failed';
@@ -215,6 +273,18 @@ export async function deleteExploreCategoryAction(
   categoryId: string
 ): Promise<DeleteExploreCategoryResult> {
   if (!categoryId) return { ok: false, error: 'Category ID required' };
+  const auth = await requireAdminContextFromCookies();
+  if (!auth.ok) return { ok: false, error: auth.error };
+
+  const existing = await prisma.explore_categories.findUnique({
+    where: { id: categoryId },
+    select: { id: true, tenant_owner_id: true },
+  });
+  if (!existing) return { ok: false, error: 'Category not found' };
+  if (!canContextMutateMasterAsset(auth.ctx, existing.tenant_owner_id, 'explore_categories.manage')) {
+    return { ok: false, error: 'Forbidden: you cannot delete this category' };
+  }
+
   try {
     const deleted = await deleteExploreCategory(categoryId);
     if (!deleted) return { ok: false, error: 'Category not found' };
@@ -228,11 +298,24 @@ export async function deleteExploreCategoryAction(
 export async function createExploreItemAction(
   body: CreateExploreItemInput
 ): Promise<CreateExploreItemResult> {
+  const auth = await requireAdminContextFromCookies();
+  if (!auth.ok) return { ok: false, error: auth.error };
+
   const parsed = createExploreItemSchema.safeParse(body);
   if (!parsed.success) {
     const msg = parsed.error.flatten().formErrors[0] ?? 'Validation failed';
     return { ok: false, error: msg };
   }
+
+  const cat = await prisma.explore_categories.findUnique({
+    where: { id: parsed.data.category_id },
+    select: { id: true, tenant_owner_id: true },
+  });
+  if (!cat) return { ok: false, error: 'Category not found' };
+  if (!canContextMutateMasterAsset(auth.ctx, cat.tenant_owner_id, 'explore_categories.manage')) {
+    return { ok: false, error: 'Forbidden: you cannot add items to this category' };
+  }
+
   try {
     const item = await createExploreItem(parsed.data);
     return { ok: true, data: mapItemToList(item) };
@@ -247,6 +330,24 @@ export async function updateExploreItemAction(
   body: UpdateExploreItemInput
 ): Promise<UpdateExploreItemResult> {
   if (!itemId) return { ok: false, error: 'Item ID required' };
+  const auth = await requireAdminContextFromCookies();
+  if (!auth.ok) return { ok: false, error: auth.error };
+
+  const existing = await prisma.explore_items.findUnique({
+    where: { id: itemId },
+    select: { id: true, explore_categories: { select: { tenant_owner_id: true } } },
+  });
+  if (!existing) return { ok: false, error: 'Explore item not found' };
+  if (
+    !canContextMutateMasterAsset(
+      auth.ctx,
+      existing.explore_categories.tenant_owner_id,
+      'explore_categories.manage'
+    )
+  ) {
+    return { ok: false, error: 'Forbidden: you cannot update this item' };
+  }
+
   const parsed = updateExploreItemSchema.safeParse(body);
   if (!parsed.success) {
     const msg = parsed.error.flatten().formErrors[0] ?? 'Validation failed';
@@ -264,6 +365,24 @@ export async function updateExploreItemAction(
 
 export async function deleteExploreItemAction(itemId: string): Promise<DeleteExploreItemResult> {
   if (!itemId) return { ok: false, error: 'Item ID required' };
+  const auth = await requireAdminContextFromCookies();
+  if (!auth.ok) return { ok: false, error: auth.error };
+
+  const existing = await prisma.explore_items.findUnique({
+    where: { id: itemId },
+    select: { id: true, explore_categories: { select: { tenant_owner_id: true } } },
+  });
+  if (!existing) return { ok: false, error: 'Explore item not found' };
+  if (
+    !canContextMutateMasterAsset(
+      auth.ctx,
+      existing.explore_categories.tenant_owner_id,
+      'explore_categories.manage'
+    )
+  ) {
+    return { ok: false, error: 'Forbidden: you cannot delete this item' };
+  }
+
   try {
     const deleted = await deleteExploreItem(itemId);
     if (!deleted) return { ok: false, error: 'Explore item not found' };
@@ -293,8 +412,15 @@ export type GetExploreCategoriesWithItemsResult =
   | { ok: false; error: string };
 
 export async function getExploreCategoriesWithItemsAction(): Promise<GetExploreCategoriesWithItemsResult> {
+  const auth = await requireAdminContextFromCookies();
+  if (!auth.ok) return { ok: false, error: auth.error };
+
   try {
-    const categories = await listAllExploreCategoriesWithItems();
+    const scope =
+      auth.ctx.tier === 'super_admin' || auth.ctx.tier === 'super_staff'
+        ? undefined
+        : (auth.ctx.tenant_owner_id ?? auth.ctx.id);
+    const categories = await listAllExploreCategoriesWithItems(scope);
     return { ok: true, data: toPlainValue(categories) as ExploreCategoryWithItems[] };
   } catch (e) {
     console.error(e);

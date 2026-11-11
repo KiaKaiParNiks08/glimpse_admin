@@ -1,10 +1,10 @@
 'use server';
 
-import { getAdminSessionFromCookies } from '@/lib/admin-session';
+import { requireAdminContextFromCookies, canContextAccessEvent } from '@/server/access';
 import { generateS3Key, getStoredObjectUrl, putObjectFromBuffer, deleteObjectByKey } from '@/lib/s3-presign';
 import { getMediaKind, validateMediaFile } from '@/lib/upload-rules';
 import prisma from '@/server/prisma';
-import { isEventAdminAssigned } from '@/server/events';
+
 
 type ResultOk = { ok: true; url: string; originalName: string | null; uploadedAt: string };
 type ResultErr = { ok: false; error: string };
@@ -24,15 +24,14 @@ function isFileLike(value: unknown): value is File | (Blob & { size: number; typ
 }
 
 async function requireEventWriteAccess(eventId: string) {
-  const session = await getAdminSessionFromCookies();
-  if (!session) return { ok: false as const, error: 'Not authenticated' };
-  if (session.role_name === 'super_admin') return { ok: true as const, session };
-  if (session.role_name === 'event_admin') {
-    const allowed = await isEventAdminAssigned(eventId, session.id);
-    if (!allowed) return { ok: false as const, error: 'Event not found' };
-    return { ok: true as const, session };
+  const auth = await requireAdminContextFromCookies();
+  if (!auth.ok) return { ok: false as const, error: auth.error };
+  if (!auth.ctx.hasPermission('report.manage')) {
+    return { ok: false as const, error: 'Forbidden: post-event report is disabled for your role or plan' };
   }
-  return { ok: false as const, error: 'Forbidden' };
+  const allowed = await canContextAccessEvent(auth.ctx, eventId);
+  if (!allowed) return { ok: false as const, error: 'Event not found' };
+  return { ok: true as const, session: auth.ctx };
 }
 
 /**

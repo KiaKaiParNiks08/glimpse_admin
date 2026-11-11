@@ -180,5 +180,14 @@ async function ensureRecognitionV2Columns(): Promise<void> {
       updated_at TIMESTAMPTZ(6) DEFAULT CURRENT_TIMESTAMP,
       PRIMARY KEY (user_id, event_id)
     );
+    CREATE TABLE IF NOT EXISTS media_asset_user_checks (
+      media_asset_id UUID NOT NULL REFERENCES media_assets(id) ON DELETE CASCADE,
+      user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      reference_sha256 VARCHAR(64),
+      checked_at TIMESTAMPTZ(6) DEFAULT CURRENT_TIMESTAMP,
+      PRIMARY KEY (media_asset_id, user_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_media_asset_user_checks_user
+      ON media_asset_user_checks (user_id, reference_sha256);
   `);
 }

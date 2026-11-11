@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { badRequest, forbidden, notFound, serverError } from '@/lib/api-response';
-import { getAdminFromAuthorizationHeader } from '@/lib/jwt';
+import { canContextAccessEvent, getAdminContextFromRequest } from '@/server/access';
 import { listEventGuestsForExport } from '@/server/event-guests';
 
 function isUuid(v: string): boolean {
@@ -19,7 +19,7 @@ function safeFilenamePart(code: string): string {
 
 /**
  * GET /api/admin/events/[event_id]/guests/export
- * CSV of app users (guests) for the event. super_admin only.
+ * CSV of app users (guests) for the event. Requires guests.export permission & event access.
  * Columns: full name, mobile number, Instagram ID, is verified (OTP), is active, and wedding side when the event category is wedding.
  */
 export async function GET(
@@ -27,13 +27,19 @@ export async function GET(
   context: { params: Promise<{ event_id: string }> }
 ) {
   try {
-    const admin = getAdminFromAuthorizationHeader(request);
-    if (!admin) return forbidden('Not authenticated');
-    if (admin.role_name !== 'super_admin') return forbidden('Forbidden');
+    const ctx = await getAdminContextFromRequest(request);
+    if (!ctx) return forbidden('Not authenticated');
+    if (!ctx.hasPermission('guests.export')) {
+      return forbidden('Forbidden: guest export is not enabled for your role or plan');
+    }
 
     const params = await context.params;
     const eventId = params.event_id;
     if (!isUuid(eventId)) return badRequest('Invalid event id');
+
+    if (!(await canContextAccessEvent(ctx, eventId))) {
+      return forbidden('Forbidden');
+    }
 
     const bundle = await listEventGuestsForExport(eventId);
     if (!bundle) return notFound('Event not found');

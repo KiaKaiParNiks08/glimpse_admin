@@ -11,6 +11,7 @@ import {
 import { validateDeclaredVideoDuration } from '@/lib/upload-rules';
 import { createEventDayMedia } from '@/server/event-day-media';
 import { sessionIdsViewerCanUpload } from '@/server/session-uploaders';
+import { getEventEffectiveFeatures } from '@/server/access';
 import prisma from '@/server/prisma';
 
 export const maxDuration = 60;
@@ -37,6 +38,11 @@ export async function POST(
     const { event_id, session_id } = await context.params;
     if (!isUuid(event_id) || !isUuid(session_id)) return badRequest('Invalid event or session id');
     if (user.event_id !== event_id) return forbidden('This login is for a different event');
+
+    const features = await getEventEffectiveFeatures(event_id);
+    if (!features.session_media_upload) {
+      return forbidden('Session media upload is disabled for this event');
+    }
 
     const session = await prisma.event_sessions.findFirst({
       where: { id: session_id, event_days: { event_id } },
