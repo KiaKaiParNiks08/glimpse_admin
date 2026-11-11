@@ -15,6 +15,7 @@ type ProfileForm = {
   country_code: string;
   avatar_url: string;
   instagram_id: string;
+  linkedin_url: string;
 };
 
 function toForm(user: {
@@ -25,6 +26,7 @@ function toForm(user: {
   country_code: string | null;
   avatar_url: string | null;
   instagram_id: string | null;
+  linkedin_url: string | null;
 }): ProfileForm {
   return {
     full_name: user.full_name ?? '',
@@ -34,6 +36,7 @@ function toForm(user: {
     country_code: user.country_code ?? '',
     avatar_url: user.avatar_url ?? '',
     instagram_id: user.instagram_id ?? '',
+    linkedin_url: user.linkedin_url ?? '',
   };
 }
 
@@ -53,6 +56,7 @@ export default function ProfilePage() {
     country_code: '',
     avatar_url: '',
     instagram_id: '',
+    linkedin_url: '',
   });
 
   useEffect(() => {
@@ -97,12 +101,14 @@ export default function ProfilePage() {
         country_code?: string;
         avatar_url: string | null;
         instagram_id: string | null;
+        linkedin_url: string | null;
       } = {
         full_name: form.full_name.trim(),
         mobile_number: form.mobile_number.trim() || undefined,
         country_code: form.country_code.trim() || undefined,
         avatar_url: form.avatar_url.trim() || null,
         instagram_id: form.instagram_id.trim() || null,
+        linkedin_url: form.linkedin_url.trim() || null,
       };
       const res = await updateMyProfileAction(payload);
       if (!res.ok) {
@@ -115,6 +121,7 @@ export default function ProfilePage() {
         country_code: form.country_code.trim(),
         avatar_url: form.avatar_url.trim(),
         instagram_id: form.instagram_id.trim(),
+        linkedin_url: form.linkedin_url.trim(),
       };
       setForm(normalized);
       setInitialForm(normalized);
@@ -212,6 +219,21 @@ export default function ProfilePage() {
               />
             ) : (
               <div className={styles.value}>{form.instagram_id || '—'}</div>
+            )}
+          </div>
+
+          <div className={styles.field}>
+            <label>LinkedIn URL</label>
+            {isEditMode ? (
+              <input
+                type="text"
+                value={form.linkedin_url}
+                onChange={(e) => setForm((p) => ({ ...p, linkedin_url: e.target.value }))}
+                className={styles.input}
+                placeholder="https://www.linkedin.com/in/username"
+              />
+            ) : (
+              <div className={styles.value}>{form.linkedin_url || '—'}</div>
             )}
           </div>
 

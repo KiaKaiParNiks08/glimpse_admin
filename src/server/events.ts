@@ -146,6 +146,11 @@ let thumbnailColumnsEnsured = false;
 export async function ensurePostEventPdfThumbnailColumns(): Promise<void> {
   if (thumbnailColumnsEnsured) return;
   try {
+    await prisma.$queryRawUnsafe('SELECT post_event_pdf_thumbnail_url FROM "events" LIMIT 0');
+    thumbnailColumnsEnsured = true;
+    return;
+  } catch {}
+  try {
     await prisma.$executeRawUnsafe(`
       ALTER TABLE "events"
         ADD COLUMN IF NOT EXISTS "post_event_pdf_thumbnail_url" TEXT,

@@ -1,5 +1,6 @@
 import crypto from 'crypto';
 import prisma from '@/server/prisma';
+import { isPermanentInvalidFcmError } from '@/lib/push-device';
 
 interface CachedToken {
   accessToken: string;
@@ -222,14 +223,8 @@ export async function sendFcmPush(payload: FcmPayload): Promise<FcmSendResult> {
             }
           }
 
-          // Check if token is invalid or unregistered
-          if (
-            errorCode === 404 ||
-            errorStatus === 'NOT_FOUND' ||
-            errorMessage.includes('UNREGISTERED') ||
-            errorMessage.includes('registration-token-not-registered') ||
-            errorMessage.includes('InvalidArgument')
-          ) {
+          // Check if token is permanently invalid or unregistered
+          if (isPermanentInvalidFcmError({ errorCode, errorStatus, errorMessage })) {
             result.invalidTokens.push(token);
           } else {
             console.warn('[fcm] Message delivery failed:', token.slice(0, 15) + '...', errorMessage);
@@ -248,7 +243,7 @@ export async function sendFcmPush(payload: FcmPayload): Promise<FcmSendResult> {
     await Promise.allSettled(promises);
   }
 
-  // Deactivate expired or invalid device tokens
+  // Deactivate expired/invalid device tokens and clear them so clients get needs_fcm_token_sync=true
   if (result.invalidTokens.length > 0) {
     try {
       await prisma.user_devices.updateMany({
@@ -258,7 +253,7 @@ export async function sendFcmPush(payload: FcmPayload): Promise<FcmSendResult> {
             { device_id: { in: result.invalidTokens } },
           ],
         },
-        data: { is_active: false, updated_at: new Date() },
+        data: { is_active: false, fcm_token: null, updated_at: new Date() },
       });
       console.info(`[fcm] Deactivated ${result.invalidTokens.length} invalid/unregistered device tokens`);
     } catch (dbErr) {

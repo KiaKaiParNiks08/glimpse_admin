@@ -4,6 +4,7 @@ import type { Prisma } from '@prisma/client';
 
 import prisma from '@/server/prisma';
 import { ensureRbacBootstrapped } from '@/server/seed-rbac';
+import { looksLikeLinkedInValue } from '@/lib/user-event-profile';
 import type { CreateUserInput, ListUsersQuery, UpdateUserInput } from '@/lib/validations/users';
 
 export const userSelect = {
@@ -16,6 +17,7 @@ export const userSelect = {
   mobile_number: true,
   country_code: true,
   instagram_id: true,
+  linkedin_url: true,
 } as const;
 
 export type UserSelect = {
@@ -28,6 +30,7 @@ export type UserSelect = {
   mobile_number: string | null;
   country_code: string | null;
   instagram_id: string | null;
+  linkedin_url: string | null;
 };
 
 export type UserListItem = Pick<
@@ -236,6 +239,18 @@ export async function updateUser(
   if (body.full_name !== undefined) updateData.full_name = body.full_name;
   if (body.avatar_url !== undefined) updateData.avatar_url = body.avatar_url ?? null;
   if (body.instagram_id !== undefined) updateData.instagram_id = body.instagram_id ?? null;
+  if (body.linkedin_url !== undefined) {
+    updateData.linkedin_url = body.linkedin_url ?? null;
+    // If explicitly clearing linkedin_url and legacy corporate row stored LinkedIn inside instagram_id, clear fallback too.
+    if (
+      body.linkedin_url === null &&
+      body.instagram_id === undefined &&
+      !existing.linkedin_url &&
+      looksLikeLinkedInValue(existing.instagram_id)
+    ) {
+      updateData.instagram_id = null;
+    }
+  }
   if (body.country_code !== undefined) updateData.country_code = body.country_code ?? null;
   if (body.mobile_number !== undefined) updateData.mobile_number = body.mobile_number ?? null;
   if (body.is_active !== undefined) updateData.is_active = body.is_active;

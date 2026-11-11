@@ -1,5 +1,6 @@
 import type { Prisma } from '@prisma/client';
 import prisma from '@/server/prisma';
+import { getEventProfileMapForUsers, resolveAuthorUserWithEventProfile } from '@/server/user-event-profiles';
 import type { CreateCommentBody, ListCommentsQuery } from '@/lib/validations/comments';
 
 export const commentSelect = {
@@ -15,6 +16,8 @@ export const commentSelect = {
     select: {
       full_name: true,
       avatar_url: true,
+      instagram_id: true,
+      linkedin_url: true,
     },
   },
 } as const;
@@ -31,6 +34,8 @@ export type CommentResult = {
   users: {
     full_name: string;
     avatar_url: string | null;
+    instagram_id: string | null;
+    linkedin_url: string | null;
   };
 };
 
@@ -64,7 +69,17 @@ export async function createComment(
     });
     return created;
   });
-  return comment as CommentResult;
+
+  const post = await prisma.posts.findUnique({
+    where: { id: postId },
+    select: { event_id: true },
+  });
+  const profileMap = await getEventProfileMapForUsers(post?.event_id, [comment.user_id]);
+  const typed = comment as CommentResult;
+  return {
+    ...typed,
+    users: resolveAuthorUserWithEventProfile(typed.users, profileMap.get(typed.user_id)),
+  };
 }
 
 /**
@@ -114,7 +129,7 @@ export async function listComments(
     parent_comment_id: null,
     status: status ?? 'active',
   };
-  const [comments, total, replyRows] = await Promise.all([
+  const [comments, total, replyRows, post] = await Promise.all([
     prisma.comments.findMany({
       where,
       select: commentSelect,
@@ -132,10 +147,27 @@ export async function listComments(
       select: commentSelect,
       orderBy: { created_at: 'asc' },
     }),
+    prisma.posts.findUnique({
+      where: { id: postId },
+      select: { event_id: true },
+    }),
   ]);
 
-  const roots = comments as CommentResult[];
-  const replies = replyRows as CommentResult[];
+  const rawRoots = comments as CommentResult[];
+  const rawReplies = replyRows as CommentResult[];
+  const userIds = [
+    ...rawRoots.map((c) => c.user_id),
+    ...rawReplies.map((c) => c.user_id),
+  ];
+  const profileMap = await getEventProfileMapForUsers(post?.event_id, userIds);
+
+  const hydrate = (c: CommentResult): CommentResult => ({
+    ...c,
+    users: resolveAuthorUserWithEventProfile(c.users, profileMap.get(c.user_id)),
+  });
+
+  const roots = rawRoots.map(hydrate);
+  const replies = rawReplies.map(hydrate);
   const rootIds = new Set(roots.map((comment) => comment.id));
   const byId = new Map(replies.map((reply) => [reply.id, reply]));
   const grouped = new Map<string, CommentResult[]>();

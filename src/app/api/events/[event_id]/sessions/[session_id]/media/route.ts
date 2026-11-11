@@ -116,48 +116,45 @@ export async function POST(
       }
     }
 
-    const saved: Array<{
+    let nextVideoIdx = 0;
+    const uploadTasks = validated.map(({ file, kind, mime }, i) => {
+      const thumbFile = kind === 'video' ? thumbnails[nextVideoIdx++] : undefined;
+      return async () => {
+        const storedPromise = saveUploadedFile(file, kind, process.cwd(), {
+          prefix: `events/${event_id}/sessions/${session.id}`,
+          contentType: mime,
+        });
+        const thumbPromise = thumbFile
+          ? saveUploadedFile(thumbFile, 'image', process.cwd(), {
+              prefix: `events/${event_id}/sessions/${session.id}/thumbnails`,
+              contentType: resolveUploadMime(thumbFile.type, thumbFile.name),
+            })
+          : Promise.resolve(null);
+        const [stored, thumbStored] = await Promise.all([storedPromise, thumbPromise]);
+        return {
+          media_key: stored.storageKey,
+          media_url: stored.relativeUrl,
+          media_type: kind,
+          thumbnail_url: thumbStored?.relativeUrl ?? null,
+          thumbnail_key: thumbStored?.storageKey ?? null,
+          display_order: i,
+        };
+      };
+    });
+
+    let saved: Array<{
       media_key: string;
       media_url: string;
       media_type: 'image' | 'video';
       thumbnail_url: string | null;
       thumbnail_key: string | null;
       display_order: number;
-    }> = [];
-    let videoIndex = 0;
-
-    for (let i = 0; i < validated.length; i++) {
-      const { file, kind, mime } = validated[i];
-      try {
-        const stored = await saveUploadedFile(file, kind, process.cwd(), {
-          prefix: `events/${event_id}/sessions/${session.id}`,
-          contentType: mime,
-        });
-        let thumbnail_url: string | null = null;
-        let thumbnail_key: string | null = null;
-        if (kind === 'video' && thumbnails[videoIndex]) {
-          const thumbnail = thumbnails[videoIndex];
-          const thumbMime = resolveUploadMime(thumbnail.type, thumbnail.name);
-          const thumbStored = await saveUploadedFile(thumbnail, 'image', process.cwd(), {
-            prefix: `events/${event_id}/sessions/${session.id}/thumbnails`,
-            contentType: thumbMime,
-          });
-          thumbnail_url = thumbStored.relativeUrl;
-          thumbnail_key = thumbStored.storageKey;
-          videoIndex += 1;
-        }
-        saved.push({
-          media_key: stored.storageKey,
-          media_url: stored.relativeUrl,
-          media_type: kind,
-          thumbnail_url,
-          thumbnail_key,
-          display_order: i,
-        });
-      } catch (error) {
-        if (error instanceof IncompleteUploadError) return badRequest(error.message);
-        throw error;
-      }
+    }>;
+    try {
+      saved = await Promise.all(uploadTasks.map((fn) => fn()));
+    } catch (error) {
+      if (error instanceof IncompleteUploadError) return badRequest(error.message);
+      throw error;
     }
 
     const created = await createEventDayMedia(

@@ -10,6 +10,7 @@ import {
 import { ok, notFound, serverError, noContent, conflict, forbidden, badRequest } from '@/lib/api-response';
 import { getUserById, updateUser, deleteUser, findUserByMobileNumber } from '@/server/users';
 import { isEventGuest, updateGuestWeddingSide } from '@/server/event-guests';
+import { withResolvedSocialLinks } from '@/lib/user-event-profile';
 import { getUserEventProfile, overlayEventProfile, upsertUserEventProfile } from '@/server/user-event-profiles';
 import { prisma } from '@/server';
 import { Prisma } from '@prisma/client';
@@ -89,7 +90,7 @@ export async function GET(
       const eventProfile = current_event_id
         ? await getUserEventProfile(user.id, current_event_id)
         : null;
-      const profile = overlayEventProfile(user, eventProfile);
+      const profile = withResolvedSocialLinks(overlayEventProfile(user, eventProfile));
 
       return ok({
         data: {
@@ -115,7 +116,7 @@ export async function GET(
       });
     }
 
-    return ok({ data: { ...user, isVerified } });
+    return ok({ data: { ...withResolvedSocialLinks(user), isVerified } });
   } catch (e) {
     console.error(e);
     return serverError('Unable to fetch user details');
@@ -184,12 +185,13 @@ export async function PATCH(
       const eventProfile = await upsertUserEventProfile(path.user_id, body.event_id, {
         ...(body.full_name !== undefined ? { full_name: body.full_name } : {}),
         ...(body.instagram_id !== undefined ? { instagram_id: body.instagram_id } : {}),
+        ...(body.linkedin_url !== undefined ? { linkedin_url: body.linkedin_url } : {}),
         ...(body.avatar_url !== undefined ? { avatar_url: body.avatar_url ?? null } : {}),
       });
-      return ok({ data: overlayEventProfile(user, eventProfile) });
+      return ok({ data: withResolvedSocialLinks(overlayEventProfile(user, eventProfile)) });
     }
 
-    return ok({ data: user });
+    return ok({ data: withResolvedSocialLinks(user) });
   } catch (e: unknown) {
     console.error(e);
     return serverError('Unable to update user');

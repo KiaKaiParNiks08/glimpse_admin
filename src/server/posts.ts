@@ -1,5 +1,6 @@
 import prisma from '@/server/prisma';
 import { getFavoritedItemIds } from '@/server/favorites';
+import { getEventProfileMapForUsers, resolveAuthorUserWithEventProfile, type UserEventProfileFields } from '@/server/user-event-profiles';
 import type { CreatePostInput, ListPostsQuery } from '@/lib/validations/posts';
 
 /** Select for list/get. */
@@ -18,6 +19,8 @@ export const postSelect = {
     select: {
       full_name: true,
       avatar_url: true,
+      instagram_id: true,
+      linkedin_url: true,
     },
   },
   post_media: {
@@ -52,6 +55,8 @@ export type PostWithMedia = {
   users: {
     full_name: string;
     avatar_url: string | null;
+    instagram_id: string | null;
+    linkedin_url: string | null;
   };
   post_media: Array<{
     id: string;
@@ -66,6 +71,31 @@ export type PostWithMedia = {
     media_order: number | null;
   }>;
 };
+
+/** Batch-resolve author event profiles and Instagram/LinkedIn links across one or more posts. */
+export async function enrichPostsSocialUsers<T extends PostWithMedia>(posts: T[]): Promise<T[]> {
+  if (posts.length === 0) return posts;
+  const byEvent = new Map<string, string[]>();
+  for (const post of posts) {
+    if (!post.event_id) continue;
+    const list = byEvent.get(post.event_id) ?? [];
+    list.push(post.user_id);
+    byEvent.set(post.event_id, list);
+  }
+  const eventMaps = new Map<string, Map<string, UserEventProfileFields>>();
+  await Promise.all(
+    Array.from(byEvent.entries()).map(async ([eventId, userIds]) => {
+      eventMaps.set(eventId, await getEventProfileMapForUsers(eventId, userIds));
+    })
+  );
+  return posts.map((post) => {
+    const profileMap = post.event_id ? eventMaps.get(post.event_id) : undefined;
+    return {
+      ...post,
+      users: resolveAuthorUserWithEventProfile(post.users, profileMap?.get(post.user_id)),
+    };
+  });
+}
 
 function toPostWithMedia(row: PostWithMedia): PostWithMedia {
   return row;
@@ -116,7 +146,8 @@ export async function createPost(
     },
     select: postSelect,
   });
-  return toPostWithMedia(post as Parameters<typeof toPostWithMedia>[0]);
+  const [hydrated] = await enrichPostsSocialUsers([toPostWithMedia(post as Parameters<typeof toPostWithMedia>[0])]);
+  return hydrated;
 }
 
 /**
@@ -153,7 +184,7 @@ export async function listPosts(query: ListPostsQuery): Promise<{
     }),
     prisma.posts.count({ where }),
   ]);
-  const posts = rows.map((row) => {
+  const rawPosts = rows.map((row) => {
     const base = toPostWithMedia(row as unknown as PostWithMedia);
     const likedByViewer =
       viewer_user_id && 'post_likes' in (row as unknown as Record<string, unknown>)
@@ -162,6 +193,8 @@ export async function listPosts(query: ListPostsQuery): Promise<{
         : undefined;
     return likedByViewer === undefined ? base : { ...base, liked_by_viewer: likedByViewer };
   });
+
+  const posts = await enrichPostsSocialUsers(rawPosts);
 
   if (viewer_user_id && event_id) {
     const favorited = await getFavoritedItemIds(
@@ -230,7 +263,8 @@ export async function updatePostCaption(input: {
     data: { caption, updated_at: new Date() },
     select: postSelect,
   });
-  return { post: toPostWithMedia(post as Parameters<typeof toPostWithMedia>[0]) };
+  const [hydrated] = await enrichPostsSocialUsers([toPostWithMedia(post as Parameters<typeof toPostWithMedia>[0])]);
+  return { post: hydrated };
 }
 
 const postLikeSelect = {
@@ -339,6 +373,8 @@ export async function setPostLike(
 /** One row in the “who liked this post” list. */
 export type PostLikedUser = {
   like_id: string;
+  instagram_id: string;
+  linkedin_url: string;
   user_id: string;
   full_name: string;
   avatar_url: string | null;
@@ -360,6 +396,7 @@ export async function getPostLikedUsers(
 
   if (!existing) return 'not_found';
 
+  const postEvent = await prisma.posts.findUnique({ where: { id: postId }, select: { event_id: true } });
   const rows = await prisma.post_likes.findMany({
     where: { post_id: postId },
     orderBy: { created_at: 'desc' },
@@ -370,16 +407,24 @@ export async function getPostLikedUsers(
         select: {
           full_name: true,
           avatar_url: true,
+      instagram_id: true,
+      linkedin_url: true,
         },
       },
     },
   });
 
+  const eventProfiles = await getEventProfileMapForUsers(
+    postEvent?.event_id,
+    rows.map((item) => item.user_id)
+  );
   const likes: PostLikedUser[] = rows.map((item) => ({
     like_id: item.id,
     user_id: item.user_id,
-    full_name: item.users.full_name,
-    avatar_url: item.users.avatar_url,
+    full_name: resolveAuthorUserWithEventProfile(item.users, eventProfiles.get(item.user_id)).full_name,
+    avatar_url: resolveAuthorUserWithEventProfile(item.users, eventProfiles.get(item.user_id)).avatar_url,
+    instagram_id: resolveAuthorUserWithEventProfile(item.users, eventProfiles.get(item.user_id)).instagram_id,
+    linkedin_url: resolveAuthorUserWithEventProfile(item.users, eventProfiles.get(item.user_id)).linkedin_url,
   }));
 
   return { likes };

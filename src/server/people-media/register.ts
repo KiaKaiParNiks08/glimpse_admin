@@ -125,6 +125,71 @@ export async function registerMediaAsset(input: RegisterMediaInput): Promise<Reg
   }
 }
 
+/** Shared bulk deduplication + createMany registration for new gallery or feed assets. */
+async function registerMediaAssetsBatch(inputs: RegisterMediaInput[]): Promise<void> {
+  if (inputs.length === 0) return;
+  await ensurePeopleMediaSchema();
+
+  const touchedEventIds = [...new Set(inputs.map((i) => i.eventId))];
+  const hashes = inputs.map((i) => sha256Hex(i.storageKey));
+  const dayIds = inputs.map((i) => i.eventDayMediaId).filter((v): v is string => Boolean(v));
+  const postIds = inputs.map((i) => i.postMediaId).filter((v): v is string => Boolean(v));
+
+  const orFilters: Prisma.media_assetsWhereInput[] = [{ content_sha256: { in: hashes } }];
+  if (dayIds.length > 0) orFilters.push({ event_day_media_id: { in: dayIds } });
+  if (postIds.length > 0) orFilters.push({ post_media_id: { in: postIds } });
+
+  const existing = await prisma.media_assets.findMany({
+    where: { event_id: { in: touchedEventIds }, OR: orFilters },
+    select: { event_id: true, content_sha256: true, event_day_media_id: true, post_media_id: true },
+  });
+
+  const seen = new Set<string>();
+  for (const row of existing) {
+    seen.add(`sha:${row.event_id}:${row.content_sha256}`);
+    if (row.event_day_media_id) seen.add(`dm:${row.event_day_media_id}`);
+    if (row.post_media_id) seen.add(`pm:${row.post_media_id}`);
+  }
+
+  const toInsert: Prisma.media_assetsCreateManyInput[] = [];
+  const insertedEvents = new Set<string>();
+  for (const input of inputs) {
+    const sha = sha256Hex(input.storageKey);
+    if (
+      seen.has(`sha:${input.eventId}:${sha}`) ||
+      (input.eventDayMediaId && seen.has(`dm:${input.eventDayMediaId}`)) ||
+      (input.postMediaId && seen.has(`pm:${input.postMediaId}`))
+    ) {
+      continue;
+    }
+    seen.add(`sha:${input.eventId}:${sha}`);
+    if (input.eventDayMediaId) seen.add(`dm:${input.eventDayMediaId}`);
+    if (input.postMediaId) seen.add(`pm:${input.postMediaId}`);
+    insertedEvents.add(input.eventId);
+    toInsert.push({
+      event_id: input.eventId,
+      source: input.source,
+      media_type: input.mediaType,
+      storage_key: input.storageKey,
+      media_url: input.mediaUrl,
+      thumbnail_url: input.thumbnailUrl ?? null,
+      thumbnail_storage_key: input.thumbnailStorageKey ?? null,
+      content_sha256: sha,
+      idempotency_key: input.idempotencyKey?.trim() || null,
+      event_day_media_id: input.eventDayMediaId ?? null,
+      post_media_id: input.postMediaId ?? null,
+      uploaded_by: input.uploadedBy ?? null,
+      processing_status: 'pending',
+      match_complete: false,
+    });
+  }
+
+  if (toInsert.length > 0) {
+    await prisma.media_assets.createMany({ data: toInsert, skipDuplicates: true });
+    await Promise.all([...insertedEvents].map((eid) => reopenCompleteScansForEvent(eid)));
+  }
+}
+
 type GalleryRow = {
   id: string;
   event_day_id: string;
@@ -139,24 +204,27 @@ type GalleryRow = {
 export async function registerPhotographerGalleryItems(items: GalleryRow[]): Promise<void> {
   if (items.length === 0) return;
   try {
-    const days = await prisma.event_days.findMany({
-      where: { id: { in: [...new Set(items.map((item) => item.event_day_id))] } },
-      select: { id: true, event_id: true },
-    });
+    const [days, owners] = await Promise.all([
+      prisma.event_days.findMany({
+        where: { id: { in: [...new Set(items.map((item) => item.event_day_id))] } },
+        select: { id: true, event_id: true },
+      }),
+      prisma.event_day_media.findMany({
+        where: { id: { in: items.map((item) => item.id) } },
+        select: { id: true, uploaded_by: true },
+      }),
+    ]);
     const eventByDay = new Map(days.map((day) => [day.id, day.event_id]));
-    const owners = await prisma.event_day_media.findMany({
-      where: { id: { in: items.map((item) => item.id) } },
-      select: { id: true, uploaded_by: true },
-    });
     const ownerById = new Map(owners.map((row) => [row.id, row.uploaded_by]));
 
+    const batch: RegisterMediaInput[] = [];
     for (const item of items) {
       const eventId = eventByDay.get(item.event_day_id);
       if (!eventId) continue;
       if (item.media_type !== 'image' && item.media_type !== 'video') continue;
       const storageKey = storageKeyFromMediaUrl(item.media_url, item.media_key);
       if (!storageKey) continue;
-      await registerMediaAsset({
+      batch.push({
         eventId,
         source: 'photographer',
         mediaType: item.media_type,
@@ -169,6 +237,8 @@ export async function registerPhotographerGalleryItems(items: GalleryRow[]): Pro
         uploadedBy: ownerById.get(item.id) ?? null,
       });
     }
+
+    await registerMediaAssetsBatch(batch);
     await scheduleFaceProcessing();
   } catch (error) {
     console.error('[people-media] gallery registration failed', error);
@@ -192,11 +262,12 @@ export async function registerFeedPostMedia(input: {
 }): Promise<void> {
   if (input.items.length === 0) return;
   try {
+    const batch: RegisterMediaInput[] = [];
     for (const item of input.items) {
       if (item.media_type !== 'image' && item.media_type !== 'video') continue;
       const storageKey = item.storageKey ?? storageKeyFromMediaUrl(item.media_url);
       if (!storageKey) continue;
-      await registerMediaAsset({
+      batch.push({
         eventId: input.eventId,
         source: 'user_post',
         mediaType: item.media_type,
@@ -209,6 +280,7 @@ export async function registerFeedPostMedia(input: {
         uploadedBy: input.userId,
       });
     }
+    await registerMediaAssetsBatch(batch);
     await scheduleFaceProcessing();
   } catch (error) {
     console.error('[people-media] feed registration failed', error);
@@ -220,35 +292,55 @@ export async function backfillEventMedia(eventId: string): Promise<number> {
   await ensurePeopleMediaSchema();
   let created = 0;
 
-  const posts = await prisma.$queryRaw<
-    {
-      id: string;
-      media_type: string;
-      media_url: string;
-      thumbnail_url: string | null;
-      user_id: string;
-    }[]
-  >`
-    SELECT pm.id, pm.media_type::text AS media_type, pm.media_url, pm.thumbnail_url, p.user_id
-    FROM post_media pm
-    JOIN posts p ON p.id = pm.post_id
-    LEFT JOIN media_assets ma ON ma.post_media_id = pm.id
-    WHERE p.event_id = ${eventId}::uuid
-      AND p.status = 'active'
-      AND pm.media_type IN ('image', 'video')
-      AND ma.id IS NULL
-  `;
+  const [posts, gallery] = await Promise.all([
+    prisma.$queryRaw<
+      {
+        id: string;
+        media_type: string;
+        media_url: string;
+        thumbnail_url: string | null;
+        user_id: string;
+      }[]
+    >`
+      SELECT pm.id, pm.media_type::text AS media_type, pm.media_url, pm.thumbnail_url, p.user_id
+      FROM post_media pm
+      JOIN posts p ON p.id = pm.post_id
+      LEFT JOIN media_assets ma ON ma.post_media_id = pm.id
+      WHERE p.event_id = ${eventId}::uuid
+        AND p.status = 'active'
+        AND pm.media_type IN ('image', 'video')
+        AND ma.id IS NULL
+    `,
+    prisma.$queryRaw<
+      {
+        id: string;
+        media_type: string;
+        media_url: string;
+        media_key: string | null;
+        thumbnail_url: string | null;
+        thumbnail_key: string | null;
+        uploaded_by: string | null;
+      }[]
+    >`
+      SELECT edm.id, edm.media_type, edm.media_url, edm.media_key,
+             edm.thumbnail_url, edm.thumbnail_key, edm.uploaded_by
+      FROM event_day_media edm
+      JOIN event_days ed ON ed.id = edm.event_day_id
+      LEFT JOIN media_assets ma ON ma.event_day_media_id = edm.id
+      WHERE ed.event_id = ${eventId}::uuid
+        AND edm.media_type IN ('image', 'video')
+        AND ma.id IS NULL
+    `,
+  ]);
+
+  const batch: RegisterMediaInput[] = [];
   for (const item of posts) {
     const storageKey = storageKeyFromMediaUrl(item.media_url);
-    if (!storageKey) {
-      console.error('[people-media] backfill skipped post_media with no storage key', item.id);
-      continue;
-    }
-    const mediaType = item.media_type === 'video' ? 'video' : 'image';
-    const result = await registerMediaAsset({
+    if (!storageKey) continue;
+    batch.push({
       eventId,
       source: 'user_post',
-      mediaType,
+      mediaType: item.media_type === 'video' ? 'video' : 'image',
       storageKey,
       mediaUrl: item.media_url,
       thumbnailUrl: item.thumbnail_url,
@@ -257,40 +349,14 @@ export async function backfillEventMedia(eventId: string): Promise<number> {
       postMediaId: item.id,
       uploadedBy: item.user_id,
     });
-    if (result.created) created += 1;
   }
-
-  const gallery = await prisma.$queryRaw<
-    {
-      id: string;
-      media_type: string;
-      media_url: string;
-      media_key: string | null;
-      thumbnail_url: string | null;
-      thumbnail_key: string | null;
-      uploaded_by: string | null;
-    }[]
-  >`
-    SELECT edm.id, edm.media_type, edm.media_url, edm.media_key,
-           edm.thumbnail_url, edm.thumbnail_key, edm.uploaded_by
-    FROM event_day_media edm
-    JOIN event_days ed ON ed.id = edm.event_day_id
-    LEFT JOIN media_assets ma ON ma.event_day_media_id = edm.id
-    WHERE ed.event_id = ${eventId}::uuid
-      AND edm.media_type IN ('image', 'video')
-      AND ma.id IS NULL
-  `;
   for (const item of gallery) {
     const storageKey = storageKeyFromMediaUrl(item.media_url, item.media_key);
-    if (!storageKey) {
-      console.error('[people-media] backfill skipped gallery item with no storage key', item.id);
-      continue;
-    }
-    const mediaType = item.media_type === 'video' ? 'video' : 'image';
-    const result = await registerMediaAsset({
+    if (!storageKey) continue;
+    batch.push({
       eventId,
       source: 'photographer',
-      mediaType,
+      mediaType: item.media_type === 'video' ? 'video' : 'image',
       storageKey,
       mediaUrl: item.media_url,
       thumbnailUrl: item.thumbnail_url,
@@ -299,7 +365,10 @@ export async function backfillEventMedia(eventId: string): Promise<number> {
       eventDayMediaId: item.id,
       uploadedBy: item.uploaded_by,
     });
-    if (result.created) created += 1;
+  }
+  if (batch.length > 0) {
+    await registerMediaAssetsBatch(batch);
+    created = batch.length;
   }
 
   return created;

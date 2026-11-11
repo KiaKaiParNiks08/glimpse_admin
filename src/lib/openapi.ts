@@ -264,7 +264,7 @@ export function getOpenApiSpec(serverUrl: string) {
                     event_id: { type: 'string', format: 'uuid', description: 'Event chosen at login. If omitted, the latest guest event is used.' },
                     device_type: { type: 'string', enum: ['android', 'ios', 'web'], description: 'Optional device platform.' },
                     device_id: { type: 'string', maxLength: 255, description: 'Stable installation UUID stored on device.' },
-                    fcm_token: { type: 'string', maxLength: 500, description: 'Firebase Cloud Messaging registration token.' },
+                    fcm_token: { type: 'string', maxLength: 1024, description: 'Firebase Cloud Messaging registration token.' },
                   },
                 },
               },
@@ -369,6 +369,9 @@ export function getOpenApiSpec(serverUrl: string) {
                   required: ['event_id'],
                   properties: {
                     event_id: { type: 'string', format: 'uuid' },
+                    device_type: { type: 'string', enum: ['android', 'ios', 'web'] },
+                    device_id: { type: 'string', maxLength: 255 },
+                    fcm_token: { type: 'string', maxLength: 1024, description: 'Firebase Cloud Messaging registration token.' },
                   },
                 },
               },
@@ -390,6 +393,8 @@ export function getOpenApiSpec(serverUrl: string) {
                           event_id: { type: 'string', format: 'uuid' },
                           token: { type: 'string' },
                           expires_at: { type: 'string', format: 'date-time' },
+                          enabled_features: { type: 'object' },
+                          needs_fcm_token_sync: { type: 'boolean', example: false },
                         },
                       },
                     },
@@ -433,7 +438,7 @@ export function getOpenApiSpec(serverUrl: string) {
                     },
                     device_type: { type: 'string', enum: ['android', 'ios', 'web'] },
                     device_id: { type: 'string', maxLength: 255 },
-                    fcm_token: { type: 'string', maxLength: 500, description: 'Firebase Cloud Messaging registration token.' },
+                    fcm_token: { type: 'string', maxLength: 1024, description: 'Firebase Cloud Messaging registration token.' },
                   },
                 },
               },
@@ -463,6 +468,8 @@ export function getOpenApiSpec(serverUrl: string) {
                           secondary_color: { type: 'string', nullable: true, example: '#F97316' },
                           button_primary_color: { type: 'string', nullable: true, example: '#4338CA' },
                           button_secondary_color: { type: 'string', nullable: true, example: '#0369A1' },
+                          enabled_features: { type: 'object' },
+                          needs_fcm_token_sync: { type: 'boolean', example: false },
                         },
                       },
                     },
@@ -552,6 +559,33 @@ export function getOpenApiSpec(serverUrl: string) {
               },
             },
             '400': { description: 'Validation failed' },
+            '500': { description: 'Server error' },
+          },
+        },
+      },
+      '/api/auth/logout': {
+        post: {
+          summary: 'Sign out current device push registration',
+          description:
+            'Requires an app-user Bearer JWT. Deactivates and clears the push token for the current (user_id, device_id) without disturbing other devices.',
+          tags: ['Auth'],
+          security: [{ BearerAuth: [] }],
+          requestBody: {
+            required: false,
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    device_id: { type: 'string', maxLength: 255 },
+                  },
+                },
+              },
+            },
+          },
+          responses: {
+            '200': { description: 'Logged out' },
+            '403': { description: 'Not authenticated' },
             '500': { description: 'Server error' },
           },
         },
@@ -2036,6 +2070,7 @@ export function getOpenApiSpec(serverUrl: string) {
                           mobile_number: { type: 'string', nullable: true },
                           country_code: { type: 'string', nullable: true },
                           instagram_id: { type: 'string', nullable: true },
+                          linkedin_url: { type: 'string', nullable: true },
                           e_invite_pdf_url: {
                             type: 'string',
                             nullable: true,
@@ -2116,7 +2151,8 @@ export function getOpenApiSpec(serverUrl: string) {
                     mobile_number: { type: 'string', maxLength: 20 },
                     is_active: { type: 'boolean' },
                     avatar_url: { type: 'string', format: 'uri', nullable: true },
-                    instagram_id: { type: 'string', maxLength: 100, nullable: true },
+                    instagram_id: { type: 'string', maxLength: 255, nullable: true },
+                    linkedin_url: { type: 'string', maxLength: 500, nullable: true },
                     event_id: {
                       type: 'string',
                       format: 'uuid',
@@ -2308,6 +2344,11 @@ export function getOpenApiSpec(serverUrl: string) {
                             description: 'Current event status from events.status',
                           },
                           allow_new_event_login: { type: 'boolean', example: true },
+                          needs_fcm_token_sync: {
+                            type: 'boolean',
+                            example: false,
+                            description: 'True when user_id is present and this device has no active FCM push token saved on the server.',
+                          },
                           previous_events: {
                             type: 'array',
                             description: 'Events this device or user has already joined',

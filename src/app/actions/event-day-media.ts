@@ -11,7 +11,12 @@ import {
   validateDeclaredVideoDuration,
   validateMediaFile,
 } from '@/lib/upload-rules';
-import { createEventDayMedia, deleteEventDayMediaById } from '@/server/event-day-media';
+import {
+  createEventDayMedia,
+  deleteEventDayMediaBulkByIds,
+  deleteEventDayMediaById,
+} from '@/server/event-day-media';
+import { notifySessionMediaUploaded } from '@/server/notifications/service';
 import { buildEventWatermark, type EventWatermark } from '@/lib/watermark';
 import { isCorporateCategory } from '@/lib/event-categories';
 import {
@@ -279,6 +284,7 @@ export type CreateEventDayMediaActionResult =
 export async function createEventDayMediaAction(input: {
   eventId: string;
   eventSessionId: string;
+  skipNotification?: boolean;
   items: Array<{
     media_key: string;
     media_url: string;
@@ -305,7 +311,8 @@ export async function createEventDayMediaAction(input: {
         media_type: it.media_type,
         display_order: it.display_order ?? i,
         uploaded_by: auth.ctx.id,
-      }))
+      })),
+      { skipNotification: input.skipNotification }
     );
     return { ok: true, data: created };
   } catch (error) {
@@ -315,6 +322,24 @@ export async function createEventDayMediaAction(input: {
       error: 'The files reached storage but could not be saved on this session. Try the upload again.',
     };
   }
+}
+
+export async function notifySessionMediaBatchAction(input: {
+  eventId: string;
+  eventSessionId: string;
+  count: number;
+}): Promise<{ ok: true } | { ok: false; error: string }> {
+  if (input.count <= 0) return { ok: true };
+  const auth = await requireMediaAccess(input.eventId, ['media.upload']);
+  if (!auth.ok) return { ok: false, error: auth.error };
+
+  void notifySessionMediaUploaded({
+    eventId: input.eventId,
+    eventSessionId: input.eventSessionId,
+    count: input.count,
+    uploaderUserId: auth.ctx.id,
+  }).catch((err) => console.error('[notifySessionMediaBatchAction] failed:', err));
+  return { ok: true };
 }
 
 export type DeleteEventDayMediaActionResult = { ok: true } | { ok: false; error: string };
@@ -361,11 +386,8 @@ export async function deleteEventDayMediaBulkAction(input: {
   });
   if (rows.length !== ids.length) return { ok: false, error: 'Some selected media were not found' };
 
-  for (const id of ids) {
-    await deleteEventDayMediaById(id);
-  }
-
-  return { ok: true, deletedCount: ids.length };
+  const deletedCount = await deleteEventDayMediaBulkByIds(ids);
+  return { ok: true, deletedCount };
 }
 
 function parseSessionTime(value: string | null | undefined): Date | null {

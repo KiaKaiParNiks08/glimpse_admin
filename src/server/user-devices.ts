@@ -1,5 +1,11 @@
 import type { device_type } from '@prisma/client';
 import { isWeddingCategory } from '@/lib/event-categories';
+import {
+  buildUserDeviceUpsertData,
+  computeNeedsFcmTokenSync,
+  extractPushTokenFromDevice,
+  normalizeFcmToken,
+} from '@/lib/push-device';
 import prisma from '@/server/prisma';
 
 export interface UpsertUserDeviceInput {
@@ -9,17 +15,27 @@ export interface UpsertUserDeviceInput {
   fcm_token?: string | null;
 }
 
+export interface UpsertUserDeviceResult {
+  has_fcm_token: boolean;
+}
+
 let userDevicesEnsured = false;
 export async function ensureUserDevicesFcmColumn(): Promise<void> {
   if (userDevicesEnsured) return;
   try {
-    await prisma.$executeRawUnsafe(`
-      ALTER TABLE "user_devices"
-        ADD COLUMN IF NOT EXISTS "fcm_token" TEXT;
-      CREATE INDEX IF NOT EXISTS "idx_user_devices_fcm_token" ON "user_devices" ("fcm_token");
-    `);
+    await prisma.$queryRawUnsafe(`SELECT "fcm_token" FROM "user_devices" LIMIT 0`);
     userDevicesEnsured = true;
   } catch {
+    try {
+      await prisma.$executeRawUnsafe(
+        `ALTER TABLE "user_devices" ADD COLUMN IF NOT EXISTS "fcm_token" TEXT`
+      );
+      await prisma.$executeRawUnsafe(
+        `CREATE INDEX IF NOT EXISTS "idx_user_devices_fcm_token" ON "user_devices" ("fcm_token")`
+      );
+    } catch {
+      // Ignore concurrent DDL races
+    }
     userDevicesEnsured = true;
   }
 }
@@ -94,34 +110,103 @@ export async function listPreviousEventsForUsers(userIds: string[]): Promise<Pre
   return items;
 }
 
-export async function upsertUserDevice(input: UpsertUserDeviceInput): Promise<void> {
+export async function upsertUserDevice(
+  input: UpsertUserDeviceInput
+): Promise<UpsertUserDeviceResult> {
   await ensureUserDevicesFcmColumn();
   const { user_id, device_type, device_id, fcm_token } = input;
-  const now = new Date();
+  const cleanDeviceId = device_id.trim();
+  const payload = buildUserDeviceUpsertData({
+    user_id,
+    device_type,
+    device_id: cleanDeviceId,
+    fcm_token,
+  });
 
-  await prisma.user_devices.upsert({
+  const saved = await prisma.user_devices.upsert({
     where: {
       user_id_device_id: {
         user_id,
-        device_id,
+        device_id: cleanDeviceId,
       },
     },
-    update: {
-      device_type,
-      is_active: true,
-      last_seen_at: now,
-      updated_at: now,
-      ...(fcm_token !== undefined ? { fcm_token: fcm_token ? fcm_token.trim() : null } : {}),
+    update: payload.update,
+    create: payload.create,
+    select: {
+      fcm_token: true,
+      device_id: true,
     },
-    create: {
-      user_id,
-      device_type,
-      device_id,
-      fcm_token: fcm_token ? fcm_token.trim() : null,
+  });
+
+  return {
+    has_fcm_token: extractPushTokenFromDevice(saved) !== null,
+  };
+}
+
+/**
+ * Refresh fcm_token and reactivate device rows matching device_id when user_id is not yet resolved.
+ */
+export async function touchDeviceFcmTokenByDeviceId(
+  deviceId: string,
+  fcmToken: string
+): Promise<void> {
+  const cleanToken = normalizeFcmToken(fcmToken);
+  const cleanDeviceId = deviceId.trim();
+  if (!cleanToken || !cleanDeviceId) return;
+
+  await ensureUserDevicesFcmColumn();
+  const now = new Date();
+  await prisma.user_devices.updateMany({
+    where: { device_id: cleanDeviceId },
+    data: {
+      fcm_token: cleanToken,
       is_active: true,
       last_seen_at: now,
-      created_at: now,
       updated_at: now,
+    },
+  });
+}
+
+/**
+ * Check whether the mobile app should call POST /api/auth/fcm-token to sync a valid push token.
+ */
+export async function needsFcmTokenSyncForUser(
+  userId: string,
+  deviceId?: string | null
+): Promise<boolean> {
+  await ensureUserDevicesFcmColumn();
+  const devices = await prisma.user_devices.findMany({
+    where: {
+      user_id: userId,
+      ...(deviceId?.trim() ? { device_id: deviceId.trim() } : {}),
+    },
+    select: {
+      device_id: true,
+      fcm_token: true,
+      is_active: true,
+    },
+  });
+  return computeNeedsFcmTokenSync(devices, deviceId);
+}
+
+/**
+ * Deactivate device registration(s) and clear push token(s) when a user explicitly logs out.
+ */
+export async function deactivateUserDevice(input: {
+  user_id: string;
+  device_id?: string | null;
+}): Promise<void> {
+  await ensureUserDevicesFcmColumn();
+  const cleanDeviceId = input.device_id?.trim();
+  await prisma.user_devices.updateMany({
+    where: {
+      user_id: input.user_id,
+      ...(cleanDeviceId ? { device_id: cleanDeviceId } : {}),
+    },
+    data: {
+      is_active: false,
+      fcm_token: null,
+      updated_at: new Date(),
     },
   });
 }

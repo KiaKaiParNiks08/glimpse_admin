@@ -101,7 +101,7 @@ export default function DashboardLayout({
         }
         // The cookie is the source of truth. Always copy its JWT into this tab: a new tab
         // has none, and an old tab may hold an expired one that the pages' API calls reject.
-        const token = await getAdminTokenFromSessionAction();
+        const token = res.data.token ?? (await getAdminTokenFromSessionAction());
         if (!token) {
           goToLogin();
           return;

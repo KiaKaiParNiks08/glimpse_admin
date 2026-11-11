@@ -1,10 +1,20 @@
 import test, { describe } from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  FCM_TOKEN_MAX_LENGTH,
   fcmTokenRequestSchema,
   authVerifyRequestSchema,
+  authSwitchEventRequestSchema,
   authJoinEventRequestSchema,
+  authLogoutRequestSchema,
 } from '../../lib/validations/auth.ts';
+import {
+  normalizeFcmToken,
+  extractPushTokenFromDevice,
+  computeNeedsFcmTokenSync,
+  buildUserDeviceUpsertData,
+  isPermanentInvalidFcmError,
+} from '../../lib/push-device.ts';
 
 describe('Notification formatting and deep-link payload contracts', () => {
   test('Case 1A: Session Media Upload broadcast format and payload', () => {
@@ -310,12 +320,116 @@ describe('Notification formatting and deep-link payload contracts', () => {
   });
 
   test('Device reachability does not treat 36-char UUID device_id as a valid FCM push token', () => {
-    const hasValidFcmToken = (fcmToken: string | null, deviceId: string) =>
-      Boolean(fcmToken?.trim() || (deviceId && deviceId.trim().length > 50));
+    assert.equal(extractPushTokenFromDevice({ fcm_token: null, device_id: 'a1b2c3d4-e5f6-7890-abcd-1234567890ab' }), null);
+    assert.equal(extractPushTokenFromDevice({ fcm_token: '', device_id: 'a1b2c3d4-e5f6-7890-abcd-1234567890ab' }), null);
+    assert.equal(
+      extractPushTokenFromDevice({ fcm_token: ' fcm_live_token_abc123 ', device_id: 'a1b2c3d4-e5f6-7890-abcd-1234567890ab' }),
+      'fcm_live_token_abc123'
+    );
+    assert.equal(
+      extractPushTokenFromDevice({ fcm_token: null, device_id: 'c_very_long_legacy_fcm_token_over_50_characters_long_123456' }),
+      'c_very_long_legacy_fcm_token_over_50_characters_long_123456'
+    );
+  });
 
-    assert.equal(hasValidFcmToken(null, 'a1b2c3d4-e5f6-7890-abcd-1234567890ab'), false);
-    assert.equal(hasValidFcmToken('', 'a1b2c3d4-e5f6-7890-abcd-1234567890ab'), false);
-    assert.equal(hasValidFcmToken('fcm_live_token_abc123', 'a1b2c3d4-e5f6-7890-abcd-1234567890ab'), true);
-    assert.equal(hasValidFcmToken(null, 'c_very_long_legacy_fcm_token_over_50_characters_long_123456'), true);
+  test('normalizeFcmToken returns undefined for blank/null inputs so existing tokens are never wiped', () => {
+    assert.equal(normalizeFcmToken(undefined), undefined);
+    assert.equal(normalizeFcmToken(null), undefined);
+    assert.equal(normalizeFcmToken(''), undefined);
+    assert.equal(normalizeFcmToken('   '), undefined);
+    assert.equal(normalizeFcmToken('  fcm_valid_abc  '), 'fcm_valid_abc');
+  });
+
+  test('buildUserDeviceUpsertData preserves existing fcm_token when app-info or switch-event omits it', () => {
+    const now = new Date('2026-11-11T15:00:00.000Z');
+    const withoutToken = buildUserDeviceUpsertData({
+      user_id: 'e2b3472b-8a8b-4a57-b088-7e3e9d8e57aa',
+      device_type: 'android',
+      device_id: 'dev-uuid-1',
+      fcm_token: null,
+      now,
+    });
+    assert.equal('fcm_token' in withoutToken.update, false);
+    assert.equal(withoutToken.update.is_active, true);
+    assert.equal(withoutToken.create.fcm_token, null);
+
+    const blankToken = buildUserDeviceUpsertData({
+      user_id: 'e2b3472b-8a8b-4a57-b088-7e3e9d8e57aa',
+      device_type: 'ios',
+      device_id: 'dev-uuid-1',
+      fcm_token: '   ',
+      now,
+    });
+    assert.equal('fcm_token' in blankToken.update, false);
+
+    const validToken = buildUserDeviceUpsertData({
+      user_id: 'e2b3472b-8a8b-4a57-b088-7e3e9d8e57aa',
+      device_type: 'android',
+      device_id: ' dev-uuid-1 ',
+      fcm_token: ' fcm_token_fresh_999 ',
+      now,
+    });
+    assert.equal(validToken.update.fcm_token, 'fcm_token_fresh_999');
+    assert.equal(validToken.create.fcm_token, 'fcm_token_fresh_999');
+    assert.equal(validToken.create.device_id, 'dev-uuid-1');
+  });
+
+  test('computeNeedsFcmTokenSync detects missing, inactive, or new-device tokens accurately', () => {
+    const activeDev = { device_id: 'dev-A', fcm_token: 'tok-A', is_active: true };
+    const wipedDev = { device_id: 'dev-B', fcm_token: null, is_active: true };
+    const inactiveDev = { device_id: 'dev-C', fcm_token: 'tok-C', is_active: false };
+
+    assert.equal(computeNeedsFcmTokenSync([activeDev], 'dev-A'), false);
+    assert.equal(computeNeedsFcmTokenSync([wipedDev], 'dev-B'), true);
+    assert.equal(computeNeedsFcmTokenSync([inactiveDev], 'dev-C'), true);
+    // Switching onto a brand-new phone dev-D must still request token sync even if old dev-A exists
+    assert.equal(computeNeedsFcmTokenSync([activeDev], 'dev-D'), true);
+    // Without device_id, user only needs sync if zero active rows have a usable token
+    assert.equal(computeNeedsFcmTokenSync([activeDev, wipedDev], null), false);
+    assert.equal(computeNeedsFcmTokenSync([wipedDev, inactiveDev], null), true);
+    assert.equal(computeNeedsFcmTokenSync([], null), true);
+  });
+
+  test('isPermanentInvalidFcmError deactivates UNREGISTERED and bad-token INVALID_ARGUMENT only', () => {
+    assert.equal(isPermanentInvalidFcmError({ errorCode: 404, errorStatus: 'NOT_FOUND', errorMessage: 'Requested entity was not found.' }), true);
+    assert.equal(isPermanentInvalidFcmError({ errorStatus: 'INVALID_ARGUMENT', errorMessage: 'The registration token is not a valid FCM registration token' }), true);
+    assert.equal(isPermanentInvalidFcmError({ errorMessage: 'UNREGISTERED' }), true);
+    // Do not wipe healthy devices when image/payload fails validation or transient 503 happens
+    assert.equal(isPermanentInvalidFcmError({ errorStatus: 'INVALID_ARGUMENT', errorMessage: 'Invalid notification image URL' }), false);
+    assert.equal(isPermanentInvalidFcmError({ errorCode: 503, errorStatus: 'UNAVAILABLE', errorMessage: 'Service temporarily unavailable' }), false);
+  });
+
+  test('Switch, join, fcm-token, and logout schemas validate expected payloads including >500 char tokens', () => {
+    const longToken = 'f'.repeat(800);
+    assert.equal(FCM_TOKEN_MAX_LENGTH, 1024);
+    assert.equal(
+      authSwitchEventRequestSchema.safeParse({
+        event_id: 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11',
+        device_id: 'dev-uuid-1',
+        device_type: 'android',
+        fcm_token: longToken,
+      }).success,
+      true
+    );
+    assert.equal(
+      authJoinEventRequestSchema.safeParse({
+        event_id: 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11',
+        device_id: 'dev-uuid-1',
+        device_type: 'ios',
+        fcm_token: longToken,
+      }).success,
+      true
+    );
+    assert.equal(
+      fcmTokenRequestSchema.safeParse({
+        user_id: 'e2b3472b-8a8b-4a57-b088-7e3e9d8e57aa',
+        device_id: 'dev-uuid-1',
+        device_type: 'android',
+        fcm_token: longToken,
+      }).success,
+      true
+    );
+    assert.equal(authLogoutRequestSchema.safeParse({ device_id: 'dev-uuid-1' }).success, true);
+    assert.equal(authLogoutRequestSchema.safeParse({}).success, true);
   });
 });

@@ -9,6 +9,7 @@ import {
   normalizeEmailSuffix,
 } from '@/lib/event-categories';
 import { WATERMARK_MAX_SIZE_PX, WATERMARK_MIN_SIZE_PX, WATERMARK_POSITIONS } from '@/lib/watermark';
+import { FCM_TOKEN_MAX_LENGTH } from './auth';
 
 /** Path params for /api/events/[event_id] and nested routes */
 export const eventIdPathSchema = z.object({
@@ -195,7 +196,7 @@ export const eventDetailsQuerySchema = z.object({
   viewer_user_id: z.string().uuid().optional(),
   device_id: z.string().max(255).optional(),
   device_type: z.enum(['android', 'ios', 'web']).optional(),
-  fcm_token: z.string().max(500).optional(),
+  fcm_token: z.string().trim().max(FCM_TOKEN_MAX_LENGTH).optional(),
 });
 
 /** Add organizer from Days & sessions (step 2) */

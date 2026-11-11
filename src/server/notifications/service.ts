@@ -1,4 +1,6 @@
 import type { notification_type } from '@prisma/client';
+import { extractPushTokenFromDevice } from '@/lib/push-device';
+import { getEventEffectiveFeatures } from '@/server/access';
 import prisma from '@/server/prisma';
 import { sendFcmPush } from './firebase-http';
 
@@ -23,16 +25,35 @@ export async function getDeviceTokensForUsers(userIds: string[]): Promise<string
   });
 
   const tokens = devices
-    .map((d) => {
-      const fcm = d.fcm_token?.trim();
-      if (fcm) return fcm;
-      const dev = d.device_id?.trim();
-      if (dev && dev.length > 50) return dev;
-      return null;
-    })
+    .map((d) => extractPushTokenFromDevice(d))
     .filter((token): token is string => Boolean(token));
 
   return [...new Set(tokens)];
+}
+
+/**
+ * Send FCM push notifications only if the event's purchased plan allows push_notifications.
+ */
+async function dispatchEventPush(input: {
+  eventId?: string | null;
+  userIds: string[];
+  notification: { title: string; body: string; image?: string };
+  data?: Record<string, string>;
+}): Promise<void> {
+  if (input.userIds.length === 0) return;
+  if (input.eventId) {
+    const features = await getEventEffectiveFeatures(input.eventId);
+    if (!features.push_notifications) return;
+  }
+
+  const tokens = await getDeviceTokensForUsers(input.userIds);
+  if (tokens.length > 0) {
+    await sendFcmPush({
+      tokens,
+      notification: input.notification,
+      data: input.data,
+    });
+  }
 }
 
 interface InAppNotificationInput {
@@ -141,20 +162,18 @@ export async function notifySessionMediaUploaded(input: SessionMediaUploadBroadc
       }))
     );
 
-    // Dispatch FCM push
-    const tokens = await getDeviceTokensForUsers(recipientUserIds);
-    if (tokens.length > 0) {
-      await sendFcmPush({
-        tokens,
-        notification: { title, body },
-        data: {
-          screen: 'session_media',
-          type: 'session_media_uploaded',
-          event_id: eventId,
-          event_session_id: eventSessionId,
-        },
-      });
-    }
+    // Dispatch FCM push (gated by plan feature push_notifications)
+    await dispatchEventPush({
+      eventId,
+      userIds: recipientUserIds,
+      notification: { title, body },
+      data: {
+        screen: 'session_media',
+        type: 'session_media_uploaded',
+        event_id: eventId,
+        event_session_id: eventSessionId,
+      },
+    });
   } catch (err) {
     console.error('[notifications] Error in notifySessionMediaUploaded:', err);
   }
@@ -202,20 +221,18 @@ export async function notifySessionFaceRecognized(input: SessionFaceRecognizedIn
       message: body,
     });
 
-    const tokens = await getDeviceTokensForUsers([userId]);
-    if (tokens.length > 0) {
-      await sendFcmPush({
-        tokens,
-        notification: { title, body },
-        data: {
-          screen: 'session_media',
-          type: 'session_media_uploaded',
-          event_id: eventId,
-          event_session_id: eventSessionId,
-          recognized_count: String(recognizedCount),
-        },
-      });
-    }
+    await dispatchEventPush({
+      eventId,
+      userIds: [userId],
+      notification: { title, body },
+      data: {
+        screen: 'session_media',
+        type: 'session_media_uploaded',
+        event_id: eventId,
+        event_session_id: eventSessionId,
+        recognized_count: String(recognizedCount),
+      },
+    });
   } catch (err) {
     console.error('[notifications] Error in notifySessionFaceRecognized:', err);
   }
@@ -277,19 +294,17 @@ export async function notifyPostLiked(input: PostLikedInput): Promise<void> {
         message: authorBody,
       });
 
-      const authorTokens = await getDeviceTokensForUsers([post.user_id]);
-      if (authorTokens.length > 0) {
-        await sendFcmPush({
-          tokens: authorTokens,
-          notification: { title: authorTitle, body: authorBody },
-          data: {
-            screen: 'post_details',
-            type: 'post_like',
-            event_id: post.event_id ?? '',
-            post_id: postId,
-          },
-        });
-      }
+      await dispatchEventPush({
+        eventId: post.event_id,
+        userIds: [post.user_id],
+        notification: { title: authorTitle, body: authorBody },
+        data: {
+          screen: 'post_details',
+          type: 'post_like',
+          event_id: post.event_id ?? '',
+          post_id: postId,
+        },
+      });
     }
 
     // 7. Notify Recognized People In That Post (Your Post Got Some Love ❤️)
@@ -321,19 +336,17 @@ export async function notifyPostLiked(input: PostLikedInput): Promise<void> {
         }))
       );
 
-      const recognizedTokens = await getDeviceTokensForUsers(recognizedList);
-      if (recognizedTokens.length > 0) {
-        await sendFcmPush({
-          tokens: recognizedTokens,
-          notification: { title: recognizedTitle, body: recognizedBody },
-          data: {
-            screen: 'post_details',
-            type: 'recognized_post_liked',
-            event_id: post.event_id ?? '',
-            post_id: postId,
-          },
-        });
-      }
+      await dispatchEventPush({
+        eventId: post.event_id,
+        userIds: recognizedList,
+        notification: { title: recognizedTitle, body: recognizedBody },
+        data: {
+          screen: 'post_details',
+          type: 'recognized_post_liked',
+          event_id: post.event_id ?? '',
+          post_id: postId,
+        },
+      });
     }
   } catch (err) {
     console.error('[notifications] Error in notifyPostLiked:', err);
@@ -391,21 +404,19 @@ export async function notifyCommentAdded(input: CommentAddedInput): Promise<void
           message: replyBody,
         });
 
-        const replyTokens = await getDeviceTokensForUsers([parentComment.user_id]);
-        if (replyTokens.length > 0) {
-          await sendFcmPush({
-            tokens: replyTokens,
-            notification: { title: replyTitle, body: replyBody },
-            data: {
-              screen: 'post_details',
-              type: 'comment_reply',
-              event_id: post.event_id ?? '',
-              post_id: postId,
-              comment_id: commentId,
-              parent_comment_id: parentCommentId,
-            },
-          });
-        }
+        await dispatchEventPush({
+          eventId: post.event_id,
+          userIds: [parentComment.user_id],
+          notification: { title: replyTitle, body: replyBody },
+          data: {
+            screen: 'post_details',
+            type: 'comment_reply',
+            event_id: post.event_id ?? '',
+            post_id: postId,
+            comment_id: commentId,
+            parent_comment_id: parentCommentId,
+          },
+        });
       }
     } else {
       // 3. Top-level Comment (New Comment 💬)
@@ -423,20 +434,18 @@ export async function notifyCommentAdded(input: CommentAddedInput): Promise<void
           message: commentBody,
         });
 
-        const authorTokens = await getDeviceTokensForUsers([post.user_id]);
-        if (authorTokens.length > 0) {
-          await sendFcmPush({
-            tokens: authorTokens,
-            notification: { title: commentTitle, body: commentBody },
-            data: {
-              screen: 'post_details',
-              type: 'post_comment',
-              event_id: post.event_id ?? '',
-              post_id: postId,
-              comment_id: commentId,
-            },
-          });
-        }
+        await dispatchEventPush({
+          eventId: post.event_id,
+          userIds: [post.user_id],
+          notification: { title: commentTitle, body: commentBody },
+          data: {
+            screen: 'post_details',
+            type: 'post_comment',
+            event_id: post.event_id ?? '',
+            post_id: postId,
+            comment_id: commentId,
+          },
+        });
       }
     }
   } catch (err) {
@@ -495,19 +504,17 @@ export async function notifyNewPostInEvent(input: NewPostInEventInput): Promise<
       }))
     );
 
-    const tokens = await getDeviceTokensForUsers(recipientUserIds);
-    if (tokens.length > 0) {
-      await sendFcmPush({
-        tokens,
-        notification: { title, body },
-        data: {
-          screen: 'post_details',
-          type: 'new_post',
-          event_id: eventId,
-          post_id: postId,
-        },
-      });
-    }
+    await dispatchEventPush({
+      eventId,
+      userIds: recipientUserIds,
+      notification: { title, body },
+      data: {
+        screen: 'post_details',
+        type: 'new_post',
+        event_id: eventId,
+        post_id: postId,
+      },
+    });
   } catch (err) {
     console.error('[notifications] Error in notifyNewPostInEvent:', err);
   }
@@ -547,19 +554,17 @@ export async function notifySpotlightPost(input: SpotlightPostInput): Promise<vo
       message: body,
     });
 
-    const tokens = await getDeviceTokensForUsers([recognizedUserId]);
-    if (tokens.length > 0) {
-      await sendFcmPush({
-        tokens,
-        notification: { title, body },
-        data: {
-          screen: 'post_details',
-          type: 'spotlight_post',
-          event_id: eventId,
-          post_id: postId,
-        },
-      });
-    }
+    await dispatchEventPush({
+      eventId,
+      userIds: [recognizedUserId],
+      notification: { title, body },
+      data: {
+        screen: 'post_details',
+        type: 'spotlight_post',
+        event_id: eventId,
+        post_id: postId,
+      },
+    });
   } catch (err) {
     console.error('[notifications] Error in notifySpotlightPost:', err);
   }

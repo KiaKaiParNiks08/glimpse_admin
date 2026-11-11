@@ -1,5 +1,7 @@
 import { z } from 'zod';
 
+export const FCM_TOKEN_MAX_LENGTH = 1024;
+
 const optionalText = (max: number) =>
   z.preprocess(
     (value) => (value === '' || value === null ? undefined : value),
@@ -25,7 +27,7 @@ export const authRequestSchema = z
       z.enum(['android', 'ios', 'web']).optional()
     ),
     device_id: optionalText(255),
-    fcm_token: optionalText(500),
+    fcm_token: optionalText(FCM_TOKEN_MAX_LENGTH),
   })
   .superRefine((data, ctx) => {
     if (!data.mobile_number && !data.email && !data.event_code) {
@@ -49,7 +51,7 @@ export const authVerifyRequestSchema = z.object({
     z.enum(['android', 'ios', 'web']).optional()
   ),
   device_id: optionalText(255),
-  fcm_token: optionalText(500),
+  fcm_token: optionalText(FCM_TOKEN_MAX_LENGTH),
 });
 
 export type AuthVerifyRequestInput = z.infer<typeof authVerifyRequestSchema>;
@@ -69,7 +71,7 @@ export const authSwitchEventRequestSchema = z.object({
     z.enum(['android', 'ios', 'web']).optional()
   ),
   device_id: optionalText(255),
-  fcm_token: optionalText(500),
+  fcm_token: optionalText(FCM_TOKEN_MAX_LENGTH),
 });
 
 /** Logged-in user joining another event from the in-app sheet or QR. */
@@ -85,7 +87,7 @@ export const authJoinEventRequestSchema = z
       z.enum(['android', 'ios', 'web']).optional()
     ),
     device_id: optionalText(255),
-    fcm_token: optionalText(500),
+    fcm_token: optionalText(FCM_TOKEN_MAX_LENGTH),
   })
   .superRefine((data, ctx) => {
     if (!data.event_code && !data.event_id) {
@@ -110,10 +112,17 @@ export const fcmTokenRequestSchema = z.object({
   ),
   device_id: z.string().min(1).max(255),
   device_type: z.enum(['android', 'ios']),
-  fcm_token: z.string().min(1),
+  fcm_token: z.string().trim().min(1).max(FCM_TOKEN_MAX_LENGTH),
 });
 
 export type FcmTokenRequestInput = z.infer<typeof fcmTokenRequestSchema>;
+
+/** Logout / unregister active device push token */
+export const authLogoutRequestSchema = z.object({
+  device_id: optionalText(255),
+});
+
+export type AuthLogoutRequestInput = z.infer<typeof authLogoutRequestSchema>;
 
 /** Admin login (SuperAdmin / Event Admin) – email and password */
 export const adminLoginRequestSchema = z.object({

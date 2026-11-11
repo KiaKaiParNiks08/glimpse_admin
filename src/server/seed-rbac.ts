@@ -17,6 +17,23 @@ let seedingPromise: Promise<void> | null = null;
 
 async function runBootstrap(): Promise<void> {
   try {
+    // Fast-path check (1 lightweight read query) skips all DDL and upserts once migrations are applied.
+    try {
+      const checkRows = await prisma.$queryRawUnsafe<Array<{ ready: boolean }>>(`
+        SELECT (
+          EXISTS (SELECT 1 FROM "purchase_plans" LIMIT 1)
+          AND EXISTS (SELECT 1 FROM "roles" WHERE "name" = 'client_admin' AND "is_system" = true)
+          AND EXISTS (SELECT 1 FROM "users" WHERE "email" = '${DEFAULT_SUPERADMIN_EMAIL}')
+        ) AS "ready"
+      `);
+      if (checkRows[0]?.ready) {
+        seeded = true;
+        return;
+      }
+    } catch {
+      // Tables or columns not yet created — fall through to full bootstrap.
+    }
+
     // Ensure schema columns/tables exist safely if running before migrate deploy
     await prisma.$executeRawUnsafe(`
       ALTER TABLE "roles"

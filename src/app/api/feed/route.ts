@@ -58,7 +58,7 @@ export async function GET(request: Request) {
  * Content-Type: multipart/form-data
  * Fields: user_id (required), caption (optional), event_id (optional), height (optional), media (multiple). Max 1 video OR max 6 images per post (no mixing). Status is always active.
  * event_id is stored on the post. GET /api/feed?event_id= returns only that event. A post with no event_id is not listed for any event.
- * Files are saved under project uploads folder (uploads/YYYY/MM/).
+ * Files are saved concurrently to S3 (or project uploads folder in local dev).
  */
 export async function POST(request: NextRequest) {
   try {
@@ -98,26 +98,14 @@ export async function POST(request: NextRequest) {
       parsed.data.event_id ??
       (tokenUser && tokenUser.id === parsed.data.user_id ? tokenUser.event_id : undefined);
     if (eventId) {
-      const event = await prisma.events.findUnique({ where: { id: eventId }, select: { id: true } });
+      const [event, features] = await Promise.all([
+        prisma.events.findUnique({ where: { id: eventId }, select: { id: true } }),
+        getEventEffectiveFeatures(eventId),
+      ]);
       if (!event) return notFound('Event not found');
-      const features = await getEventEffectiveFeatures(eventId);
       if (!features.mobile_feed) return forbidden('Social feed is disabled for this event');
       await ensureEventGuest({ event_id: eventId, user_id: parsed.data.user_id });
     }
-
-    const mediaItems: Array<{
-      media_type: 'image' | 'video';
-      media_url: string;
-      thumbnail_url?: string;
-      media_width: number | null;
-      media_height: number | null;
-      aspect_ratio: number | null;
-      thumbnail_width: number | null;
-      thumbnail_height: number | null;
-      media_order: number;
-      storageKey: string;
-    }> = [];
-    let order = 0;
 
     // Collect all media files: "media", "media[]", or "media[0]", "media[1]" (Swagger UI array).
     // An empty part means the body was cut off. Do not create the post without that file.
@@ -182,54 +170,60 @@ export async function POST(request: NextRequest) {
     }
 
     const projectRoot = process.cwd();
-    let videoThumbnail: {
-      url: string;
-      storageKey: string;
-      width: number | null;
-      height: number | null;
-    } | null = null;
-    if (videoCount === 1 && thumbnails[0]) {
-      const mime = resolveUploadMime(thumbnails[0].type, thumbnails[0].name);
-      const thumbBytes = Buffer.from(await thumbnails[0].arrayBuffer());
-      const thumbSize = readMediaDimensions(thumbBytes, 'image');
-      const savedThumb = await saveUploadedBuffer(thumbBytes, 'image', projectRoot, {
-        prefix: 'feed/thumbnails',
-        contentType: mime,
-        fileName: thumbnails[0].name,
-      });
-      videoThumbnail = {
-        url: savedThumb.relativeUrl,
-        storageKey: savedThumb.storageKey,
-        width: thumbSize?.width ?? null,
-        height: thumbSize?.height ?? null,
-      };
-    }
-    for (const { file, kind, mime } of validated) {
-      order += 1;
-      const bytes = Buffer.from(await file.arrayBuffer());
-      if (bytes.length === 0 || bytes.length !== file.size) {
-        return badRequest('The media file was missing or did not finish uploading. Please try again.');
-      }
-      const size = readMediaDimensions(bytes, kind);
-      const ratio = size ? aspectRatio(size.width, size.height) : null;
-      const saved = await saveUploadedBuffer(bytes, kind, projectRoot, {
-        prefix: 'feed',
-        contentType: mime,
-        fileName: file.name,
-      });
-      mediaItems.push({
-        media_type: kind,
-        media_url: saved.relativeUrl,
-        media_width: size?.width ?? null,
-        media_height: size?.height ?? null,
-        aspect_ratio: ratio,
-        thumbnail_width: kind === 'video' ? videoThumbnail?.width ?? null : null,
-        thumbnail_height: kind === 'video' ? videoThumbnail?.height ?? null : null,
-        media_order: order,
-        storageKey: saved.storageKey,
-        ...(kind === 'video' && videoThumbnail ? { thumbnail_url: videoThumbnail.url } : {}),
-      });
-    }
+    const thumbnailPromise =
+      videoCount === 1 && thumbnails[0]
+        ? (async () => {
+            const thumbFile = thumbnails[0]!;
+            const mime = resolveUploadMime(thumbFile.type, thumbFile.name);
+            const thumbBytes = Buffer.from(await thumbFile.arrayBuffer());
+            const thumbSize = readMediaDimensions(thumbBytes, 'image');
+            const savedThumb = await saveUploadedBuffer(thumbBytes, 'image', projectRoot, {
+              prefix: 'feed/thumbnails',
+              contentType: mime,
+              fileName: thumbFile.name,
+            });
+            return {
+              url: savedThumb.relativeUrl,
+              storageKey: savedThumb.storageKey,
+              width: thumbSize?.width ?? null,
+              height: thumbSize?.height ?? null,
+            };
+          })()
+        : Promise.resolve(null);
+
+    const mediaUploadPromise = Promise.all(
+      validated.map(async ({ file, kind, mime }, idx) => {
+        const bytes = Buffer.from(await file.arrayBuffer());
+        if (bytes.length === 0 || bytes.length !== file.size) {
+          throw new IncompleteUploadError();
+        }
+        const size = readMediaDimensions(bytes, kind);
+        const ratio = size ? aspectRatio(size.width, size.height) : null;
+        const saved = await saveUploadedBuffer(bytes, kind, projectRoot, {
+          prefix: 'feed',
+          contentType: mime,
+          fileName: file.name,
+        });
+        return {
+          media_type: kind,
+          media_url: saved.relativeUrl,
+          media_width: size?.width ?? null,
+          media_height: size?.height ?? null,
+          aspect_ratio: ratio,
+          media_order: idx + 1,
+          storageKey: saved.storageKey,
+        };
+      })
+    );
+
+    const [videoThumbnail, rawMediaItems] = await Promise.all([thumbnailPromise, mediaUploadPromise]);
+
+    const mediaItems = rawMediaItems.map((item) => ({
+      ...item,
+      thumbnail_width: item.media_type === 'video' ? videoThumbnail?.width ?? null : null,
+      thumbnail_height: item.media_type === 'video' ? videoThumbnail?.height ?? null : null,
+      ...(item.media_type === 'video' && videoThumbnail ? { thumbnail_url: videoThumbnail.url } : {}),
+    }));
 
     const post = await createPost(
       {

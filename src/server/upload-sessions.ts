@@ -11,6 +11,13 @@ let schemaEnsured = false;
 export async function ensureUploadSessionsSchema(): Promise<void> {
   if (schemaEnsured) return;
   try {
+    await prisma.$queryRawUnsafe(`SELECT 1 FROM "upload_sessions" LIMIT 0`);
+    schemaEnsured = true;
+    return;
+  } catch {
+    // Table missing on older DB -> create idempotently below
+  }
+  try {
     await prisma.$executeRawUnsafe(`
       CREATE TABLE IF NOT EXISTS upload_sessions (
         id TEXT PRIMARY KEY,
@@ -222,27 +229,35 @@ export async function assembleUploadSession(uploadId: string): Promise<{
     throw new Error(`INCOMPLETE_CHUNKS: received ${chunks.length} of ${totalExpected}`);
   }
 
-  // Ensure each sequential chunk index 0..totalExpected-1 is present
+  // Ensure all chunks 0..totalExpected-1 exist, then fetch S3 objects in bounded batches of 6
   const chunkMap = new Map(chunks.map((c) => [c.chunk_index, c]));
-  const buffers: Buffer[] = [];
-
+  const orderedChunks = [];
   for (let i = 0; i < totalExpected; i++) {
     const chunk = chunkMap.get(i);
     if (!chunk) {
       throw new Error(`MISSING_CHUNK: chunk ${i} is missing`);
     }
+    orderedChunks.push({ index: i, chunk });
+  }
 
-    if (chunk.storage_key) {
-      const obj = await getObjectBuffer(chunk.storage_key);
-      if (!obj) {
-        throw new Error(`CHUNK_STORAGE_ERROR: unable to fetch ${chunk.storage_key}`);
-      }
-      buffers.push(obj.buffer);
-    } else if (chunk.chunk_data) {
-      buffers.push(chunk.chunk_data);
-    } else {
-      throw new Error(`CHUNK_CORRUPT: chunk ${i} has neither storage_key nor chunk_data`);
-    }
+  const buffers: Buffer[] = new Array(totalExpected);
+  for (let start = 0; start < orderedChunks.length; start += 6) {
+    const batch = orderedChunks.slice(start, start + 6);
+    await Promise.all(
+      batch.map(async ({ index, chunk }) => {
+        if (chunk.storage_key) {
+          const obj = await getObjectBuffer(chunk.storage_key);
+          if (!obj) {
+            throw new Error(`CHUNK_STORAGE_ERROR: unable to fetch ${chunk.storage_key}`);
+          }
+          buffers[index] = obj.buffer;
+        } else if (chunk.chunk_data) {
+          buffers[index] = chunk.chunk_data;
+        } else {
+          throw new Error(`CHUNK_CORRUPT: chunk ${index} has neither storage_key nor chunk_data`);
+        }
+      })
+    );
   }
 
   const assembled = Buffer.concat(buffers);
@@ -266,10 +281,9 @@ export async function cleanupUploadSession(
       uploadId
     );
 
-    for (const c of chunks) {
-      if (c.storage_key) {
-        await deleteObjectByKey(c.storage_key).catch(() => null);
-      }
+    const keys = chunks.map((c) => c.storage_key).filter((k): k is string => Boolean(k));
+    if (keys.length > 0) {
+      await Promise.all(keys.map((k) => deleteObjectByKey(k).catch(() => null)));
     }
 
     await prisma.$executeRawUnsafe(`DELETE FROM upload_session_chunks WHERE upload_id = $1`, uploadId);

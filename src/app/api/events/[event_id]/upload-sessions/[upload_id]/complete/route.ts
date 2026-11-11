@@ -104,57 +104,43 @@ export async function POST(
         }
       }
 
-      const mediaItems: Array<{
-        media_type: 'image' | 'video';
-        media_url: string;
-        thumbnail_url?: string;
-        media_width: number | null;
-        media_height: number | null;
-        aspect_ratio: number | null;
-        thumbnail_width: number | null;
-        thumbnail_height: number | null;
-        media_order: number;
-        storageKey: string;
-      }> = [];
-
-      let order = 0;
-      for (const upId of uploadIds) {
-        order++;
-        let assembled;
-        try {
-          assembled = await assembleUploadSession(upId);
-        } catch (err: any) {
-          console.error(`[feed_post assemble failed for ${upId}]`, err);
-          return badRequest(`Upload session ${upId} is incomplete or corrupt: ${err.message}`);
+      const mediaItems = await Promise.all(
+        uploadIds.map(async (upId, idx) => {
+          const assembled = await assembleUploadSession(upId);
+          const mediaKind = getMediaKind(assembled.session.content_type);
+          if (mediaKind !== 'image' && mediaKind !== 'video') {
+            throw new Error(`BAD_CONTENT_TYPE:${assembled.session.content_type}`);
+          }
+          const size = readMediaDimensions(assembled.buffer, mediaKind);
+          const ratio = size ? aspectRatio(size.width, size.height) : null;
+          const saved = await saveUploadedBuffer(assembled.buffer, mediaKind, projectRoot, {
+            prefix: 'feed',
+            contentType: assembled.session.content_type,
+            fileName: assembled.session.filename,
+          });
+          await cleanupUploadSession(upId, { url: saved.relativeUrl, key: saved.storageKey });
+          return {
+            media_type: mediaKind,
+            media_url: saved.relativeUrl,
+            media_width: size?.width ?? null,
+            media_height: size?.height ?? null,
+            aspect_ratio: ratio,
+            thumbnail_width: mediaKind === 'video' ? videoThumbnail?.width ?? null : null,
+            thumbnail_height: mediaKind === 'video' ? videoThumbnail?.height ?? null : null,
+            media_order: idx + 1,
+            storageKey: saved.storageKey,
+            ...(mediaKind === 'video' && videoThumbnail ? { thumbnail_url: videoThumbnail.url } : {}),
+          };
+        })
+      ).catch((err: unknown) => {
+        const msg = err instanceof Error ? err.message : 'Upload incomplete';
+        return msg;
+      });
+      if (typeof mediaItems === 'string') {
+        if (mediaItems.startsWith('BAD_CONTENT_TYPE:')) {
+          return badRequest(`Unsupported media content type ${mediaItems.slice('BAD_CONTENT_TYPE:'.length)}`);
         }
-
-        const mediaKind = getMediaKind(assembled.session.content_type);
-        if (mediaKind !== 'image' && mediaKind !== 'video') {
-          return badRequest(`Unsupported media content type ${assembled.session.content_type}`);
-        }
-
-        const size = readMediaDimensions(assembled.buffer, mediaKind);
-        const ratio = size ? aspectRatio(size.width, size.height) : null;
-        const saved = await saveUploadedBuffer(assembled.buffer, mediaKind, projectRoot, {
-          prefix: 'feed',
-          contentType: assembled.session.content_type,
-          fileName: assembled.session.filename,
-        });
-
-        mediaItems.push({
-          media_type: mediaKind,
-          media_url: saved.relativeUrl,
-          media_width: size?.width ?? null,
-          media_height: size?.height ?? null,
-          aspect_ratio: ratio,
-          thumbnail_width: mediaKind === 'video' ? videoThumbnail?.width ?? null : null,
-          thumbnail_height: mediaKind === 'video' ? videoThumbnail?.height ?? null : null,
-          media_order: order,
-          storageKey: saved.storageKey,
-          ...(mediaKind === 'video' && videoThumbnail ? { thumbnail_url: videoThumbnail.url } : {}),
-        });
-
-        await cleanupUploadSession(upId, { url: saved.relativeUrl, key: saved.storageKey });
+        return badRequest(`Upload session is incomplete or corrupt: ${mediaItems}`);
       }
 
       const post = await createPost(
@@ -233,73 +219,71 @@ export async function POST(
         ? body.thumbnail_upload_ids.filter(Boolean)
         : [];
 
-      // Pre-assemble thumbnails if present
-      const savedThumbnails: Array<{ url: string; key: string }> = [];
-      for (const thumbUpId of thumbnailUploadIds) {
-        try {
-          const { buffer: tBuf, session: tSession } = await assembleUploadSession(thumbUpId);
-          const savedThumb = await saveUploadedBuffer(tBuf, 'image', projectRoot, {
-            prefix: `events/${event_id}/sessions/${session.id}/thumbnails`,
-            contentType: tSession.content_type,
-            fileName: tSession.filename,
-          });
-          savedThumbnails.push({ url: savedThumb.relativeUrl, key: savedThumb.storageKey });
-          await cleanupUploadSession(thumbUpId, { url: savedThumb.relativeUrl, key: savedThumb.storageKey });
-        } catch (err) {
-          console.error(`[session_media thumbnail assemble failed for ${thumbUpId}]`, err);
-        }
-      }
+      // Pre-assemble thumbnails concurrently if present
+      const savedThumbnails = (
+        await Promise.all(
+          thumbnailUploadIds.map(async (thumbUpId) => {
+            try {
+              const { buffer: tBuf, session: tSession } = await assembleUploadSession(thumbUpId);
+              const savedThumb = await saveUploadedBuffer(tBuf, 'image', projectRoot, {
+                prefix: `events/${event_id}/sessions/${session.id}/thumbnails`,
+                contentType: tSession.content_type,
+                fileName: tSession.filename,
+              });
+              await cleanupUploadSession(thumbUpId, { url: savedThumb.relativeUrl, key: savedThumb.storageKey });
+              return { url: savedThumb.relativeUrl, key: savedThumb.storageKey };
+            } catch (err) {
+              console.error(`[session_media thumbnail assemble failed for ${thumbUpId}]`, err);
+              return null;
+            }
+          })
+        )
+      ).filter((t): t is { url: string; key: string } => t !== null);
 
-      const savedItems: Array<{
-        media_key: string;
-        media_url: string;
-        media_type: 'image' | 'video';
-        thumbnail_url: string | null;
-        thumbnail_key: string | null;
-        display_order: number;
-      }> = [];
+      const assembledResults = await Promise.all(
+        uploadIds.map(async (upId, i) => {
+          const assembled = await assembleUploadSession(upId);
+          const mediaKind = getMediaKind(assembled.session.content_type);
+          if (mediaKind !== 'image' && mediaKind !== 'video') {
+            throw new Error(`BAD_CONTENT_TYPE:${assembled.session.content_type}`);
+          }
+          const saved = await saveUploadedBuffer(assembled.buffer, mediaKind, projectRoot, {
+            prefix: `events/${event_id}/sessions/${session.id}`,
+            contentType: assembled.session.content_type,
+            fileName: assembled.session.filename,
+          });
+          await cleanupUploadSession(upId, { url: saved.relativeUrl, key: saved.storageKey });
+          return {
+            media_key: saved.storageKey,
+            media_url: saved.relativeUrl,
+            media_type: mediaKind as 'image' | 'video',
+            display_order: i,
+          };
+        })
+      ).catch((err: unknown) => (err instanceof Error ? err.message : 'Incomplete upload'));
+
+      if (typeof assembledResults === 'string') {
+        if (assembledResults.startsWith('BAD_CONTENT_TYPE:')) {
+          return badRequest(`Unsupported media content type ${assembledResults.slice('BAD_CONTENT_TYPE:'.length)}`);
+        }
+        return badRequest(`Upload session is incomplete: ${assembledResults}`);
+      }
 
       let videoIndex = 0;
-      for (let i = 0; i < uploadIds.length; i++) {
-        const upId = uploadIds[i];
-        let assembled;
-        try {
-          assembled = await assembleUploadSession(upId);
-        } catch (err: any) {
-          console.error(`[session_media assemble failed for ${upId}]`, err);
-          return badRequest(`Upload session ${upId} is incomplete: ${err.message}`);
-        }
-
-        const mediaKind = getMediaKind(assembled.session.content_type);
-        if (mediaKind !== 'image' && mediaKind !== 'video') {
-          return badRequest(`Unsupported media content type ${assembled.session.content_type}`);
-        }
-
-        const saved = await saveUploadedBuffer(assembled.buffer, mediaKind, projectRoot, {
-          prefix: `events/${event_id}/sessions/${session.id}`,
-          contentType: assembled.session.content_type,
-          fileName: assembled.session.filename,
-        });
-
-        let thumbUrl: string | null = null;
-        let thumbKey: string | null = null;
-        if (mediaKind === 'video' && savedThumbnails[videoIndex]) {
-          thumbUrl = savedThumbnails[videoIndex].url;
-          thumbKey = savedThumbnails[videoIndex].key;
+      const savedItems = assembledResults.map((item) => {
+        let thumbnail_url: string | null = null;
+        let thumbnail_key: string | null = null;
+        if (item.media_type === 'video' && savedThumbnails[videoIndex]) {
+          thumbnail_url = savedThumbnails[videoIndex].url;
+          thumbnail_key = savedThumbnails[videoIndex].key;
           videoIndex++;
         }
-
-        savedItems.push({
-          media_key: saved.storageKey,
-          media_url: saved.relativeUrl,
-          media_type: mediaKind,
-          thumbnail_url: thumbUrl,
-          thumbnail_key: thumbKey,
-          display_order: i,
-        });
-
-        await cleanupUploadSession(upId, { url: saved.relativeUrl, key: saved.storageKey });
-      }
+        return {
+          ...item,
+          thumbnail_url,
+          thumbnail_key,
+        };
+      });
 
       const created = await createEventDayMedia(
         savedItems.map((item) => ({

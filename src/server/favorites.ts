@@ -1,6 +1,6 @@
 import type { Prisma } from '@prisma/client';
 import prisma from '@/server/prisma';
-import { postSelect, type PostWithMedia } from '@/server/posts';
+import { enrichPostsSocialUsers, postSelect, type PostWithMedia } from '@/server/posts';
 import type {
   FavoriteItemType,
   ListFavoritesQuery,
@@ -148,6 +148,19 @@ export async function listFavorites(
       post,
     };
   });
+
+  const postsToHydrate = items
+    .map((item) => item.post)
+    .filter((post): post is NonNullable<FavoriteItem['post']> => post !== null);
+  if (postsToHydrate.length > 0) {
+    const hydratedPosts = await enrichPostsSocialUsers(postsToHydrate);
+    const byId = new Map(hydratedPosts.map((p) => [p.id, p]));
+    for (const item of items) {
+      if (item.post) {
+        item.post = byId.get(item.post.id) ?? item.post;
+      }
+    }
+  }
 
   return { items, total };
 }

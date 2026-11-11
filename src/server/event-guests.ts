@@ -1,5 +1,9 @@
 import prisma from '@/server/prisma';
-import { createEmptyUserEventProfile } from '@/server/user-event-profiles';
+import {
+  createEmptyUserEventProfile,
+  getEventProfileMapForUsers,
+  resolveAuthorUserWithEventProfile,
+} from '@/server/user-event-profiles';
 import type { EnsureEventGuestParams } from '@/types';
 
 export type { EnsureEventGuestParams } from '@/types';
@@ -90,6 +94,7 @@ export type EventGuestExportRow = {
   full_name: string;
   mobile: string;
   instagram_id: string;
+  linkedin_url: string;
   /** Matches GET /api/users/[user_id]: non-expired OTP row with is_verified */
   is_verified: string;
   is_active: string;
@@ -104,7 +109,7 @@ export type EventGuestExportBundle = {
 };
 
 /**
- * Guests with app user role only, ordered by join time. Used for super_admin CSV export.
+ * Guests with app user role only, ordered by join time. Used for CSV export.
  */
 export async function listEventGuestsForExport(
   eventId: string
@@ -132,9 +137,11 @@ export async function listEventGuestsForExport(
         select: {
           id: true,
           full_name: true,
+          avatar_url: true,
           mobile_number: true,
           country_code: true,
           instagram_id: true,
+          linkedin_url: true,
           is_active: true,
         },
       },
@@ -143,17 +150,20 @@ export async function listEventGuestsForExport(
   });
 
   const userIds = [...new Set(guests.map((g) => g.users_event_guests_user_idTousers.id))];
-  const verifiedOtps =
+  const [verifiedOtps, eventProfileMap] =
     userIds.length === 0
-      ? []
-      : await prisma.user_otps.findMany({
-          where: {
-            user_id: { in: userIds },
-            is_verified: true,
-            expires_at: { gt: new Date() },
-          },
-          select: { user_id: true },
-        });
+      ? [[], new Map()]
+      : await Promise.all([
+          prisma.user_otps.findMany({
+            where: {
+              user_id: { in: userIds },
+              is_verified: true,
+              expires_at: { gt: new Date() },
+            },
+            select: { user_id: true },
+          }),
+          getEventProfileMapForUsers(eventId, userIds),
+        ]);
   const verifiedUserIds = new Set(verifiedOtps.map((r) => r.user_id));
 
   const rows: EventGuestExportRow[] = guests.map((g) => {
@@ -164,10 +174,12 @@ export async function listEventGuestsForExport(
       if (g.wedding_side === 'groom') wedding_side = 'Groom side';
       else if (g.wedding_side === 'bride') wedding_side = 'Bride side';
     }
+    const author = resolveAuthorUserWithEventProfile(u, eventProfileMap.get(u.id));
     return {
-      full_name: u.full_name,
+      full_name: author.full_name,
       mobile,
-      instagram_id: u.instagram_id?.trim() ?? '',
+      instagram_id: author.instagram_id,
+      linkedin_url: author.linkedin_url,
       is_verified: verifiedUserIds.has(u.id) ? 'Yes' : 'No',
       is_active: u.is_active === false ? 'No' : 'Yes',
       wedding_side,

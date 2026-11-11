@@ -10,10 +10,18 @@ const IV_LENGTH = 16;
 const KEY_LENGTH = 32;
 const TAG_LENGTH = 16;
 
+let cachedSecretValue: string | null = null;
+let cachedDerivedKey: Buffer | null = null;
+
 function getSecret(): Buffer | null {
   const secret = process.env.UPLOAD_TOKEN_SECRET;
   if (!secret || secret.length < 16) return null;
-  return scryptSync(secret, 'upload-token-salt', KEY_LENGTH);
+  if (cachedDerivedKey && cachedSecretValue === secret) {
+    return cachedDerivedKey;
+  }
+  cachedSecretValue = secret;
+  cachedDerivedKey = scryptSync(secret, 'upload-token-salt', KEY_LENGTH);
+  return cachedDerivedKey;
 }
 
 function base64UrlEncode(buf: Buffer): string {

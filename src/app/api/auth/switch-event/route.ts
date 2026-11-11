@@ -3,7 +3,7 @@ import { forbidden, notFound, ok, serverError } from '@/lib/api-response';
 import { createUserJwtToken, getUserFromAuthorizationHeader } from '@/lib/jwt';
 import { isEventGuest } from '@/server/event-guests';
 import { getEventEffectiveFeatures } from '@/server/access';
-import { upsertUserDevice } from '@/server/user-devices';
+import { needsFcmTokenSyncForUser, upsertUserDevice } from '@/server/user-devices';
 
 /**
  * POST /api/auth/switch-event
@@ -21,13 +21,17 @@ export async function POST(request: Request) {
     const allowed = await isEventGuest(body.event_id, user.id);
     if (!allowed) return notFound('You have not joined this event');
 
+    let needs_fcm_token_sync: boolean;
     if (body.device_id) {
-      await upsertUserDevice({
+      const devStatus = await upsertUserDevice({
         user_id: user.id,
         device_type: body.device_type || 'android',
         device_id: body.device_id,
         fcm_token: body.fcm_token,
       });
+      needs_fcm_token_sync = !devStatus.has_fcm_token;
+    } else {
+      needs_fcm_token_sync = await needsFcmTokenSyncForUser(user.id);
     }
 
     const issued = createUserJwtToken({ user_id: user.id, event_id: body.event_id });
@@ -39,6 +43,7 @@ export async function POST(request: Request) {
         token: issued.token,
         expires_at: issued.expires_at,
         enabled_features,
+        needs_fcm_token_sync,
       },
       'Event switched'
     );

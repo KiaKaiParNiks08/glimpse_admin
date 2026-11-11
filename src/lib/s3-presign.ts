@@ -29,22 +29,33 @@ const ALLOWED_TYPES = [
 
 const PRESIGN_EXPIRES_IN = 900; // 15 minutes
 
+let cachedS3Client: S3Client | null = null;
+let cachedS3Signature = '';
+
 function getS3Client(): S3Client {
   const region = process.env.AWS_REGION;
   if (!region) throw new Error('AWS_REGION is required for S3 presign');
-  return new S3Client({
+  const accessKeyId = process.env.AWS_ACCESS_KEY_ID ?? '';
+  const secretAccessKey = process.env.AWS_SECRET_ACCESS_KEY ?? '';
+  const signature = `${region}:${accessKeyId}`;
+  if (cachedS3Client && cachedS3Signature === signature) {
+    return cachedS3Client;
+  }
+  cachedS3Signature = signature;
+  cachedS3Client = new S3Client({
     region,
     // Browser uploads only send Content-Type. The default checksum would be signed into the URL and S3 would reject the PUT.
     requestChecksumCalculation: 'WHEN_REQUIRED',
     responseChecksumValidation: 'WHEN_REQUIRED',
     credentials:
-      process.env.AWS_ACCESS_KEY_ID && process.env.AWS_SECRET_ACCESS_KEY
+      accessKeyId && secretAccessKey
         ? {
-            accessKeyId: process.env.AWS_ACCESS_KEY_ID,
-            secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
+            accessKeyId,
+            secretAccessKey,
           }
         : undefined,
   });
+  return cachedS3Client;
 }
 
 function getBucket(): string {
@@ -97,7 +108,10 @@ export type GetObjectStreamResult = {
   body: ReadableStream;
   contentType: string;
   contentLength?: number;
+  contentRange?: string;
+  etag?: string;
   cacheControl?: string;
+  statusCode: 200 | 206;
 };
 
 /**
@@ -116,17 +130,28 @@ export async function getObjectBuffer(key: string): Promise<{ buffer: Buffer; co
   };
 }
 
-export async function getObjectStream(key: string): Promise<GetObjectStreamResult | null> {
+export async function getObjectStream(
+  key: string,
+  range?: string | null
+): Promise<GetObjectStreamResult | null> {
   const bucket = getBucket();
   const client = getS3Client();
-  const command = new GetObjectCommand({ Bucket: bucket, Key: key });
+  const command = new GetObjectCommand({
+    Bucket: bucket,
+    Key: key,
+    ...(range ? { Range: range } : {}),
+  });
   const response = await client.send(command);
   if (!response.Body) return null;
+  const isPartial = Boolean(range && response.ContentRange);
   return {
     body: response.Body as ReadableStream,
     contentType: response.ContentType ?? 'application/octet-stream',
     contentLength: response.ContentLength,
+    contentRange: response.ContentRange ?? undefined,
+    etag: response.ETag ?? undefined,
     cacheControl: response.CacheControl ?? undefined,
+    statusCode: isPartial ? 206 : 200,
   };
 }
 

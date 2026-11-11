@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { uuidSchema } from './common';
+import { FCM_TOKEN_MAX_LENGTH } from './auth';
 
 export const appInfoQuerySchema = z
   .object({
@@ -7,7 +8,7 @@ export const appInfoQuerySchema = z
     user_id: uuidSchema.optional(),
     device_id: z.string().min(1).max(255).optional(),
     platform: z.string().max(20).optional(),
-    fcm_token: z.string().min(1).max(500).optional(),
+    fcm_token: z.string().trim().min(1).max(FCM_TOKEN_MAX_LENGTH).optional(),
   })
   .superRefine((query, ctx) => {
     if (!query.event_id && !query.device_id && !query.user_id) {

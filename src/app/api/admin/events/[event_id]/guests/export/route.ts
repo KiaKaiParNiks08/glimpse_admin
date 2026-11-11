@@ -49,11 +49,12 @@ export async function GET(
           'Full name',
           'Mobile number',
           'Instagram ID',
+          'LinkedIn URL',
           'Is verified',
           'Is active',
           'Wedding side',
         ]
-      : ['Full name', 'Mobile number', 'Instagram ID', 'Is verified', 'Is active'];
+      : ['Full name', 'Mobile number', 'Instagram ID', 'LinkedIn URL', 'Is verified', 'Is active'];
 
     const lines = [
       headersRow.map(csvEscape).join(','),
@@ -62,6 +63,7 @@ export async function GET(
           r.full_name,
           r.mobile,
           r.instagram_id,
+          r.linkedin_url,
           r.is_verified,
           r.is_active,
         ].map(csvEscape);

@@ -3,7 +3,7 @@ import { createUserJwtToken } from '@/lib/jwt';
 import { toAuthCategoryFields } from '@/server/auth-login';
 import { ensureEventGuest, isEventGuest } from '@/server/event-guests';
 import prisma from '@/server/prisma';
-import { upsertUserDevice } from '@/server/user-devices';
+import { needsFcmTokenSyncForUser, upsertUserDevice } from '@/server/user-devices';
 import { getVenueContactForEvent } from '@/server/venues';
 import { getEventEffectiveFeatures } from '@/server/access';
 import type { FeatureMap } from '@/lib/rbac';
@@ -54,6 +54,7 @@ export type JoinEventResult =
         button_primary_color: string | null;
         button_secondary_color: string | null;
         enabled_features: FeatureMap;
+        needs_fcm_token_sync: boolean;
       };
     }
   | { ok: false; status: 400 | 404 | 409; message: string };
@@ -143,13 +144,17 @@ export async function joinAuthenticatedUserToEvent(input: {
     console.error('[auth-join] face reference queueing skipped', error);
   }
 
+  let needs_fcm_token_sync: boolean;
   if (input.device_id) {
-    await upsertUserDevice({
+    const devStatus = await upsertUserDevice({
       user_id: input.userId,
       device_type: input.device_type || 'android',
       device_id: input.device_id,
       fcm_token: input.fcm_token,
     });
+    needs_fcm_token_sync = !devStatus.has_fcm_token;
+  } else {
+    needs_fcm_token_sync = await needsFcmTokenSyncForUser(input.userId);
   }
 
   const issued = createUserJwtToken({ user_id: input.userId, event_id: event.id });
@@ -171,6 +176,7 @@ export async function joinAuthenticatedUserToEvent(input: {
       button_primary_color: theme?.button_primary_color ?? null,
       button_secondary_color: theme?.button_secondary_color ?? null,
       enabled_features,
+      needs_fcm_token_sync,
     },
   };
 }

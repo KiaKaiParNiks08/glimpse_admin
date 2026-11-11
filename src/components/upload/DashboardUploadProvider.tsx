@@ -12,6 +12,7 @@ import {
 import { adminBearerAuthHeader } from '@/lib/admin-jwt-client';
 import {
   createEventDayMediaAction,
+  notifySessionMediaBatchAction,
   presignEventDayMediaUploadAction,
   uploadSessionMediaFileAction,
 } from '@/app/actions/event-day-media';
@@ -78,9 +79,58 @@ const DashboardUploadContext = createContext<DashboardUploadContextValue>({
   subscribeToSessionCommits: () => () => {},
 });
 
-const UPLOAD_CONCURRENCY = 4;
-const COMMIT_BATCH_SIZE = 5;
+const UPLOAD_CONCURRENCY = 6;
+const COMMIT_BATCH_SIZE = 15;
+const PRESIGN_BATCH_SIZE = 20;
 const SERVER_FALLBACK_MAX_BYTES = 4.2 * 1024 * 1024;
+
+type SignedTarget = { uploadUrl: string; fileUrl: string; key: string };
+
+async function batchPresignCandidates(params: {
+  eventId: string;
+  sessionId: string;
+  candidates: Array<{ idx: number; filename: string; contentType: string; fileSize: number }>;
+}): Promise<Map<number, SignedTarget>> {
+  const map = new Map<number, SignedTarget>();
+  if (params.candidates.length === 0) return map;
+  try {
+    const res = await fetch(
+      `/api/admin/events/${params.eventId}/sessions/${params.sessionId}/presign-batch`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...adminBearerAuthHeader(),
+        },
+        body: JSON.stringify({
+          files: params.candidates.map((c) => ({
+            filename: c.filename,
+            contentType: c.contentType,
+            fileSize: c.fileSize,
+          })),
+        }),
+      }
+    );
+    if (!res.ok) return map;
+    const json = (await res.json()) as {
+      data?: { items?: Array<{ ok?: boolean; uploadUrl?: string; fileUrl?: string; key?: string }> };
+      items?: Array<{ ok?: boolean; uploadUrl?: string; fileUrl?: string; key?: string }>;
+    };
+    const items = json.data?.items ?? json.items ?? [];
+    items.forEach((entry, pos) => {
+      if (entry?.ok && entry.uploadUrl && entry.fileUrl && entry.key) {
+        map.set(params.candidates[pos]!.idx, {
+          uploadUrl: entry.uploadUrl,
+          fileUrl: entry.fileUrl,
+          key: entry.key,
+        });
+      }
+    });
+  } catch {
+    // Graceful fallback to individual presign / server action below
+  }
+  return map;
+}
 
 type ModerationApiResult = {
   allowed: boolean;
@@ -131,30 +181,33 @@ async function uploadCandidateMedia(params: {
   sessionId: string;
   candidate: PreparedMediaCandidate;
   videoDurationSec?: number;
+  preSigned?: SignedTarget | null;
 }): Promise<{ media_key: string; media_url: string; media_type: 'image' | 'video' }> {
-  const { eventId, sessionId, candidate, videoDurationSec } = params;
+  const { eventId, sessionId, candidate, videoDurationSec, preSigned } = params;
   const { file, kind, mimeType } = candidate;
 
-  const presign = await presignEventDayMediaUploadAction({
-    eventId,
-    eventSessionId: sessionId,
-    filename: file.name,
-    contentType: mimeType,
-    fileSize: file.size,
-    videoDurationSec,
-  });
+  const presignData =
+    preSigned ??
+    (await presignEventDayMediaUploadAction({
+      eventId,
+      eventSessionId: sessionId,
+      filename: file.name,
+      contentType: mimeType,
+      fileSize: file.size,
+      videoDurationSec,
+    }).then((r) => (r.ok ? r.data : null)));
 
-  if (presign.ok && /^https?:\/\//i.test(presign.data.uploadUrl)) {
+  if (presignData && /^https?:\/\//i.test(presignData.uploadUrl)) {
     try {
-      const putRes = await fetch(presign.data.uploadUrl, {
+      const putRes = await fetch(presignData.uploadUrl, {
         method: 'PUT',
         headers: { 'Content-Type': mimeType },
         body: file,
       });
       if (putRes.ok) {
         return {
-          media_key: presign.data.key,
-          media_url: presign.data.fileUrl,
+          media_key: presignData.key,
+          media_url: presignData.fileUrl,
           media_type: kind,
         };
       }
@@ -243,6 +296,9 @@ export function DashboardUploadProvider({ children }: { children: React.ReactNod
       }
 
       let cursor = 0;
+      let totalCommittedInJob = 0;
+      const presignMap = new Map<number, SignedTarget>();
+      const presignFlights = new Map<number, Promise<void>>();
       const pendingDbBatch: Array<{
         media_key: string;
         media_url: string;
@@ -251,6 +307,41 @@ export function DashboardUploadProvider({ children }: { children: React.ReactNod
       }> = [];
       let flushing = false;
       let orderCounter = input.startingOrder;
+
+      async function getPreSignedForIndex(idx: number): Promise<SignedTarget | null> {
+        const hit = presignMap.get(idx);
+        if (hit) return hit;
+        const candidate = candidates[idx];
+        if (!candidate || candidate.kind === 'video') return null;
+
+        const blockStart = Math.floor(idx / PRESIGN_BATCH_SIZE) * PRESIGN_BATCH_SIZE;
+        let flight = presignFlights.get(blockStart);
+        if (!flight) {
+          const blockItems: Array<{ idx: number; filename: string; contentType: string; fileSize: number }> = [];
+          const end = Math.min(candidates.length, blockStart + PRESIGN_BATCH_SIZE);
+          for (let j = blockStart; j < end; j++) {
+            const c = candidates[j]!;
+            if (c.kind === 'image') {
+              blockItems.push({
+                idx: j,
+                filename: c.file.name,
+                contentType: c.mimeType,
+                fileSize: c.file.size,
+              });
+            }
+          }
+          flight = batchPresignCandidates({
+            eventId: input.eventId,
+            sessionId: input.sessionId,
+            candidates: blockItems,
+          }).then((resMap) => {
+            for (const [k, v] of resMap.entries()) presignMap.set(k, v);
+          });
+          presignFlights.set(blockStart, flight);
+        }
+        await flight;
+        return presignMap.get(idx) ?? null;
+      }
 
       async function flushBatch(force = false) {
         if (flushing && !force) return;
@@ -263,9 +354,11 @@ export function DashboardUploadProvider({ children }: { children: React.ReactNod
             const res = await createEventDayMediaAction({
               eventId: input.eventId,
               eventSessionId: input.sessionId,
+              skipNotification: true,
               items: slice,
             });
             if (res.ok) {
+              totalCommittedInJob += slice.length;
               patchJob(jobId, (prev) => ({
                 ...prev,
                 uploadedCount: prev.uploadedCount + slice.length,
@@ -329,7 +422,10 @@ export function DashboardUploadProvider({ children }: { children: React.ReactNod
               continue;
             }
 
-            const moderation = await runClientModerationCheck(input.eventId, meta.frames);
+            const [moderation, preSigned] = await Promise.all([
+              runClientModerationCheck(input.eventId, meta.frames),
+              getPreSignedForIndex(idx),
+            ]);
             if (cancelledJobsRef.current.has(jobId)) return;
             if (!moderation.allowed) {
               patchJob(jobId, (prev) => ({
@@ -352,6 +448,7 @@ export function DashboardUploadProvider({ children }: { children: React.ReactNod
               sessionId: input.sessionId,
               candidate,
               videoDurationSec: meta.durationSec,
+              preSigned,
             });
             if (cancelledJobsRef.current.has(jobId)) return;
 
@@ -392,6 +489,14 @@ export function DashboardUploadProvider({ children }: { children: React.ReactNod
       const workerCount = Math.min(UPLOAD_CONCURRENCY, candidates.length);
       await Promise.all(Array.from({ length: workerCount }, () => worker()));
       await flushBatch(true);
+
+      if (totalCommittedInJob > 0) {
+        void notifySessionMediaBatchAction({
+          eventId: input.eventId,
+          eventSessionId: input.sessionId,
+          count: totalCommittedInJob,
+        });
+      }
 
       const wasCancelled = cancelledJobsRef.current.has(jobId);
       patchJob(jobId, (prev) => {

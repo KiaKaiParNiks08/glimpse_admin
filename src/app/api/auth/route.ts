@@ -6,6 +6,7 @@ import {
   findOrCreateGuestUser,
   createOtpForUser,
   ensureEventGuest,
+  needsFcmTokenSyncForUser,
   upsertUserDevice,
 } from '@/server';
 import { getEventByCode } from '@/server/events';
@@ -42,7 +43,7 @@ export async function POST(request: Request) {
       if (device_id) {
         const returning = await findReturningUserByDevice(eventByCode.id, device_id, userRole.id);
         if (returning) {
-          await upsertUserDevice({
+          const devStatus = await upsertUserDevice({
             user_id: returning.user_id,
             device_type: device_type || 'android',
             device_id,
@@ -64,6 +65,7 @@ export async function POST(request: Request) {
               event_count: 1,
               token,
               expires_at,
+              needs_fcm_token_sync: !devStatus.has_fcm_token,
               ...toAuthCategoryFields(eventByCode.event_categories),
             },
             'Logged in'
@@ -143,7 +145,7 @@ export async function POST(request: Request) {
         email,
         roleId: userRole.id,
       });
-      await Promise.all([
+      const [deviceStatus] = await Promise.all([
         device_id
           ? upsertUserDevice({
               user_id: createdUser.user_id,
@@ -151,7 +153,7 @@ export async function POST(request: Request) {
               device_id,
               fcm_token,
             })
-          : Promise.resolve(),
+          : Promise.resolve(null),
         ensureEventGuest({
           event_id: event.id,
           user_id: createdUser.user_id,
@@ -160,6 +162,9 @@ export async function POST(request: Request) {
       ]);
 
       if (alreadyGuest) {
+        const needs_fcm_token_sync = deviceStatus
+          ? !deviceStatus.has_fcm_token
+          : await needsFcmTokenSyncForUser(createdUser.user_id);
         const { token, expires_at } = createUserJwtToken({
           user_id: createdUser.user_id,
           event_id: event.id,
@@ -176,6 +181,7 @@ export async function POST(request: Request) {
             event_count: 1,
             token,
             expires_at,
+            needs_fcm_token_sync,
             ...category,
           },
           'Logged in'

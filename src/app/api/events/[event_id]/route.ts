@@ -2,8 +2,11 @@ import { parseParams, parseQuery } from '@/lib/validations';
 import { eventDetailsQuerySchema, eventIdPathSchema } from '@/lib/validations/events';
 import { ok, notFound, serverError } from '@/lib/api-response';
 import { getAdminFromAuthorizationHeader, getUserFromAuthorizationHeader } from '@/lib/jwt';
-import prisma from '@/server/prisma';
-import { upsertUserDevice, ensureUserDevicesFcmColumn } from '@/server/user-devices';
+import {
+  needsFcmTokenSyncForUser,
+  touchDeviceFcmTokenByDeviceId,
+  upsertUserDevice,
+} from '@/server/user-devices';
 import {
   DEFAULT_CURRENT_HAPPENING_TITLE,
   DEFAULT_POST_EVENT_REPORT_TITLE,
@@ -41,28 +44,36 @@ export async function GET(
     const [query, queryErr] = parseQuery(new URL(request.url).searchParams, eventDetailsQuerySchema);
     if (queryErr) return queryErr;
 
-    // Passively register or refresh device & fcm_token if provided
     const userFromToken = getUserFromAuthorizationHeader(request);
     const effectiveUserId = query.viewer_user_id || userFromToken?.id;
-    if (query.device_id && effectiveUserId) {
-      const devType = query.device_type || 'android';
-      await upsertUserDevice({
-        user_id: effectiveUserId,
-        device_id: query.device_id,
-        device_type: devType,
-        fcm_token: query.fcm_token,
-      }).catch((e) => console.warn('[events/[event_id]] upsertUserDevice warning:', e));
-    } else if (query.device_id && query.fcm_token) {
-      await ensureUserDevicesFcmColumn();
-      await prisma.user_devices
-        .updateMany({
-          where: { device_id: query.device_id },
-          data: { fcm_token: query.fcm_token.trim(), last_seen_at: new Date() },
-        })
-        .catch((e) => console.warn('[events/[event_id]] updateMany warning:', e));
-    }
+    const deviceTouchPromise: Promise<{ has_fcm_token: boolean } | null> =
+      query.device_id && effectiveUserId
+        ? upsertUserDevice({
+            user_id: effectiveUserId,
+            device_id: query.device_id,
+            device_type: query.device_type || 'android',
+            fcm_token: query.fcm_token,
+          }).catch((e) => {
+            console.warn('[events/[event_id]] upsertUserDevice warning:', e);
+            return null;
+          })
+        : effectiveUserId
+          ? needsFcmTokenSyncForUser(effectiveUserId)
+              .then((needsSync) => ({ has_fcm_token: !needsSync }))
+              .catch(() => null)
+          : query.device_id && query.fcm_token
+            ? touchDeviceFcmTokenByDeviceId(query.device_id, query.fcm_token)
+                .then(() => null)
+                .catch((e) => {
+                  console.warn('[events/[event_id]] updateMany warning:', e);
+                  return null;
+                })
+            : Promise.resolve(null);
 
-    const event = await getEventDetailsById(path.event_id);
+    const [event, deviceStatus] = await Promise.all([
+      getEventDetailsById(path.event_id),
+      deviceTouchPromise,
+    ]);
     if (!event) return notFound('Event not found');
 
     const timezone = getEventTimezone();
@@ -71,11 +82,12 @@ export async function GET(
     const previewPhase = getAdminFromAuthorizationHeader(request) ? query.phase : undefined;
     const current = previewPhase ?? actualPhase;
 
-    const [days, mediaRows, team, enabledFeatures] = await Promise.all([
+    const [days, mediaRows, team, enabledFeatures, rawHappening] = await Promise.all([
       getEventDaysByEventId(event.id),
       getEventDayMediaByEventId(event.id),
       getEventTeam(event.id),
       getEventEffectiveFeatures(event.id),
+      getCurrentHappeningByEventId(event.id),
     ]);
 
     const sessionIds = days.flatMap((day) => day.event_sessions.map((s) => s.id));
@@ -171,7 +183,7 @@ export async function GET(
 
     const happeningItems =
       enabledFeatures.event_current_happening && isVisibleInPhase(happeningFlags, current)
-        ? (await getCurrentHappeningByEventId(event.id)).map((item) => ({
+        ? rawHappening.map((item) => ({
             ...item,
             photo_count: item.happening_photos.length,
           }))
@@ -255,6 +267,7 @@ export async function GET(
         event_sessions,
         can_upload_media,
         enabled_features: enabledFeatures,
+        ...(deviceStatus !== null && { needs_fcm_token_sync: !deviceStatus.has_fcm_token }),
         ...(watermark && { watermark }),
         media_sections,
         ...(current_happening && { current_happening }),

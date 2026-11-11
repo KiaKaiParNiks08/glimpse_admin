@@ -12,6 +12,7 @@ import { appPublicOrigin } from '@/lib/app-share';
 import { createPresignedGetUrl } from '@/lib/s3-presign';
 import { isS3Configured } from '@/lib/upload';
 import { storageKeyFromMediaUrl } from '@/server/people-media/storage';
+import { extractPushTokenFromDevice } from '@/lib/push-device';
 
 async function requireAdminSession(): Promise<
   | { ok: true; session: AdminAccessContext }
@@ -240,10 +241,7 @@ export async function getEventGuestsForNotificationAction(params: {
     >();
     for (const dev of devices) {
       const list = devicesByUser.get(dev.user_id) ?? [];
-      // Only a real FCM token (> 50 chars if legacy in device_id, or explicit fcm_token) can receive pushes.
-      const hasFcm = Boolean(
-        dev.fcm_token?.trim() || (dev.device_id && dev.device_id.trim().length > 50)
-      );
+      const hasFcm = extractPushTokenFromDevice(dev) !== null;
       list.push({
         device_type: dev.device_type,
         has_fcm: hasFcm,
@@ -399,8 +397,7 @@ export async function sendAdminPushNotificationAction(input: {
     const tokensByEventId = new Map<string, Set<string>>();
     const usersWithTokens = new Set<string>();
     for (const d of devices) {
-      const token =
-        d.fcm_token?.trim() || (d.device_id && d.device_id.trim().length > 50 ? d.device_id.trim() : null);
+      const token = extractPushTokenFromDevice(d);
       if (!token) continue;
       usersWithTokens.add(d.user_id);
       const targetEventId = userEventMap.get(d.user_id) || primaryEventId;

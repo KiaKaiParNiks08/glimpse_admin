@@ -22,6 +22,8 @@ export type MyProfile = {
   country_code: string | null;
   avatar_url: string | null;
   instagram_id: string | null;
+  linkedin_url: string | null;
+  token?: string | null;
   access?: ClientAdminAccess;
 };
 
@@ -35,6 +37,7 @@ export type UpdateMyProfileInput = {
   country_code?: string;
   avatar_url?: string | null;
   instagram_id?: string | null;
+  linkedin_url?: string | null;
 };
 
 export type UpdateMyProfileResult =
@@ -68,9 +71,10 @@ export async function getMyProfileAction(): Promise<GetMyProfileResult> {
   if (!session) return { ok: false, error: 'Not authenticated' };
 
   try {
-    const [user, ctx] = await Promise.all([
+    const [user, ctx, token] = await Promise.all([
       getUserById(session.id),
       getAdminAccessContext(session.id),
+      getAdminJwtFromCookies(),
     ]);
     if (!user || !ctx) return { ok: false, error: 'User not found' };
     return {
@@ -84,6 +88,8 @@ export async function getMyProfileAction(): Promise<GetMyProfileResult> {
         country_code: user.country_code,
         avatar_url: user.avatar_url,
         instagram_id: user.instagram_id,
+        linkedin_url: user.linkedin_url,
+        token,
         access: toClientAdminAccess(ctx),
       },
     };
@@ -105,9 +111,12 @@ export async function updateMyProfileAction(
     country_code: body.country_code?.trim() || undefined,
     avatar_url: body.avatar_url ?? null,
     instagram_id: body.instagram_id?.trim() || null,
+    linkedin_url: body.linkedin_url?.trim() || null,
   });
   if (!parsed.success) {
-    const msg = parsed.error.flatten().formErrors[0] ?? 'Validation failed';
+    const flat = parsed.error.flatten();
+    const firstFieldError = Object.values(flat.fieldErrors).flat().find(Boolean);
+    const msg = flat.formErrors[0] ?? firstFieldError ?? 'Validation failed';
     return { ok: false, error: msg };
   }
 
@@ -133,6 +142,7 @@ export async function updateMyProfileAction(
         country_code: user.country_code,
         avatar_url: user.avatar_url,
         instagram_id: user.instagram_id,
+        linkedin_url: user.linkedin_url,
         ...(ctx ? { access: toClientAdminAccess(ctx) } : {}),
       },
     };
@@ -154,7 +164,9 @@ export async function changeMyPasswordAction(
 
   const parsed = updateUserSchema.safeParse({ password: nextPassword });
   if (!parsed.success) {
-    const msg = parsed.error.flatten().formErrors[0] ?? 'Validation failed';
+    const flat = parsed.error.flatten();
+    const firstFieldError = Object.values(flat.fieldErrors).flat().find(Boolean);
+    const msg = flat.formErrors[0] ?? firstFieldError ?? 'Validation failed';
     return { ok: false, error: msg };
   }
 

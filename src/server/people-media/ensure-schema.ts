@@ -145,6 +145,21 @@ export async function ensurePeopleMediaSchema(): Promise<void> {
 }
 
 async function ensureRecognitionV2Columns(): Promise<void> {
+  try {
+    const check = await prisma.$queryRawUnsafe<Array<{ ready: boolean }>>(`
+      SELECT (
+        to_regclass('public.user_event_face_scans') IS NOT NULL
+        AND to_regclass('public.media_asset_user_checks') IS NOT NULL
+        AND EXISTS (
+          SELECT 1 FROM information_schema.columns
+          WHERE table_schema = 'public' AND table_name = 'media_assets' AND column_name = 'guest_scan_cursor'
+        )
+      ) AS ready
+    `);
+    if (check[0]?.ready) return;
+  } catch {
+    // Fall through to idempotent DDL setup
+  }
   await prisma.$executeRawUnsafe(`
     ALTER TABLE media_assets
       ADD COLUMN IF NOT EXISTS guest_scan_cursor UUID,

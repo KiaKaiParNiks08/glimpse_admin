@@ -109,31 +109,21 @@ export async function getDashboardStats(
   const monthBins = monthBinsForRange(dateRange);
 
   const [
-    statusGroups,
-    monthCounts,
-    totalEventsInRange,
+    eventsInRange,
     venuesInRange,
     exploreCategoriesInRange,
     exploreItemsInRange,
-    eventsWithAdminCountsInRange,
     totalEventAdminAssignmentsInRange,
   ] = await Promise.all([
-    prisma.events.groupBy({
-      by: ['status'],
+    prisma.events.findMany({
       where: eventWhereWithDate,
-      _count: { _all: true },
+      select: {
+        title: true,
+        status: true,
+        created_at: true,
+        _count: { select: { event_admins: true } },
+      },
     }),
-    Promise.all(
-      monthBins.map(async (bin) => {
-        const count = await prisma.events.count({
-          where: andWhere(eventWhere, {
-            created_at: { gte: bin.effectiveStart, lte: bin.effectiveEnd },
-          }),
-        });
-        return { month: bin.month, count };
-      })
-    ),
-    prisma.events.count({ where: eventWhereWithDate }),
     prisma.venues.count({ where: venuesWhere }),
     prisma.explore_categories.count({ where: categoriesWhere }),
     prisma.explore_items.count({
@@ -142,26 +132,44 @@ export async function getDashboardStats(
         ...(Object.keys(masterWhere).length > 0 ? { explore_categories: masterWhere } : {}),
       },
     }),
-    prisma.events.findMany({
-      where: eventWhereWithDate,
-      select: {
-        title: true,
-        _count: { select: { event_admins: true } },
-      },
-    }),
     prisma.event_admins.count({
       where: { events: eventWhereWithDate },
     }),
   ]);
 
-  const assignedAdminsPerEvent = eventsWithAdminCountsInRange
-    .filter((e) => e._count.event_admins > 0)
-    .map((e) => ({ title: e.title, count: e._count.event_admins }))
+  const statusMap = new Map<string, number>();
+  const monthBuckets = monthBins.map((bin) => ({
+    month: bin.month,
+    startMs: bin.effectiveStart.getTime(),
+    endMs: bin.effectiveEnd.getTime(),
+    count: 0,
+  }));
+  const adminCounts: { title: string; count: number }[] = [];
+
+  for (const ev of eventsInRange) {
+    statusMap.set(ev.status, (statusMap.get(ev.status) ?? 0) + 1);
+    if (ev.created_at) {
+      const ts = ev.created_at.getTime();
+      for (const bucket of monthBuckets) {
+        if (ts >= bucket.startMs && ts <= bucket.endMs) {
+          bucket.count += 1;
+          break;
+        }
+      }
+    }
+    if (ev._count.event_admins > 0) {
+      adminCounts.push({ title: ev.title, count: ev._count.event_admins });
+    }
+  }
+
+  const totalEventsInRange = eventsInRange.length;
+  const monthCounts = monthBuckets.map(({ month, count }) => ({ month, count }));
+  const assignedAdminsPerEvent = adminCounts
     .sort((a, b) => b.count - a.count)
     .slice(0, 15);
 
-  const eventsByStatus = statusGroups
-    .map((g) => ({ status: g.status, count: g._count._all }))
+  const eventsByStatus = Array.from(statusMap.entries())
+    .map(([status, count]) => ({ status, count }))
     .sort((a, b) => b.count - a.count);
 
   const totals: DashboardStats['totals'] = {

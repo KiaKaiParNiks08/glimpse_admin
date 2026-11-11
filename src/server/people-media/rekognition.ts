@@ -15,16 +15,27 @@ import { isRekognitionSupportedImage, normalizeImageForRekognition, sniffImageKi
 
 const REKOGNITION_MAX_BYTES = 5 * 1024 * 1024;
 
+let cachedRekognitionClient: RekognitionClient | null = null;
+let cachedRekognitionSignature = '';
+
 export function rekognitionClient(): RekognitionClient | null {
   const region = process.env.AWS_REGION?.trim();
-  if (!region || !process.env.AWS_ACCESS_KEY_ID || !process.env.AWS_SECRET_ACCESS_KEY) return null;
-  return new RekognitionClient({
+  const accessKeyId = process.env.AWS_ACCESS_KEY_ID ?? '';
+  const secretAccessKey = process.env.AWS_SECRET_ACCESS_KEY ?? '';
+  if (!region || !accessKeyId || !secretAccessKey) return null;
+  const sig = `${region}:${accessKeyId}`;
+  if (cachedRekognitionClient && cachedRekognitionSignature === sig) {
+    return cachedRekognitionClient;
+  }
+  cachedRekognitionSignature = sig;
+  cachedRekognitionClient = new RekognitionClient({
     region,
     credentials: {
-      accessKeyId: process.env.AWS_ACCESS_KEY_ID,
-      secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
+      accessKeyId,
+      secretAccessKey,
     },
   });
+  return cachedRekognitionClient;
 }
 
 /** Gallery discovery threshold (default 75). Profile lock stays on PROFILE_FACE_MIN_SIMILARITY. */

@@ -4,7 +4,7 @@ import { prisma, verifyOtpForUser } from '@/server';
 import { createUserJwtToken } from '@/lib/jwt';
 import { toAuthCategoryFields } from '@/server/auth-login';
 import { getEventEffectiveFeatures } from '@/server/access';
-import { upsertUserDevice } from '@/server/user-devices';
+import { needsFcmTokenSyncForUser, upsertUserDevice } from '@/server/user-devices';
 
 type GuestEventRow = {
   event_id: string;
@@ -59,13 +59,17 @@ export async function POST(request: Request) {
       return badRequest('User event context not found. Please request OTP again.');
     }
 
+    let needs_fcm_token_sync: boolean;
     if (body.device_id) {
-      await upsertUserDevice({
+      const devStatus = await upsertUserDevice({
         user_id: body.user_id,
         device_type: body.device_type || 'android',
         device_id: body.device_id,
         fcm_token: body.fcm_token,
       });
+      needs_fcm_token_sync = !devStatus.has_fcm_token;
+    } else {
+      needs_fcm_token_sync = await needsFcmTokenSyncForUser(body.user_id);
     }
 
     const { token, expires_at } = createUserJwtToken({
@@ -81,6 +85,7 @@ export async function POST(request: Request) {
         token,
         expires_at,
         enabled_features,
+        needs_fcm_token_sync,
         ...toAuthCategoryFields(
           guest.event_category_id && guest.event_category && guest.event_type
             ? { id: guest.event_category_id, name: guest.event_category, slug: guest.event_type }

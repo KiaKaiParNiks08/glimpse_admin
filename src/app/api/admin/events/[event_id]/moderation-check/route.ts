@@ -56,16 +56,19 @@ export async function POST(
       return ok({ allowed: true, reason: null, labels: [] });
     }
 
-    for (const blob of frameBlobs) {
-      const buf = Buffer.from(await blob.arrayBuffer());
-      const verdict = await detectExplicit18PlusContent(buf);
-      if (verdict.blocked) {
-        return ok({
-          allowed: false,
-          reason: verdict.reason,
-          labels: verdict.labels,
-        });
-      }
+    const verdicts = await Promise.all(
+      frameBlobs.map(async (blob) => {
+        const buf = Buffer.from(await blob.arrayBuffer());
+        return detectExplicit18PlusContent(buf);
+      })
+    );
+    const blocked = verdicts.find((v) => v.blocked);
+    if (blocked) {
+      return ok({
+        allowed: false,
+        reason: blocked.reason,
+        labels: blocked.labels,
+      });
     }
 
     return ok({ allowed: true, reason: null, labels: [] });
