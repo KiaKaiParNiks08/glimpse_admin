@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import Link from 'next/link';
 import {
   Bar,
   BarChart,
@@ -15,6 +16,19 @@ import {
   YAxis,
 } from 'recharts';
 import { adminBearerAuthHeader } from '@/lib/admin-jwt-client';
+import { KpiCard } from '@/components/ui/KpiCard';
+import {
+  Calendar,
+  Users,
+  Building2,
+  Compass,
+  Key,
+  Shield,
+  Plus,
+  Bell,
+  CreditCard,
+  Sparkles,
+} from '@/components/icons';
 import styles from './dashboard-charts.module.css';
 
 type DashboardStats = {
@@ -34,12 +48,47 @@ type DashboardStats = {
 
 const STATUS_COLORS = ['#3b82f6', '#8b5cf6', '#06b6d4', '#10b981', '#f59e0b', '#ef4444', '#64748b'];
 
-const chartTooltipStyle = {
-  backgroundColor: '#ffffff',
-  border: '1px solid #e2e8f0',
-  borderRadius: 8,
-  color: '#0f172a',
-};
+function CustomChartTooltip({
+  active,
+  payload,
+  label,
+}: {
+  active?: boolean;
+  payload?: Array<{ name: string; value: number | string; color?: string; fill?: string }>;
+  label?: string;
+}) {
+  if (!active || !payload || !payload.length) return null;
+  return (
+    <div
+      style={{
+        background: 'var(--bg-surface)',
+        border: '1px solid var(--border-color)',
+        borderRadius: '8px',
+        padding: '8px 12px',
+        boxShadow: 'var(--shadow-card)',
+        color: 'var(--text-primary)',
+        fontSize: '12px',
+      }}
+    >
+      {label && <div style={{ fontWeight: 600, marginBottom: 4 }}>{label}</div>}
+      {payload.map((item, idx) => (
+        <div key={idx} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <span
+            style={{
+              width: 8,
+              height: 8,
+              borderRadius: '50%',
+              backgroundColor: item.color || item.fill || 'var(--primary-accent)',
+              display: 'inline-block',
+            }}
+          />
+          <span style={{ color: 'var(--text-secondary)' }}>{item.name}:</span>
+          <span style={{ fontWeight: 600, color: 'var(--text-primary)' }}>{item.value}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
 
 function formatStatusLabel(status: string): string {
   if (!status) return 'Unknown';
@@ -164,6 +213,21 @@ export function DashboardCharts() {
 
   return (
     <div className={styles.wrap}>
+      <div className={styles.quickActionsRow}>
+        <Link href="/dashboard/events/addEditEvent?mode=create" className={styles.quickActionBtn}>
+          <Plus size={15} /> Create Event
+        </Link>
+        <Link href="/dashboard/venues" className={styles.quickActionBtn}>
+          <Building2 size={15} /> Add Venue
+        </Link>
+        <Link href="/dashboard/plans" className={styles.quickActionBtn}>
+          <CreditCard size={15} /> Manage Plans
+        </Link>
+        <Link href="/dashboard/notifications" className={styles.quickActionBtn}>
+          <Bell size={15} /> Push Notification
+        </Link>
+      </div>
+
       <div className={styles.filterBar}>
         <div className={styles.filterGroup}>
           <span className={styles.filterLabel}>Time range</span>
@@ -255,36 +319,50 @@ export function DashboardCharts() {
       ) : stats ? (
         <>
           <div className={styles.statRow}>
-            <div className={styles.statCard}>
-              <span className={styles.statValue}>{stats.totals.events}</span>
-              <span className={styles.statLabel}>Events</span>
-            </div>
-            <div className={styles.statCard}>
-              <span className={styles.statValue}>{stats.totals.totalEventAdminAssignments}</span>
-              <span className={styles.statLabel}>Admin assignments</span>
-            </div>
-            <div className={styles.statCard}>
-              <span className={styles.statValue}>{stats.totals.venues}</span>
-              <span className={styles.statLabel}>Venues</span>
-            </div>
-            <div className={styles.statCard}>
-              <span className={styles.statValue}>{stats.totals.exploreCategories}</span>
-              <span className={styles.statLabel}>Explore categories</span>
-            </div>
-            <div className={styles.statCard}>
-              <span className={styles.statValue}>{stats.totals.exploreItems}</span>
-              <span className={styles.statLabel}>Explore items</span>
-            </div>
+            <KpiCard
+              label="Events"
+              value={stats.totals.events}
+              icon={<Calendar size={18} />}
+              variant="primary"
+            />
+            <KpiCard
+              label="Admin assignments"
+              value={stats.totals.totalEventAdminAssignments}
+              icon={<Users size={18} />}
+              variant="purple"
+            />
+            <KpiCard
+              label="Venues"
+              value={stats.totals.venues}
+              icon={<Building2 size={18} />}
+              variant="info"
+            />
+            <KpiCard
+              label="Explore categories"
+              value={stats.totals.exploreCategories}
+              icon={<Compass size={18} />}
+              variant="warning"
+            />
+            <KpiCard
+              label="Explore items"
+              value={stats.totals.exploreItems}
+              icon={<Sparkles size={18} />}
+              variant="success"
+            />
             {stats.totals.superAdmins != null && stats.totals.eventAdmins != null && (
               <>
-                <div className={styles.statCard}>
-                  <span className={styles.statValue}>{stats.totals.superAdmins}</span>
-                  <span className={styles.statLabel}>Super admins</span>
-                </div>
-                <div className={styles.statCard}>
-                  <span className={styles.statValue}>{stats.totals.eventAdmins}</span>
-                  <span className={styles.statLabel}>Event admin users</span>
-                </div>
+                <KpiCard
+                  label="Super admins"
+                  value={stats.totals.superAdmins}
+                  icon={<Shield size={18} />}
+                  variant="primary"
+                />
+                <KpiCard
+                  label="Event admin users"
+                  value={stats.totals.eventAdmins}
+                  icon={<Key size={18} />}
+                  variant="purple"
+                />
               </>
             )}
           </div>
@@ -309,8 +387,8 @@ export function DashboardCharts() {
                       tickLine={false}
                       width={36}
                     />
-                    <Tooltip contentStyle={chartTooltipStyle} labelStyle={{ color: '#64748b' }} />
-                    <Bar dataKey="count" name="Events" fill="#3b82f6" radius={[4, 4, 0, 0]} />
+                    <Tooltip content={<CustomChartTooltip />} />
+                    <Bar dataKey="count" name="Events" fill="var(--primary-accent)" radius={[4, 4, 0, 0]} />
                   </BarChart>
                 </ResponsiveContainer>
               </div>
@@ -338,10 +416,10 @@ export function DashboardCharts() {
                           <Cell key={i} fill={STATUS_COLORS[i % STATUS_COLORS.length]} />
                         ))}
                       </Pie>
-                      <Tooltip contentStyle={chartTooltipStyle} />
+                      <Tooltip content={<CustomChartTooltip />} />
                       <Legend
-                        wrapperStyle={{ fontSize: 12, color: '#64748b' }}
-                        formatter={(value) => <span style={{ color: '#0f172a' }}>{value}</span>}
+                        wrapperStyle={{ fontSize: 12, color: 'var(--text-secondary)' }}
+                        formatter={(value) => <span style={{ color: 'var(--text-primary)' }}>{value}</span>}
                       />
                     </PieChart>
                   </ResponsiveContainer>
@@ -392,11 +470,7 @@ export function DashboardCharts() {
                         axisLine={false}
                         tickLine={false}
                       />
-                      <Tooltip
-                        contentStyle={chartTooltipStyle}
-                        labelStyle={{ color: '#64748b' }}
-                        formatter={(value: number) => [value, 'Assigned admins']}
-                      />
+                      <Tooltip content={<CustomChartTooltip />} />
                       <Bar
                         dataKey="count"
                         name="Assigned admins"

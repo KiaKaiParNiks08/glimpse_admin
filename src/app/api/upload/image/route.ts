@@ -1,7 +1,8 @@
 import { NextRequest } from 'next/server';
-import { ok, badRequest, serverError } from '@/lib/api-response';
+import { ok, badRequest, serverError, unsupportedMediaType } from '@/lib/api-response';
 import {
   getMediaKind,
+  resolveUploadMime,
   saveUploadedFile,
   validateMediaFile,
 } from '@/lib/upload';
@@ -23,18 +24,24 @@ export async function POST(request: NextRequest) {
       return badRequest('No image file provided. Send a file in the "file" field.');
     }
 
-    const kind = getMediaKind(file.type);
+    const mime = resolveUploadMime(file.type, file.name);
+    const kind = getMediaKind(mime);
     if (kind !== 'image') {
-      return badRequest('File must be an image (JPEG, PNG, GIF, WebP).');
+      return unsupportedMediaType(
+        `Unsupported media type: ${mime || file.name || 'unknown'}. File must be an image (JPEG, PNG, GIF, WebP, HEIC, HEIF).`
+      );
     }
 
-    const validationError = validateMediaFile(file, 'image');
+    const validationError = validateMediaFile({ type: mime, size: file.size }, 'image');
     if (validationError) {
       return badRequest(validationError);
     }
 
     const projectRoot = process.cwd();
-    const { relativeUrl } = await saveUploadedFile(file, 'image', projectRoot, { prefix: 'uploads' });
+    const { relativeUrl } = await saveUploadedFile(file, 'image', projectRoot, {
+      prefix: 'uploads',
+      contentType: mime,
+    });
     return ok({ url: relativeUrl });
   } catch (e) {
     console.error(e);

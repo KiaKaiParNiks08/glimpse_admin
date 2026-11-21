@@ -590,6 +590,160 @@ export function getOpenApiSpec(serverUrl: string) {
           },
         },
       },
+      '/api/notifications': {
+        get: {
+          summary: 'List in-app notifications (event-scoped)',
+          description:
+            'Returns a paginated list of notifications for the authenticated user, filtered by event_id. When event_id is omitted, defaults to the active session event in the JWT. If query event_id conflicts with the JWT session event, returns 400. Includes unread_count scoped to this event.',
+          tags: ['Notifications'],
+          security: [{ BearerAuth: [] }],
+          parameters: [
+            { name: 'page', in: 'query', schema: { type: 'integer', minimum: 1, default: 1 } },
+            { name: 'limit', in: 'query', schema: { type: 'integer', minimum: 1, maximum: 100, default: 20 } },
+            { name: 'event_id', in: 'query', required: false, schema: { type: 'string', format: 'uuid' }, description: 'Active event ID. Must match the JWT session event or an event joined by the caller.' },
+            { name: 'is_read', in: 'query', required: false, schema: { type: 'boolean' } },
+          ],
+          responses: {
+            '200': {
+              description: 'Paginated notifications with event-scoped unread count',
+              content: {
+                'application/json': {
+                  schema: {
+                    type: 'object',
+                    properties: {
+                      message: { type: 'string', example: 'Success' },
+                      data: {
+                        type: 'array',
+                        items: {
+                          type: 'object',
+                          properties: {
+                            id: { type: 'string', format: 'uuid' },
+                            event_id: { type: 'string', format: 'uuid' },
+                            title: { type: 'string' },
+                            message: { type: 'string' },
+                            notification_type: { type: 'string' },
+                            reference_type: { type: 'string', nullable: true },
+                            reference_id: { type: 'string', format: 'uuid', nullable: true },
+                            is_read: { type: 'boolean' },
+                            created_at: { type: 'string', format: 'date-time' },
+                            routing: {
+                              type: 'object',
+                              properties: {
+                                screen: { type: 'string' },
+                                type: { type: 'string' },
+                                event_id: { type: 'string', format: 'uuid' },
+                                event_session_id: { type: 'string', format: 'uuid', nullable: true },
+                                post_id: { type: 'string', format: 'uuid', nullable: true },
+                                comment_id: { type: 'string', format: 'uuid', nullable: true },
+                              },
+                            },
+                          },
+                        },
+                      },
+                      meta: {
+                        type: 'object',
+                        properties: {
+                          total: { type: 'integer' },
+                          unread_count: { type: 'integer' },
+                          page: { type: 'integer' },
+                          limit: { type: 'integer' },
+                          totalPages: { type: 'integer' },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+            '400': { description: 'event_id conflicts with active session event' },
+            '401': { description: 'Authentication required' },
+            '403': { description: 'Forbidden' },
+            '500': { description: 'Server error' },
+          },
+        },
+      },
+      '/api/notifications/read': {
+        patch: {
+          summary: 'Mark notifications as read (event-scoped)',
+          description:
+            'Marks specific notifications or all unread notifications for an event as read. Rejects IDs belonging to other events with 403.',
+          tags: ['Notifications'],
+          security: [{ BearerAuth: [] }],
+          requestBody: {
+            required: true,
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    notification_id: { type: 'string', format: 'uuid' },
+                    notification_ids: { type: 'array', items: { type: 'string', format: 'uuid' } },
+                    all: { type: 'boolean' },
+                    event_id: { type: 'string', format: 'uuid' },
+                  },
+                },
+              },
+            },
+          },
+          responses: {
+            '200': {
+              description: 'Count of marked notifications',
+              content: {
+                'application/json': {
+                  schema: {
+                    type: 'object',
+                    properties: {
+                      message: { type: 'string', example: 'Success' },
+                      data: {
+                        type: 'object',
+                        properties: {
+                          ok: { type: 'boolean' },
+                          updated_count: { type: 'integer' },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+            '400': { description: 'Invalid request or event_id conflict' },
+            '401': { description: 'Authentication required' },
+            '403': { description: 'Cannot mark notification from another event as read' },
+            '404': { description: 'Notification not found' },
+            '500': { description: 'Server error' },
+          },
+        },
+        post: {
+          summary: 'Mark notifications as read (POST alias)',
+          description: 'Alias for PATCH /api/notifications/read for client libraries that prefer POST.',
+          tags: ['Notifications'],
+          security: [{ BearerAuth: [] }],
+          requestBody: {
+            required: true,
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    notification_id: { type: 'string', format: 'uuid' },
+                    notification_ids: { type: 'array', items: { type: 'string', format: 'uuid' } },
+                    all: { type: 'boolean' },
+                    event_id: { type: 'string', format: 'uuid' },
+                  },
+                },
+              },
+            },
+          },
+          responses: {
+            '200': { description: 'Count of marked notifications' },
+            '400': { description: 'Invalid request or event_id conflict' },
+            '401': { description: 'Authentication required' },
+            '403': { description: 'Cannot mark notification from another event as read' },
+            '404': { description: 'Notification not found' },
+            '500': { description: 'Server error' },
+          },
+        },
+      },
       '/api/users': {
         get: {
           summary: 'List admins',
@@ -1005,7 +1159,7 @@ export function getOpenApiSpec(serverUrl: string) {
         post: {
           summary: 'Create feed post (with optional image/video upload)',
           description:
-            'Creates a feed post. Use multipart/form-data. Media: either max 1 video OR max 6 images (no mixing). Send `height` as the tallest media height in pixels (one value for the post). Files are uploaded to S3 and returned as a stored URL (CloudFront public URL if configured, otherwise /api/upload/signed?t=...). Allowed: images (JPEG, PNG, GIF, WebP), videos (MP4, WebM, MOV). Size limits: images max 10MB, videos max 50MB; videos max 120 seconds (provide `video_duration_sec` from client-side metadata). For a video, send one image field `thumbnail`; it is stored as post_media.thumbnail_url. Empty files rejected.',
+            'Creates a feed post. Use multipart/form-data. Media: either max 1 video OR max 6 images (no mixing). Send `height` as the tallest media height in pixels (one value for the post). Files are uploaded to S3 and returned as a stored URL (CloudFront public URL if configured, otherwise /api/upload/signed?t=...). Allowed: images (JPEG, PNG, GIF, WebP, HEIC, HEIF), videos (MP4, WebM, MOV, MKV, 3GP). Size limits: images max 10MB, videos max 50MB; videos max 120 seconds (provide `video_duration_sec` from client-side metadata). For a video, send one image field `thumbnail`; it is stored as post_media.thumbnail_url. Empty files rejected.',
           tags: ['Feed'],
           requestBody: {
             required: true,
@@ -1039,18 +1193,18 @@ export function getOpenApiSpec(serverUrl: string) {
                       type: 'array',
                       items: { type: 'string', format: 'binary' },
                       description:
-                        'Image(s) or video. Max 1 video OR max 6 images (no mixing). Allowed: JPEG, PNG, GIF, WebP; MP4, WebM, MOV. Size: images max 10MB, videos max 50MB; video length max 120s (see video_duration_sec).',
+                        'Image(s) or video. Max 1 video OR max 6 images (no mixing). Allowed: JPEG, PNG, GIF, WebP, HEIC, HEIF; MP4, WebM, MOV, MKV, 3GP. Size: images max 10MB, videos max 50MB; video length max 120s (see video_duration_sec).',
                     },
                     thumbnail: {
                       type: 'string',
                       format: 'binary',
-                      description: 'One poster image for the video. JPEG, PNG, GIF, or WebP, max 10MB.',
+                      description: 'One poster image for the video. JPEG, PNG, GIF, WebP, HEIC, or HEIF, max 10MB.',
                     },
                   },
                 },
                 encoding: {
                   media: {
-                    contentType: 'image/jpeg, image/png, image/gif, image/webp, video/mp4, video/webm, video/quicktime',
+                    contentType: 'image/jpeg, image/png, image/gif, image/webp, image/heic, image/heif, video/mp4, video/webm, video/quicktime, video/x-matroska, video/3gpp',
                   },
                 },
               },
@@ -1714,7 +1868,7 @@ export function getOpenApiSpec(serverUrl: string) {
           description:
             'Multipart upload for a guest who was added as a session uploader. Authorization: user Bearer JWT for this event_id. ' +
             'Repeat the `media` field, maximum 10 files (images and/or videos). Images max 10MB. Videos max 50MB and 120 seconds; send `video_duration_sec` once per video in the same order. ' +
-            'For each video, send a JPEG/PNG/WebP `thumbnail` in the same video order. The stored poster is returned as `thumbnail_url`. ' +
+            'For each video, send a JPEG/PNG/WebP/HEIC `thumbnail` in the same video order. The stored poster is returned as `thumbnail_url`. ' +
             'Returns 403 when this user cannot upload to the session.',
           tags: ['Events'],
           security: [{ BearerAuth: [] }],
@@ -1744,7 +1898,7 @@ export function getOpenApiSpec(serverUrl: string) {
                     thumbnail: {
                       type: 'array',
                       items: { type: 'string', format: 'binary' },
-                      description: 'One image per video, same order as the video files. Max 10MB each.',
+                      description: 'One image per video, same order as the video files. JPEG, PNG, GIF, WebP, HEIC, or HEIF. Max 10MB each.',
                     },
                   },
                 },
@@ -2211,7 +2365,7 @@ export function getOpenApiSpec(serverUrl: string) {
                     file: {
                       type: 'string',
                       format: 'binary',
-                      description: 'Profile image file (JPEG, PNG, GIF, WebP). Max 10MB.',
+                      description: 'Profile image file (JPEG, PNG, GIF, WebP, HEIC, HEIF). Max 10MB.',
                     },
                     event_id: {
                       type: 'string',
@@ -2222,7 +2376,7 @@ export function getOpenApiSpec(serverUrl: string) {
                 },
                 encoding: {
                   file: {
-                    contentType: 'image/jpeg, image/png, image/gif, image/webp',
+                    contentType: 'image/jpeg, image/png, image/gif, image/webp, image/heic, image/heif',
                   },
                 },
               },

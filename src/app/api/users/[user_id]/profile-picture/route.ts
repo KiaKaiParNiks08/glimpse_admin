@@ -1,6 +1,6 @@
 import { NextRequest } from 'next/server';
 import { parseParams, userIdPathSchema, uuidSchema } from '@/lib/validations';
-import { badRequest, forbidden, notFound, ok, serverError } from '@/lib/api-response';
+import { badRequest, forbidden, notFound, ok, serverError, unsupportedMediaType } from '@/lib/api-response';
 import { getUserFromAuthorizationHeader } from '@/lib/jwt';
 import { getMediaKind, resolveUploadMime, saveUploadedBuffer, validateMediaFile } from '@/lib/upload';
 import { isEventGuest } from '@/server/event-guests';
@@ -48,12 +48,15 @@ export async function POST(
       return badRequest('No image file provided. Send a file in the "file" field.');
     }
 
-    const kind = getMediaKind(file.type);
+    const mime = resolveUploadMime(file.type, file.name);
+    const kind = getMediaKind(mime);
     if (kind !== 'image') {
-      return badRequest('File must be an image (JPEG, PNG, GIF, WebP).');
+      return unsupportedMediaType(
+        `Unsupported media type: ${mime || file.name || 'unknown'}. File must be an image (JPEG, PNG, GIF, WebP, HEIC, HEIF).`
+      );
     }
 
-    const validationError = validateMediaFile(file, 'image');
+    const validationError = validateMediaFile({ type: mime, size: file.size }, 'image');
     if (validationError) {
       return badRequest(validationError);
     }
@@ -64,7 +67,6 @@ export async function POST(
     const faceCheck = await verifyProfileFace(path.user_id, bytes);
     if (!faceCheck.ok) return badRequest(faceCheck.message);
 
-    const mime = resolveUploadMime(file.type, file.name);
     const saved = await saveUploadedBuffer(bytes, 'image', process.cwd(), {
       prefix: 'profile-pictures',
       contentType: mime || file.type,

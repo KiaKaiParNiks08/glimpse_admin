@@ -7,6 +7,9 @@ import { PaginatedTable } from '@/components/PaginatedTable';
 import { ExploreCategoryFormModal } from './ExploreCategoryFormModal';
 import { useAdminAccess } from '@/components/auth/AdminAccessContext';
 import { ContentSkeleton } from '@/components/navigation/ContentSkeleton';
+import { PageHeader } from '@/components/ui/PageHeader';
+import { SearchInput } from '@/components/ui/SearchInput';
+import { Plus, Edit2, Trash2 } from '@/components/icons';
 import {
   getExploreCategoriesAction,
   deleteExploreCategoryAction,
@@ -135,33 +138,34 @@ export default function ExploreCategoriesPage() {
 
   return (
     <div className={styles.page}>
-      <div className={styles.headerRow}>
-        <div className={styles.headerText}>
-          <h1>Explore categories</h1>
-          <p>Browse global explore categories or manage custom categories &amp; local listings.</p>
-        </div>
-        {canManage && (
-          <button
-            type="button"
-            onClick={openCreateForm}
-            className={styles.newCategoryButton}
-          >
-            + New category
-          </button>
-        )}
-      </div>
+      <PageHeader
+        title="Explore Categories"
+        subtitle="Browse global explore categories or manage custom categories & local listings."
+        breadcrumbs={[{ label: 'Admin', href: '/dashboard' }, { label: 'Explore Categories' }]}
+        actions={
+          canManage ? (
+            <button
+              type="button"
+              onClick={openCreateForm}
+              className={styles.newCategoryButton}
+            >
+              <Plus size={16} /> New category
+            </button>
+          ) : undefined
+        }
+      />
 
       <div className={styles.controlsRow}>
-        <input
-          type="search"
-          placeholder="Search by title or description…"
-          value={search}
-          onChange={(e) => {
-            setPage(1);
-            setSearch(e.target.value);
-          }}
-          className={styles.searchInput}
-        />
+        <div style={{ flex: 1, minWidth: 220 }}>
+          <SearchInput
+            placeholder="Search by title or description…"
+            value={search}
+            onChange={(val) => {
+              setPage(1);
+              setSearch(val);
+            }}
+          />
+        </div>
       </div>
 
       {error && <p className={styles.errorText}>{error}</p>}
@@ -190,9 +194,24 @@ export default function ExploreCategoriesPage() {
           const mutable = canEditRow(cat);
           return (
             <tr key={cat.id} className={styles.rowDivider}>
-              <td className={styles.td}>{cat.title}</td>
               <td className={styles.td}>
-                <span style={{ fontSize: '0.74rem', color: cat.tenant_owner_id ? '#1e40af' : '#475569' }}>
+                <strong>{cat.title}</strong>
+              </td>
+              <td className={styles.td}>
+                <span
+                  style={{
+                    fontSize: '0.72rem',
+                    fontWeight: 600,
+                    padding: '0.15rem 0.5rem',
+                    borderRadius: '999px',
+                    backgroundColor: cat.tenant_owner_id
+                      ? 'var(--badge-info-bg)'
+                      : 'var(--badge-neutral-bg)',
+                    color: cat.tenant_owner_id
+                      ? 'var(--badge-info-text)'
+                      : 'var(--badge-neutral-text)',
+                  }}
+                >
                   {cat.tenant_owner_id ? 'Private' : 'Global'}
                 </span>
               </td>
@@ -203,7 +222,22 @@ export default function ExploreCategoriesPage() {
                     : cat.description
                   : '—'}
               </td>
-              <td className={styles.td}>{cat._count.explore_items}</td>
+              <td className={styles.td}>
+                <span
+                  style={{
+                    display: 'inline-block',
+                    padding: '0.12rem 0.5rem',
+                    borderRadius: '999px',
+                    fontSize: '0.75rem',
+                    fontWeight: 600,
+                    backgroundColor: 'var(--bg-surface-secondary)',
+                    color: 'var(--text-primary)',
+                    border: '1px solid var(--border-color)',
+                  }}
+                >
+                  {cat._count.explore_items} items
+                </span>
+              </td>
               <td className={styles.td} style={{ textAlign: 'right' }}>
                 {mutable ? (
                   <div className={styles.actions}>
@@ -212,18 +246,18 @@ export default function ExploreCategoriesPage() {
                       onClick={() => openEditForm(cat)}
                       className={styles.btnEdit}
                     >
-                      Edit
+                      <Edit2 size={13} /> Edit
                     </button>
                     <button
                       type="button"
                       onClick={() => handleDelete(cat)}
                       className={styles.btnDelete}
                     >
-                      Delete
+                      <Trash2 size={13} /> Delete
                     </button>
                   </div>
                 ) : (
-                  <span style={{ fontSize: '0.75rem', color: '#94a3b8' }}>Global read-only</span>
+                  <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>Global read-only</span>
                 )}
               </td>
             </tr>

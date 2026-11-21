@@ -4,7 +4,7 @@ import {
   listPostsQuerySchema,
   parseQuery,
 } from '@/lib/validations';
-import { ok, badRequest, forbidden, notFound, serverError } from '@/lib/api-response';
+import { ok, badRequest, forbidden, notFound, serverError, unsupportedMediaType } from '@/lib/api-response';
 import {
   IncompleteUploadError,
   getMediaKind,
@@ -135,8 +135,8 @@ export async function POST(request: NextRequest) {
       const mime = resolveUploadMime(file.type, file.name);
       const kind = getMediaKind(mime);
       if (!kind || kind === 'pdf') {
-        return badRequest(
-          `Invalid file type for "${file.name}". Allowed: images (JPEG, PNG, GIF, WebP) and videos (MP4, WebM, MOV).`
+        return unsupportedMediaType(
+          `Unsupported media type: ${mime || file.name || 'unknown'}. Allowed: images (JPEG, PNG, GIF, WebP, HEIC, HEIF) and videos (MP4, WebM, MOV, MKV, 3GP).`
         );
       }
       const validationError = validateMediaFile({ type: mime, size: file.size }, kind);
@@ -164,7 +164,11 @@ export async function POST(request: NextRequest) {
     }
     if (thumbnails.length === 1) {
       const mime = resolveUploadMime(thumbnails[0].type, thumbnails[0].name);
-      if (getMediaKind(mime) !== 'image') return badRequest('Video thumbnail must be an image');
+      if (getMediaKind(mime) !== 'image') {
+        return unsupportedMediaType(
+          `Unsupported media type: ${mime || thumbnails[0].name || 'unknown'}. Video thumbnail must be an image (JPEG, PNG, GIF, WebP, HEIC, HEIF).`
+        );
+      }
       const sizeError = validateMediaFile({ type: mime, size: thumbnails[0].size }, 'image');
       if (sizeError) return badRequest(sizeError);
     }

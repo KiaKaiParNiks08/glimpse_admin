@@ -202,7 +202,7 @@ export async function presignEventDayMediaUploadAction(input: {
   if (!kind || kind === 'pdf') {
     return {
       ok: false,
-      error: 'Only images (JPEG, PNG, GIF, WebP) or videos (MP4, WebM, MOV) are allowed for day media.',
+      error: `Unsupported media type: ${input.contentType || input.filename}. Only images (JPEG, PNG, GIF, WebP, HEIC, HEIF) or videos (MP4, WebM, MOV, MKV, 3GP) are allowed for day media.`,
     };
   }
 
@@ -251,7 +251,10 @@ export async function uploadSessionMediaFileAction(formData: FormData): Promise<
   const mimeType = resolveUploadMime(file.type, file.name);
   const kind = getMediaKind(mimeType);
   if (kind !== 'image' && kind !== 'video') {
-    return { ok: false, error: 'Only images (JPEG, PNG, GIF, WebP) or videos (MP4, WebM, MOV) are allowed.' };
+    return {
+      ok: false,
+      error: `Unsupported media type: ${file.type || file.name}. Only images (JPEG, PNG, GIF, WebP, HEIC, HEIF) or videos (MP4, WebM, MOV, MKV, 3GP) are allowed.`,
+    };
   }
 
   const sizeErr = validateMediaFile({ type: mimeType, size: file.size }, kind);

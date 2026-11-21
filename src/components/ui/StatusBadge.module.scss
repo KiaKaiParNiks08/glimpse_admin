@@ -1,0 +1,67 @@
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.72rem;
+  font-weight: 600;
+  padding: 0.2rem 0.55rem;
+  border-radius: var(--radius-full);
+  line-height: 1.2;
+  white-space: nowrap;
+  letter-spacing: 0.02em;
+}
+
+.dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.success {
+  background: var(--success-light);
+  color: var(--success-text);
+  border: 1px solid rgba(22, 163, 106, 0.2);
+}
+
+.warning {
+  background: var(--warning-light);
+  color: var(--warning-text);
+  border: 1px solid rgba(217, 119, 6, 0.2);
+}
+
+.danger {
+  background: var(--danger-light);
+  color: var(--danger-text);
+  border: 1px solid rgba(220, 38, 38, 0.2);
+}
+
+.neutral {
+  background: var(--bg-surface-hover);
+  color: var(--text-secondary);
+  border: 1px solid var(--border-color);
+}
+
+.accent {
+  background: var(--primary-accent-light);
+  color: var(--primary-accent);
+  border: 1px solid rgba(79, 70, 229, 0.2);
+}
+
+.info {
+  background: var(--info-light);
+  color: var(--info-text);
+  border: 1px solid rgba(2, 132, 199, 0.2);
+}
+
+.gold {
+  background: #FEF3C7;
+  color: #92400E;
+  border: 1px solid #FDE68A;
+}
+
+:root[data-theme='dark'] .gold {
+  background: rgba(251, 191, 36, 0.15);
+  color: #FDE68A;
+  border-color: rgba(251, 191, 36, 0.3);
+}

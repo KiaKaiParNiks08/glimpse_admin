@@ -10,6 +10,9 @@ import {
   type AppThemeRow,
 } from '@/app/actions/app-themes';
 import { AppThemeFormModal } from './AppThemeFormModal';
+import { PageHeader } from '@/components/ui/PageHeader';
+import { SearchInput } from '@/components/ui/SearchInput';
+import { Plus, Edit2, Trash2 } from '@/components/icons';
 import styles from './app-themes.module.scss';
 import { ContentSkeleton } from '@/components/navigation/ContentSkeleton';
 
@@ -142,28 +145,30 @@ export default function AppThemesPage() {
 
   return (
     <div className={styles.page}>
-      <div className={styles.headerRow}>
-        <div className={styles.headerText}>
-          <h1>App themes</h1>
-          <p>Use platform app color themes or create custom color themes for your events.</p>
-        </div>
-        {canManage && (
-          <button type="button" className={styles.primaryButton} onClick={openCreate}>
-            + New theme
-          </button>
-        )}
-      </div>
+      <PageHeader
+        title="App Themes"
+        subtitle="Use platform app color themes or create custom color themes for your events."
+        breadcrumbs={[{ label: 'Admin', href: '/dashboard' }, { label: 'App Themes' }]}
+        actions={
+          canManage ? (
+            <button type="button" className={styles.primaryButton} onClick={openCreate}>
+              <Plus size={16} /> New theme
+            </button>
+          ) : undefined
+        }
+      />
 
       <div className={styles.controlsRow}>
-        <input
-          className={styles.searchInput}
-          placeholder="Search theme name…"
-          value={search}
-          onChange={(e) => {
-            setPage(1);
-            setSearch(e.target.value);
-          }}
-        />
+        <div style={{ flex: 1, minWidth: 220 }}>
+          <SearchInput
+            placeholder="Search theme name…"
+            value={search}
+            onChange={(val) => {
+              setPage(1);
+              setSearch(val);
+            }}
+          />
+        </div>
       </div>
 
       {error && <p className={styles.errorText}>{error}</p>}
@@ -195,9 +200,24 @@ export default function AppThemesPage() {
           const mutable = canEditRow(r);
           return (
             <tr key={r.id} className={styles.rowDivider}>
-              <td className={styles.td}>{r.name}</td>
               <td className={styles.td}>
-                <span style={{ fontSize: '0.74rem', color: r.tenant_owner_id ? '#1e40af' : '#475569' }}>
+                <strong>{r.name}</strong>
+              </td>
+              <td className={styles.td}>
+                <span
+                  style={{
+                    fontSize: '0.72rem',
+                    fontWeight: 600,
+                    padding: '0.15rem 0.5rem',
+                    borderRadius: '999px',
+                    backgroundColor: r.tenant_owner_id
+                      ? 'var(--badge-info-bg)'
+                      : 'var(--badge-neutral-bg)',
+                    color: r.tenant_owner_id
+                      ? 'var(--badge-info-text)'
+                      : 'var(--badge-neutral-text)',
+                  }}
+                >
                   {r.tenant_owner_id ? 'Private' : 'Global'}
                 </span>
               </td>
@@ -218,7 +238,7 @@ export default function AppThemesPage() {
                 {mutable ? (
                   <div className={styles.actions}>
                     <button type="button" className={styles.btnEdit} onClick={() => openEdit(r)}>
-                      Edit
+                      <Edit2 size={13} /> Edit
                     </button>
                     <button
                       type="button"
@@ -226,11 +246,11 @@ export default function AppThemesPage() {
                       disabled={deletingId === r.id}
                       onClick={() => handleDelete(r)}
                     >
-                      {deletingId === r.id ? 'Deleting…' : 'Delete'}
+                      <Trash2 size={13} /> {deletingId === r.id ? 'Deleting…' : 'Delete'}
                     </button>
                   </div>
                 ) : (
-                  <span style={{ fontSize: '0.75rem', color: '#94a3b8' }}>Global read-only</span>
+                  <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>Global read-only</span>
                 )}
               </td>
             </tr>

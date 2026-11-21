@@ -8,6 +8,20 @@ import { EventShareQrModal } from './EventShareQrModal';
 import { adminBearerAuthHeader } from '@/lib/admin-jwt-client';
 import { useRouteProgress } from '@/components/navigation/NavigationProvider';
 import { useAdminAccess } from '@/components/auth/AdminAccessContext';
+import { PageHeader } from '@/components/ui/PageHeader';
+import { SearchInput } from '@/components/ui/SearchInput';
+import {
+  Plus,
+  Edit2,
+  Sparkles,
+  QrCode,
+  ImageIcon,
+  Users,
+  Bell,
+  MessageSquare,
+  Download,
+  Trash2,
+} from '@/components/icons';
 import Link from 'next/link';
 import {
   getEventsAction,
@@ -48,6 +62,7 @@ export default function DashboardEventsPage() {
   const canPeopleMedia = hasPermission('people_media.view') && hasFeature('ai_recognition');
   const canNotify = hasPermission('notifications.send') && hasFeature('push_notifications');
   const canExportGuests = hasPermission('guests.export') && hasFeature('event_guests_export');
+  const canFeed = hasFeature('mobile_feed');
 
   useEffect(() => {
     let cancelled = false;
@@ -181,38 +196,38 @@ export default function DashboardEventsPage() {
 
   return (
     <div className={styles.page}>
-      <div className={styles.headerRow}>
-        <div className={styles.headerText}>
-          <h1>Events</h1>
-          <p>
-            Manage your scoped events, dates, sessions, and enabled event features.
-            {access?.purchase_plan_name ? ` (Plan: ${access.purchase_plan_name})` : ''}
-          </p>
-        </div>
-        {canCreate && (
-          <button
-            type="button"
-            onClick={openCreateForm}
-            className={styles.newEventButton}
-            disabled={!access}
-            aria-busy={pendingHref === '/dashboard/events/addEditEvent?mode=create' || undefined}
-          >
-            + New event
-          </button>
-        )}
-      </div>
+      <PageHeader
+        title="Events"
+        subtitle={`Manage your scoped events, dates, sessions, and enabled event features.${
+          access?.purchase_plan_name ? ` (Plan: ${access.purchase_plan_name})` : ''
+        }`}
+        breadcrumbs={[{ label: 'Admin', href: '/dashboard' }, { label: 'Events' }]}
+        actions={
+          canCreate ? (
+            <button
+              type="button"
+              onClick={openCreateForm}
+              className={styles.newEventButton}
+              disabled={!access}
+              aria-busy={pendingHref === '/dashboard/events/addEditEvent?mode=create' || undefined}
+            >
+              <Plus size={16} /> New event
+            </button>
+          ) : undefined
+        }
+      />
 
       <div className={styles.controlsRow}>
-        <input
-          type="search"
-          placeholder="Search by title, slug, event code…"
-          value={search}
-          onChange={(e) => {
-            setPage(1);
-            setSearch(e.target.value);
-          }}
-          className={styles.searchInput}
-        />
+        <div style={{ flex: 1, minWidth: 220 }}>
+          <SearchInput
+            placeholder="Search by title, slug, event code…"
+            value={search}
+            onChange={(val) => {
+              setPage(1);
+              setSearch(val);
+            }}
+          />
+        </div>
         <select
           className={styles.filterSelect}
           value={statusFilter}
@@ -256,8 +271,12 @@ export default function DashboardEventsPage() {
       >
         {events.map((ev) => (
           <tr key={ev.id} className={styles.rowDivider}>
-            <td className={styles.td}>{ev.title}</td>
-            <td className={styles.td}>{ev.event_code}</td>
+            <td className={styles.td}>
+              <strong>{ev.title}</strong>
+            </td>
+            <td className={styles.td}>
+              <code>{ev.event_code}</code>
+            </td>
             <td className={styles.td}>{ev.event_categories?.name ?? '—'}</td>
             <td className={styles.td}>{formatDate(ev.start_date)}</td>
             <td className={styles.td}>{formatDate(ev.end_date)}</td>
@@ -307,13 +326,14 @@ export default function DashboardEventsPage() {
                     type="button"
                     onClick={() => openEditForm(ev)}
                     className={styles.btnEdit}
+                    title="Edit event"
                     aria-busy={
                       pendingHref ===
                         `/dashboard/events/addEditEvent?mode=edit&eventId=${encodeURIComponent(ev.id)}` ||
                       undefined
                     }
                   >
-                    Edit
+                    <Edit2 size={13} /> Edit
                   </button>
                 )}
                 {canHappening && (
@@ -321,21 +341,23 @@ export default function DashboardEventsPage() {
                     type="button"
                     onClick={() => openCurrentHappening(ev)}
                     className={styles.btnEdit}
+                    title="Current happening"
                   >
-                    Happening
+                    <Sparkles size={13} /> Happening
                   </button>
                 )}
                 {canQr && (
                   <button
                     type="button"
                     className={styles.btnEdit}
+                    title="QR Code & Share"
                     onClick={() => {
                       setSelectedEventId(ev.id);
                       setSelectedEventTitle(ev.title);
                       setShareQrOpen(true);
                     }}
                   >
-                    QR
+                    <QrCode size={13} /> QR
                   </button>
                 )}
                 {canMedia && (
@@ -344,7 +366,7 @@ export default function DashboardEventsPage() {
                     className={styles.btnEdit}
                     title="Manage session media"
                   >
-                    Media
+                    <ImageIcon size={13} /> Media
                   </Link>
                 )}
                 {canPeopleMedia && (
@@ -353,7 +375,7 @@ export default function DashboardEventsPage() {
                     className={styles.btnEdit}
                     title="Face processing status and matches"
                   >
-                    People
+                    <Users size={13} /> People
                   </Link>
                 )}
                 {canNotify && (
@@ -362,7 +384,16 @@ export default function DashboardEventsPage() {
                     className={styles.btnEdit}
                     title="Send push notification for this event"
                   >
-                    Notify
+                    <Bell size={13} /> Notify
+                  </Link>
+                )}
+                {canFeed && (
+                  <Link
+                    href={`/dashboard/events/${ev.id}/feed`}
+                    className={styles.btnEdit}
+                    title="Moderate guest social feed posts"
+                  >
+                    <MessageSquare size={13} /> Feed
                   </Link>
                 )}
                 {canExportGuests && (
@@ -372,7 +403,7 @@ export default function DashboardEventsPage() {
                     className={styles.btnEdit}
                     title="Download guest list (CSV)"
                   >
-                    Export users
+                    <Download size={13} /> Export
                   </button>
                 )}
                 {canDelete && (
@@ -380,8 +411,9 @@ export default function DashboardEventsPage() {
                     type="button"
                     onClick={() => handleDelete(ev)}
                     className={styles.btnDelete}
+                    title="Delete event"
                   >
-                    Delete
+                    <Trash2 size={13} /> Delete
                   </button>
                 )}
               </div>

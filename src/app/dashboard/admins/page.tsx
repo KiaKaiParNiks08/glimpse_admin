@@ -8,6 +8,9 @@ import { RolePermissionsModal } from './RolePermissionsModal';
 import { PaginatedTable } from '@/components/PaginatedTable';
 import { formatRoleDisplayName } from '@/lib/rbac';
 import { useAdminAccess } from '@/components/auth/AdminAccessContext';
+import { PageHeader } from '@/components/ui/PageHeader';
+import { SearchInput } from '@/components/ui/SearchInput';
+import { Plus, Edit2, Shield, Key } from '@/components/icons';
 import {
   getUsersAction,
   getRolesAction,
@@ -173,50 +176,54 @@ export default function DashboardUsersPage() {
 
   return (
     <div className={styles.page}>
-      <div className={styles.headerRow}>
-        <div className={styles.headerText}>
-          <h1>Users, Roles &amp; Access</h1>
-          <p>
-            {isSuperAdmin
-              ? 'Manage Support Staff, Client Admins with Purchase Plans, Custom Roles, and Event Sub-Users.'
-              : access.tier === 'client_admin'
-              ? `Manage your event photographers, coordinators, and team sub-users${access.purchase_plan_name ? ` (Plan: ${access.purchase_plan_name})` : ''}.`
-              : 'Manage assigned client administrators and event team users.'}
-          </p>
-        </div>
-        <div className={styles.headerActions}>
-          {isSuperAdmin && (
-            <button
-              type="button"
-              onClick={() => setRolesModalOpen(true)}
-              className={styles.btnSecondary}
-            >
-              Manage Roles &amp; Permissions
-            </button>
-          )}
-          {canManageUsers && (
-            <button
-              type="button"
-              onClick={openCreateForm}
-              className={styles.newUserButton}
-            >
-              + New user
-            </button>
-          )}
-        </div>
-      </div>
+      <PageHeader
+        title="Users, Roles & Access"
+        subtitle={
+          isSuperAdmin
+            ? 'Manage Support Staff, Client Admins with Purchase Plans, Custom Roles, and Event Sub-Users.'
+            : access.tier === 'client_admin'
+            ? `Manage your event photographers, coordinators, and team sub-users${
+                access.purchase_plan_name ? ` (Plan: ${access.purchase_plan_name})` : ''
+              }.`
+            : 'Manage assigned client administrators and event team users.'
+        }
+        breadcrumbs={[{ label: 'Admin', href: '/dashboard' }, { label: 'Users & Access' }]}
+        actions={
+          <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+            {isSuperAdmin && (
+              <button
+                type="button"
+                onClick={() => setRolesModalOpen(true)}
+                className={styles.btnSecondary}
+                style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4rem' }}
+              >
+                <Shield size={14} /> Roles &amp; Permissions
+              </button>
+            )}
+            {canManageUsers && (
+              <button
+                type="button"
+                onClick={openCreateForm}
+                className={styles.newUserButton}
+              >
+                <Plus size={16} /> New user
+              </button>
+            )}
+          </div>
+        }
+      />
 
       <div className={styles.controlsRow}>
-        <input
-          type="search"
-          placeholder="Search by name or email…"
-          value={search}
-          onChange={(e) => {
-            setPage(1);
-            setSearch(e.target.value);
-          }}
-          className={styles.searchInput}
-        />
+        <div style={{ flex: 1, minWidth: 220 }}>
+          <SearchInput
+            placeholder="Search by name or email…"
+            value={search}
+            onChange={(val) => {
+              setPage(1);
+              setSearch(val);
+            }}
+          />
+        </div>
       </div>
 
       {error && <p className={styles.errorText}>{error}</p>}
@@ -247,7 +254,7 @@ export default function DashboardUsersPage() {
           <tr key={user.id} className={styles.rowDivider}>
             <td className={styles.td}>
               <div className={styles.userName}>
-                <span>{user.full_name}</span>
+                <strong>{user.full_name}</strong>
               </div>
             </td>
             <td className={styles.td}>{user.email}</td>
@@ -303,7 +310,7 @@ export default function DashboardUsersPage() {
                     onClick={() => openEditForm(user)}
                     className={styles.btnEdit}
                   >
-                    Edit
+                    <Edit2 size={13} /> Edit
                   </button>
                 </div>
               </td>

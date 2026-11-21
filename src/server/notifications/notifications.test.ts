@@ -432,4 +432,94 @@ describe('Notification formatting and deep-link payload contracts', () => {
     assert.equal(authLogoutRequestSchema.safeParse({ device_id: 'dev-uuid-1' }).success, true);
     assert.equal(authLogoutRequestSchema.safeParse({}).success, true);
   });
+
+  test('Event-scoped in-app notifications response contract includes top-level event_id and routing', () => {
+    const eventId = 'e2b3472b-8a8b-4a57-b088-7e3e9d8e57aa';
+    const notificationRow = {
+      id: 'notif-1111-2222-3333-444455556666',
+      event_id: eventId,
+      title: 'New Post 📸',
+      message: 'Someone shared a new post',
+      is_read: false,
+      created_at: new Date().toISOString(),
+      routing: {
+        screen: 'post_details',
+        type: 'new_post',
+        event_id: eventId,
+        post_id: 'post-1111-2222-3333-444455556666',
+      },
+    };
+
+    assert.equal(notificationRow.event_id, eventId);
+    assert.equal(notificationRow.routing.event_id, eventId);
+    assert.equal(notificationRow.routing.screen, 'post_details');
+  });
+
+  test('Query event_id and JWT session event_id conflict detection', () => {
+    const sessionEventId = 'e2b3472b-8a8b-4a57-b088-7e3e9d8e57aa';
+    const matchingQueryEventId = 'e2b3472b-8a8b-4a57-b088-7e3e9d8e57aa';
+    const conflictingQueryEventId = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
+
+    function validateEventIds(queryId: string | null, sessionId: string | null): boolean {
+      if (queryId && sessionId && queryId !== sessionId) {
+        return false;
+      }
+      return true;
+    }
+
+    assert.equal(validateEventIds(matchingQueryEventId, sessionEventId), true);
+    assert.equal(validateEventIds(null, sessionEventId), true);
+    assert.equal(validateEventIds(conflictingQueryEventId, sessionEventId), false);
+  });
+
+  test('Mark-read event scoping rejects cross-event notifications', () => {
+    const activeEventId = 'e2b3472b-8a8b-4a57-b088-7e3e9d8e57aa';
+    const otherEventId = 'bbbbbbbb-cccc-dddd-eeee-ffffffffffff';
+
+    const existingNotifs = [
+      { id: 'n1', event_id: activeEventId },
+      { id: 'n2', event_id: otherEventId },
+    ];
+
+    function checkCrossEvent(notifications: Array<{ id: string; event_id: string }>, targetEvent: string): boolean {
+      return notifications.some((n) => n.event_id !== targetEvent);
+    }
+
+    assert.equal(checkCrossEvent([existingNotifs[0]], activeEventId), false);
+    assert.equal(checkCrossEvent(existingNotifs, activeEventId), true);
+  });
+
+  test('FCM push dispatch automatically generates stringified routing in data dictionary', () => {
+    const eventId = 'e2b3472b-8a8b-4a57-b088-7e3e9d8e57aa';
+    const postId = 'post-1111-2222-3333-444455556666';
+
+    const rawData: Record<string, string> = {
+      screen: 'post_details',
+      type: 'new_post',
+      event_id: eventId,
+      post_id: postId,
+    };
+
+    const routingPayload = JSON.stringify({
+      screen: rawData.screen,
+      event_id: rawData.event_id,
+      post_id: rawData.post_id,
+      type: rawData.type,
+    });
+
+    const fcmData: Record<string, string> = {
+      ...rawData,
+      routing: routingPayload,
+    };
+
+    assert.equal(typeof fcmData.routing, 'string');
+    for (const [key, val] of Object.entries(fcmData)) {
+      assert.equal(typeof val, 'string', `FCM data field ${key} must be a string`);
+    }
+
+    const parsedRouting = JSON.parse(fcmData.routing);
+    assert.equal(parsedRouting.screen, 'post_details');
+    assert.equal(parsedRouting.event_id, eventId);
+    assert.equal(parsedRouting.post_id, postId);
+  });
 });

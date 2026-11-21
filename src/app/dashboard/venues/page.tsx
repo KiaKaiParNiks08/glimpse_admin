@@ -7,6 +7,9 @@ import { PaginatedTable } from '@/components/PaginatedTable';
 import { VenueFormModal } from './VenueFormModal';
 import { useAdminAccess } from '@/components/auth/AdminAccessContext';
 import { ContentSkeleton } from '@/components/navigation/ContentSkeleton';
+import { PageHeader } from '@/components/ui/PageHeader';
+import { SearchInput } from '@/components/ui/SearchInput';
+import { Plus, Edit2, Trash2 } from '@/components/icons';
 import {
   getVenuesAction,
   deleteVenueAction,
@@ -132,33 +135,34 @@ export default function DashboardVenuesPage() {
 
   return (
     <div className={styles.page}>
-      <div className={styles.headerRow}>
-        <div className={styles.headerText}>
-          <h1>Venues</h1>
-          <p>Browse global platform venues or manage your custom client venues.</p>
-        </div>
-        {canManage && (
-          <button
-            type="button"
-            onClick={openCreateForm}
-            className={styles.newVenueButton}
-          >
-            + New venue
-          </button>
-        )}
-      </div>
+      <PageHeader
+        title="Venues"
+        subtitle="Browse global platform venues or manage your custom client venues."
+        breadcrumbs={[{ label: 'Admin', href: '/dashboard' }, { label: 'Venues' }]}
+        actions={
+          canManage ? (
+            <button
+              type="button"
+              onClick={openCreateForm}
+              className={styles.newVenueButton}
+            >
+              <Plus size={16} /> New venue
+            </button>
+          ) : undefined
+        }
+      />
 
       <div className={styles.controlsRow}>
-        <input
-          type="search"
-          placeholder="Search by name, address, city, country…"
-          value={search}
-          onChange={(e) => {
-            setPage(1);
-            setSearch(e.target.value);
-          }}
-          className={styles.searchInput}
-        />
+        <div style={{ flex: 1, minWidth: 220 }}>
+          <SearchInput
+            placeholder="Search by name, address, city, country…"
+            value={search}
+            onChange={(val) => {
+              setPage(1);
+              setSearch(val);
+            }}
+          />
+        </div>
       </div>
 
       {error && <p className={styles.errorText}>{error}</p>}
@@ -188,9 +192,24 @@ export default function DashboardVenuesPage() {
           const mutable = canEditRow(venue);
           return (
             <tr key={venue.id} className={styles.rowDivider}>
-              <td className={styles.td}>{venue.name}</td>
               <td className={styles.td}>
-                <span style={{ fontSize: '0.74rem', color: venue.tenant_owner_id ? '#1e40af' : '#475569' }}>
+                <strong>{venue.name}</strong>
+              </td>
+              <td className={styles.td}>
+                <span
+                  style={{
+                    fontSize: '0.72rem',
+                    fontWeight: 600,
+                    padding: '0.15rem 0.5rem',
+                    borderRadius: '999px',
+                    backgroundColor: venue.tenant_owner_id
+                      ? 'var(--badge-info-bg)'
+                      : 'var(--badge-neutral-bg)',
+                    color: venue.tenant_owner_id
+                      ? 'var(--badge-info-text)'
+                      : 'var(--badge-neutral-text)',
+                  }}
+                >
                   {venue.tenant_owner_id ? 'Private' : 'Global'}
                 </span>
               </td>
@@ -205,18 +224,18 @@ export default function DashboardVenuesPage() {
                       onClick={() => openEditForm(venue)}
                       className={styles.btnEdit}
                     >
-                      Edit
+                      <Edit2 size={13} /> Edit
                     </button>
                     <button
                       type="button"
                       onClick={() => handleDelete(venue)}
                       className={styles.btnDelete}
                     >
-                      Delete
+                      <Trash2 size={13} /> Delete
                     </button>
                   </div>
                 ) : (
-                  <span style={{ fontSize: '0.75rem', color: '#94a3b8' }}>Global read-only</span>
+                  <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>Global read-only</span>
                 )}
               </td>
             </tr>

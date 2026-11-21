@@ -5,6 +5,8 @@ import { ImageUploadField } from '@/components/VenueForm/ImageUploadField';
 import { useSearchParams } from 'next/navigation';
 import { getMyProfileAction, updateMyProfileAction } from '@/app/actions/profile';
 import { ContentSkeleton } from '@/components/navigation/ContentSkeleton';
+import { PageHeader } from '@/components/ui/PageHeader';
+import { Edit2 } from '@/components/icons';
 import styles from './profile.module.scss';
 
 type ProfileForm = {
@@ -138,21 +140,22 @@ export default function ProfilePage() {
 
   return (
     <div className={styles.pageWrap}>
-      <div className={styles.pageHeader}>
-        <div>
-          <h1 className={styles.title}>My Profile</h1>
-          <p className={styles.subtitle}>View and manage your account information.</p>
-        </div>
-        {!isEditMode ? (
-          <button type="button" className={styles.primaryBtn} onClick={() => setIsEditMode(true)}>
-            Edit profile
-          </button>
-        ) : (
-          <button type="button" className={styles.secondaryBtn} onClick={handleCancelEdit} disabled={saving}>
-            Cancel
-          </button>
-        )}
-      </div>
+      <PageHeader
+        title="My Profile"
+        subtitle="View and manage your account information."
+        breadcrumbs={[{ label: 'Admin', href: '/dashboard' }, { label: 'My Profile' }]}
+        actions={
+          !isEditMode ? (
+            <button type="button" className={styles.primaryBtn} onClick={() => setIsEditMode(true)} style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4rem' }}>
+              <Edit2 size={14} /> Edit profile
+            </button>
+          ) : (
+            <button type="button" className={styles.secondaryBtn} onClick={handleCancelEdit} disabled={saving}>
+              Cancel
+            </button>
+          )
+        }
+      />
 
       {error && <p className={styles.errorText}>{error}</p>}
       {success && <p className={styles.successText}>{success}</p>}

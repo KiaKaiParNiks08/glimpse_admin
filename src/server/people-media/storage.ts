@@ -10,9 +10,14 @@ const CONTENT_TYPES: Record<string, string> = {
   '.png': 'image/png',
   '.gif': 'image/gif',
   '.webp': 'image/webp',
+  '.heic': 'image/heic',
+  '.heif': 'image/heif',
   '.mp4': 'video/mp4',
+  '.m4v': 'video/mp4',
   '.webm': 'video/webm',
   '.mov': 'video/quicktime',
+  '.mkv': 'video/x-matroska',
+  '.3gp': 'video/3gpp',
 };
 
 export function sha256Hex(value: string): string {

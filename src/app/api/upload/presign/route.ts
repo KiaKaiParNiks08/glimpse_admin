@@ -1,5 +1,5 @@
 import { NextRequest } from 'next/server';
-import { ok, badRequest, serverError } from '@/lib/api-response';
+import { ok, badRequest, serverError, unsupportedMediaType } from '@/lib/api-response';
 import { createPresignedUpload } from '@/lib/s3-presign';
 
 const presignBodySchema = {
@@ -38,7 +38,10 @@ export async function POST(request: NextRequest) {
     return ok(result);
   } catch (e) {
     const message = e instanceof Error ? e.message : 'Presign failed';
-    if (message.startsWith('Invalid content type') || message.startsWith('AWS_') || message.startsWith('S3_')) {
+    if (message.startsWith('Unsupported media type') || message.startsWith('Invalid content type')) {
+      return unsupportedMediaType(message);
+    }
+    if (message.startsWith('AWS_') || message.startsWith('S3_')) {
       return badRequest(message);
     }
     console.error(e);

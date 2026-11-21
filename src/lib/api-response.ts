@@ -116,6 +116,13 @@ export function conflict(message: string): NextResponse {
 }
 
 /**
+ * 415 Unsupported Media Type
+ */
+export function unsupportedMediaType(message: string): NextResponse {
+  return NextResponse.json({ message, data: null } satisfies ApiBody, { status: 415 });
+}
+
+/**
  * 500 Internal Server Error
  */
 export function serverError(message: string = 'Internal server error'): NextResponse {

@@ -74,7 +74,10 @@ export async function POST(
         const mime = resolveUploadMime(file.contentType, file.filename);
         const kind = getMediaKind(mime);
         if (kind !== 'image' && kind !== 'video') {
-          return { ok: false as const, error: `Unsupported file type: ${file.filename}` };
+          return {
+            ok: false as const,
+            error: `Unsupported media type: ${mime || file.filename}. Allowed: images (JPEG, PNG, GIF, WebP, HEIC, HEIF) and videos (MP4, WebM, MOV, MKV, 3GP).`,
+          };
         }
         const sizeErr = validateMediaFile({ type: mime, size: file.fileSize }, kind);
         if (sizeErr) {

@@ -1,8 +1,8 @@
-import { badRequest, forbidden, ok, serverError } from '@/lib/api-response';
+import { badRequest, forbidden, ok, serverError, unsupportedMediaType } from '@/lib/api-response';
 import { getUserFromAuthorizationHeader } from '@/lib/jwt';
 import { faceReferenceRevokeSchema } from '@/lib/validations/people-media';
 import { parseBody } from '@/lib/validations/parse';
-import { getMediaKind, validateMediaFile } from '@/lib/upload';
+import { getMediaKind, resolveUploadMime, validateMediaFile } from '@/lib/upload';
 import {
   enrollFaceReference,
   getFaceReferenceStatus,
@@ -55,8 +55,13 @@ export async function PUT(request: Request) {
     if (!file || !(file instanceof File) || file.size === 0) {
       return badRequest('Send an image in the file field');
     }
-    if (getMediaKind(file.type) !== 'image') return badRequest('Face reference must be an image');
-    const validationError = validateMediaFile(file, 'image');
+    const mime = resolveUploadMime(file.type, file.name);
+    if (getMediaKind(mime) !== 'image') {
+      return unsupportedMediaType(
+        `Unsupported media type: ${mime || file.name || 'unknown'}. Face reference must be an image (JPEG, PNG, GIF, WebP, HEIC, HEIF).`
+      );
+    }
+    const validationError = validateMediaFile({ type: mime, size: file.size }, 'image');
     if (validationError) return badRequest(validationError);
 
     const status = await enrollFaceReference(user.id, file);

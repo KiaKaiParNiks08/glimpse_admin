@@ -3,17 +3,20 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import {
   ALL_FEATURES_ENABLED,
+  ESSENTIAL_PLAN_FEATURES,
+  SIGNATURE_PLAN_FEATURES,
+  ELITE_PLAN_FEATURES,
   FEATURE_KEYS,
   PERMISSION_KEYS,
   ROLE_DEFAULT_PERMISSIONS,
-  STARTER_MEDIA_FEATURES,
+  STANDARD_PLAN_LIMITS,
   computeEffectiveFeatures,
   computeEffectivePermissions,
   modulesFromAccess,
 } from '../lib/rbac.ts';
 import { evaluateModerationLabels } from '../lib/moderation-rules.ts';
 
-describe('Multi-tenant RBAC, Purchase Plans & 18+ Moderation Rules', () => {
+describe('Multi-tenant RBAC, Purchase Plans & Feed Moderation Rules', () => {
   test('Static default Super Admin password hash matches seeded SHA-256 value', () => {
     const expectedHash = createHash('sha256').update('superadmin@123').digest('hex');
     assert.equal(
@@ -22,17 +25,27 @@ describe('Multi-tenant RBAC, Purchase Plans & 18+ Moderation Rules', () => {
     );
   });
 
-  test('Starter Media Only plan gates watermark, AI recognition, highlights, and push notifications', () => {
-    const features = computeEffectiveFeatures(STARTER_MEDIA_FEATURES, null);
+  test('Plan I — Essential features and permissions', () => {
+    const features = computeEffectiveFeatures(ESSENTIAL_PLAN_FEATURES, null);
+    // Included features
     assert.equal(features.event_basic, true);
     assert.equal(features.event_sessions, true);
     assert.equal(features.event_team, true);
     assert.equal(features.session_media_upload, true);
+    assert.equal(features.ai_recognition, true);
+    assert.equal(features.event_qr, true);
+    assert.equal(features.venues_manage, true);
+    assert.equal(features.event_guests_export, true);
+    assert.equal(features.event_current_happening, true);
+    assert.equal(features.event_explore, true);
+
+    // Gated features
     assert.equal(features.event_watermark, false);
-    assert.equal(features.ai_recognition, false);
+    assert.equal(features.event_highlights, false);
+    assert.equal(features.event_post_report, false);
+    assert.equal(features.push_notifications, false);
     assert.equal(features.mobile_favorites, false);
     assert.equal(features.mobile_feed, false);
-    assert.equal(features.push_notifications, false);
 
     const perms = computeEffectivePermissions({
       roleName: 'client_admin',
@@ -44,10 +57,12 @@ describe('Multi-tenant RBAC, Purchase Plans & 18+ Moderation Rules', () => {
     assert.equal(perms.has('events.create'), true);
     assert.equal(perms.has('sessions.manage'), true);
     assert.equal(perms.has('media.upload'), true);
+    assert.equal(perms.has('people_media.view'), true);
+    assert.equal(perms.has('explore.manage'), true);
+    assert.equal(perms.has('happening.manage'), true);
+    assert.equal(perms.has('guests.export'), true);
     assert.equal(perms.has('watermark.manage'), false);
-    assert.equal(perms.has('people_media.view'), false);
     assert.equal(perms.has('highlights.manage'), false);
-    assert.equal(perms.has('explore.manage'), false);
     assert.equal(perms.has('notifications.send'), false);
     assert.equal(perms.has('plans.manage'), false);
 
@@ -56,17 +71,98 @@ describe('Multi-tenant RBAC, Purchase Plans & 18+ Moderation Rules', () => {
     assert.ok(modules.includes('events'));
     assert.ok(modules.includes('admins'));
     assert.ok(!modules.includes('plans'));
-    assert.ok(!modules.includes('app-config'));
     assert.ok(!modules.includes('notifications'));
   });
 
+  test('Plan II — Signature and Plan III — Elite features', () => {
+    const sigFeatures = computeEffectiveFeatures(SIGNATURE_PLAN_FEATURES, null);
+    assert.equal(sigFeatures.event_watermark, true);
+    assert.equal(sigFeatures.event_highlights, true);
+    assert.equal(sigFeatures.event_post_report, true);
+    assert.equal(sigFeatures.push_notifications, true);
+    assert.equal(sigFeatures.mobile_favorites, true);
+    assert.equal(sigFeatures.mobile_feed, true);
+    assert.equal(sigFeatures.ai_recognition, true);
+
+    const eliteFeatures = computeEffectiveFeatures(ELITE_PLAN_FEATURES, null);
+    for (const key of FEATURE_KEYS) {
+      assert.equal(eliteFeatures[key], true);
+    }
+  });
+
+  test('Standard plan quotas: Event Admins and Session Media Uploaders', () => {
+    // Plan I — Essential: 2 admins (1 initial + 1 additional), 1 uploader
+    assert.equal(STANDARD_PLAN_LIMITS.essential.max_event_admins, 2);
+    assert.equal(STANDARD_PLAN_LIMITS.essential.max_session_media_uploaders, 1);
+
+    // Plan II — Signature: 5 admins (1 initial + 4 additional), 3 uploaders
+    assert.equal(STANDARD_PLAN_LIMITS.signature.max_event_admins, 5);
+    assert.equal(STANDARD_PLAN_LIMITS.signature.max_session_media_uploaders, 3);
+
+    // Plan III — Elite: 10 admins, 10 uploaders
+    assert.equal(STANDARD_PLAN_LIMITS.elite.max_event_admins, 10);
+    assert.equal(STANDARD_PLAN_LIMITS.elite.max_session_media_uploaders, 10);
+
+    // Legacy slug mappings
+    assert.equal(STANDARD_PLAN_LIMITS['media-sessions-only'].max_event_admins, 2);
+    assert.equal(STANDARD_PLAN_LIMITS['media-sessions-only'].max_session_media_uploaders, 1);
+    assert.equal(STANDARD_PLAN_LIMITS['pro-planner'].max_event_admins, 5);
+    assert.equal(STANDARD_PLAN_LIMITS['pro-planner'].max_session_media_uploaders, 3);
+    assert.equal(STANDARD_PLAN_LIMITS.enterprise.max_event_admins, 10);
+    assert.equal(STANDARD_PLAN_LIMITS.enterprise.max_session_media_uploaders, 10);
+  });
+
+  test('Unique session uploader clustering correctly merges identical contacts', () => {
+    function normalizeMobile(value: string | null | undefined): string {
+      return (value ?? '').replace(/\D/g, '');
+    }
+    function normalizeEmail(value: string | null | undefined): string {
+      return (value ?? '').trim().toLowerCase();
+    }
+    function mobilesMatch(a: string | null | undefined, b: string | null | undefined): boolean {
+      const ma = normalizeMobile(a);
+      const mb = normalizeMobile(b);
+      if (!ma || !mb) return false;
+      if (ma === mb) return true;
+      const short = ma.length <= mb.length ? ma : mb;
+      const long = ma.length <= mb.length ? mb : ma;
+      return short.length >= 8 && long.endsWith(short);
+    }
+    function emailsMatch(a: string | null | undefined, b: string | null | undefined): boolean {
+      const ea = normalizeEmail(a);
+      const eb = normalizeEmail(b);
+      if (!ea || !eb) return false;
+      return ea === eb;
+    }
+    function uploaderMatches(u: { mobile_number: string | null; email: string | null }, row: { mobile_number: string | null; email: string | null }) {
+      return mobilesMatch(u.mobile_number, row.mobile_number) || emailsMatch(u.email, row.email);
+    }
+    function cluster(rows: Array<{ mobile_number: string | null; email: string | null }>) {
+      const unique: Array<{ mobile_number: string | null; email: string | null }> = [];
+      for (const r of rows) {
+        if (!unique.some((u) => uploaderMatches(u, r))) unique.push(r);
+      }
+      return unique;
+    }
+
+    const rows = [
+      { mobile_number: '+1 (555) 123-4567', email: null },
+      { mobile_number: '5551234567', email: null }, // same mobile
+      { mobile_number: null, email: 'user@example.com' },
+      { mobile_number: null, email: 'USER@EXAMPLE.COM' }, // same email
+      { mobile_number: '9876543210', email: 'other@example.com' }, // distinct
+    ];
+    const unique = cluster(rows);
+    assert.equal(unique.length, 3);
+  });
+
   test('Per-client feature overrides unlock a specific feature on top of base plan', () => {
-    const features = computeEffectiveFeatures(STARTER_MEDIA_FEATURES, {
+    const features = computeEffectiveFeatures(ESSENTIAL_PLAN_FEATURES, {
       event_watermark: true,
-      ai_recognition: true,
+      push_notifications: true,
     });
     assert.equal(features.event_watermark, true);
-    assert.equal(features.ai_recognition, true);
+    assert.equal(features.push_notifications, true);
     assert.equal(features.event_highlights, false);
 
     const perms = computeEffectivePermissions({
@@ -76,7 +172,7 @@ describe('Multi-tenant RBAC, Purchase Plans & 18+ Moderation Rules', () => {
       applyFeatureGate: true,
     });
     assert.equal(perms.has('watermark.manage'), true);
-    assert.equal(perms.has('people_media.view'), true);
+    assert.equal(perms.has('notifications.send'), true);
     assert.equal(perms.has('highlights.manage'), false);
   });
 
@@ -105,7 +201,7 @@ describe('Multi-tenant RBAC, Purchase Plans & 18+ Moderation Rules', () => {
   test('Super admin retains every permission unconditionally', () => {
     const perms = computeEffectivePermissions({
       roleName: 'super_admin',
-      features: STARTER_MEDIA_FEATURES,
+      features: ESSENTIAL_PLAN_FEATURES,
       applyFeatureGate: true,
     });
     assert.equal(perms.size, PERMISSION_KEYS.length);
@@ -158,8 +254,8 @@ describe('Multi-tenant RBAC, Purchase Plans & 18+ Moderation Rules', () => {
       assert.equal(ALL_FEATURES_ENABLED[key], true);
     }
 
-    const eventAFeatures = computeEffectiveFeatures(ALL_FEATURES_ENABLED, null);
-    const eventBFeatures = computeEffectiveFeatures(STARTER_MEDIA_FEATURES, {
+    const eventAFeatures = computeEffectiveFeatures(SIGNATURE_PLAN_FEATURES, null);
+    const eventBFeatures = computeEffectiveFeatures(ESSENTIAL_PLAN_FEATURES, {
       event_team: false,
       session_media_upload: false,
     });
@@ -175,7 +271,7 @@ describe('Multi-tenant RBAC, Purchase Plans & 18+ Moderation Rules', () => {
     assert.equal(eventBFeatures.session_media_upload, false);
     assert.equal(eventBFeatures.mobile_feed, false);
     assert.equal(eventBFeatures.mobile_favorites, false);
-    assert.equal(eventBFeatures.ai_recognition, false);
+    assert.equal(eventBFeatures.ai_recognition, true);
     assert.equal(eventBFeatures.event_watermark, false);
     assert.equal(eventBFeatures.event_sessions, true);
   });

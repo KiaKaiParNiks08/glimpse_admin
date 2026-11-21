@@ -8,6 +8,8 @@ import { signOutToLogin } from '@/lib/admin-sign-out';
 import { canAccessModule } from '@/lib/rbac';
 import { listAppConfigurationsAction, type AppConfigurationRow } from '@/app/actions/app-configurations';
 import { AppConfigFormModal } from './AppConfigFormModal';
+import { PageHeader } from '@/components/ui/PageHeader';
+import { Plus, Edit2 } from '@/components/icons';
 import styles from './app-config.module.scss';
 import { ContentSkeleton } from '@/components/navigation/ContentSkeleton';
 
@@ -115,15 +117,16 @@ export default function AppConfigPage() {
 
   return (
     <div className={styles.page}>
-      <div className={styles.headerRow}>
-        <div className={styles.headerText}>
-          <h1>App configuration</h1>
-          <p>Store URLs, versioning, and update policy per platform (super admin only).</p>
-        </div>
-        <button type="button" className={styles.primaryButton} onClick={openCreate}>
-          + New platform
-        </button>
-      </div>
+      <PageHeader
+        title="App Configuration"
+        subtitle="Store URLs, versioning, and update policy per platform (super admin only)."
+        breadcrumbs={[{ label: 'Admin', href: '/dashboard' }, { label: 'App Configuration' }]}
+        actions={
+          <button type="button" className={styles.primaryButton} onClick={openCreate}>
+            <Plus size={16} /> New platform
+          </button>
+        }
+      />
 
       {error && <p className={styles.errorText}>{error}</p>}
 
@@ -151,13 +154,15 @@ export default function AppConfigPage() {
       >
         {rows.map((r) => (
           <tr key={r.id} className={styles.rowDivider}>
-            <td className={styles.td}>{r.platform}</td>
+            <td className={styles.td}>
+              <strong>{r.platform}</strong>
+            </td>
             <td className={styles.td}>{r.app_name ?? '—'}</td>
             <td className={`${styles.td} ${styles.tdMuted}`} title={r.store_url}>
               {r.store_url}
             </td>
             <td className={styles.td}>
-              <span style={{ fontSize: '0.8rem', color: '#94a3b8' }}>
+              <span style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
                 cur {r.current_version ?? '—'}
                 <br />
                 min {r.minimum_supported_version ?? '—'}
@@ -175,7 +180,7 @@ export default function AppConfigPage() {
             <td className={styles.td} style={{ textAlign: 'right' }}>
               <div className={styles.actions}>
                 <button type="button" className={styles.btnEdit} onClick={() => openEdit(r)}>
-                  Edit
+                  <Edit2 size={13} /> Edit
                 </button>
               </div>
             </td>

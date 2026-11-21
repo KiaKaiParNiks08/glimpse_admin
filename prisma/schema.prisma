@@ -404,6 +404,10 @@ model events {
   user_event_face_scans                user_event_face_scans[]
   user_event_profiles                  user_event_profiles[]
   posts                                posts[]
+  notifications                        notifications[]
+  custom_plan_id                       String?               @db.Uuid
+  custom_plan                          purchase_plans?       @relation("EventCustomPlan", fields: [custom_plan_id], references: [id], onDelete: SetNull, onUpdate: NoAction, map: "fk_event_custom_plan")
+  post_moderations                     post_moderation_audits[]
 
   @@index([category_id], map: "idx_events_category_id")
   @@index([created_by], map: "idx_events_created_by")
@@ -414,6 +418,7 @@ model events {
   @@index([start_date], map: "idx_events_start_date")
   @@index([status], map: "idx_events_status")
   @@index([email_suffix], map: "idx_events_email_suffix")
+  @@index([custom_plan_id], map: "idx_events_custom_plan_id")
 }
 
 model events_admin {
@@ -464,6 +469,7 @@ model explore_items {
 /// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
 model notifications {
   id                                           String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  event_id                                     String            @db.Uuid
   recipient_user_id                            String            @db.Uuid
   sender_user_id                               String?           @db.Uuid
   notification_type                            notification_type
@@ -474,6 +480,7 @@ model notifications {
   is_read                                      Boolean?          @default(false)
   is_deleted                                   Boolean?          @default(false)
   created_at                                   DateTime?         @default(now()) @db.Timestamptz(6)
+  events                                       events            @relation(fields: [event_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_notifications_event")
   users_notifications_recipient_user_idTousers users             @relation("notifications_recipient_user_idTousers", fields: [recipient_user_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
   users_notifications_sender_user_idTousers    users?            @relation("notifications_sender_user_idTousers", fields: [sender_user_id], references: [id], onUpdate: NoAction)
 
@@ -481,6 +488,8 @@ model notifications {
   @@index([is_read], map: "idx_notifications_is_read")
   @@index([recipient_user_id], map: "idx_notifications_recipient_user_id")
   @@index([recipient_user_id, is_deleted, created_at(sort: Desc)], map: "idx_notifications_recipient_feed")
+  @@index([recipient_user_id, event_id, is_read], map: "idx_notifications_user_event_read")
+  @@index([recipient_user_id, event_id, is_deleted, created_at(sort: Desc)], map: "idx_notifications_user_event_feed")
 }
 
 model post_likes {
@@ -537,6 +546,7 @@ model posts {
   users          users            @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
   events         events?          @relation(fields: [event_id], references: [id], onDelete: SetNull, onUpdate: NoAction, map: "posts_event_id_fkey")
   user_favorites user_favorites[]
+  moderation_audits post_moderation_audits[]
 
   @@index([created_at], map: "idx_posts_created_at")
   @@index([user_id], map: "idx_posts_user_id")
@@ -563,13 +573,18 @@ model purchase_plans {
   features      Json      @default("{}")
   max_events    Int?
   max_sub_users Int?
+  max_event_admins Int?
+  max_session_media_uploaders Int?
   is_active     Boolean   @default(true)
   is_default    Boolean   @default(false)
+  is_custom     Boolean   @default(false)
+  is_recommended Boolean   @default(false)
   created_by    String?   @db.Uuid
   created_at    DateTime? @default(now()) @db.Timestamptz(6)
   updated_at    DateTime? @default(now()) @db.Timestamptz(6)
   creator       users?    @relation("PlanCreatedBy", fields: [created_by], references: [id], onDelete: SetNull, onUpdate: NoAction)
   users         users[]   @relation("UserPurchasePlan")
+  custom_events events[]  @relation("EventCustomPlan")
 }
 
 model staff_client_assignments {
@@ -691,6 +706,8 @@ model users {
   owned_venues                                         venues[]                   @relation("VenueTenantOwner")
   owned_app_themes                                     app_themes[]               @relation("AppThemeTenantOwner")
   owned_explore_categories                             explore_categories[]       @relation("ExploreCatTenantOwner")
+  moderated_posts                                      post_moderation_audits[]   @relation("ModeratedByUser")
+  moderated_content                                    post_moderation_audits[]   @relation("PostCreatorUser")
 
   @@index([role_id], map: "idx_users_role_id")
   @@index([parent_user_id], map: "idx_users_parent_user_id")
@@ -1013,10 +1030,33 @@ enum page_status {
 enum post_status {
   active
   deleted
+  moderated
 }
 
 enum device_type {
   android
   ios
   web
+}
+
+model post_moderation_audits {
+  id                   String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  post_id              String    @db.Uuid
+  event_id             String    @db.Uuid
+  original_creator_id  String    @db.Uuid
+  moderator_user_id    String    @db.Uuid
+  action               String    @db.VarChar(50)
+  reason               String    @db.VarChar(100)
+  comment              String?
+  notification_sent    Boolean   @default(false)
+  created_at           DateTime? @default(now()) @db.Timestamptz(6)
+
+  posts                posts     @relation(fields: [post_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_post_moderation_post")
+  events               events    @relation(fields: [event_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_post_moderation_event")
+  original_creator     users     @relation("PostCreatorUser", fields: [original_creator_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_post_moderation_creator")
+  moderator            users     @relation("ModeratedByUser", fields: [moderator_user_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_post_moderation_moderator")
+
+  @@index([post_id], map: "idx_post_moderation_post_id")
+  @@index([event_id], map: "idx_post_moderation_event_id")
+  @@index([moderator_user_id], map: "idx_post_moderation_moderator")
 }

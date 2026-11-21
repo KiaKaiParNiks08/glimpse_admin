@@ -7,6 +7,7 @@ import { signOutToLogin } from '@/lib/admin-sign-out';
 import { useAdminAccess } from '@/components/auth/AdminAccessContext';
 import { DashboardCharts } from './DashboardCharts';
 import { ContentSkeleton } from '@/components/navigation/ContentSkeleton';
+import { PageHeader } from '@/components/ui/PageHeader';
 
 export default function DashboardPage() {
   const router = useRouter();
@@ -27,12 +28,11 @@ export default function DashboardPage() {
         <ContentSkeleton variant="cards" />
       ) : (
         <>
-          <h1 style={{ fontSize: '1.5rem', color: '#0f172a', marginBottom: '0.5rem' }}>
-            Dashboard
-          </h1>
-          <p style={{ color: '#64748b', marginBottom: '1rem' }}>
-            Welcome back. You’re signed in as <strong style={{ color: '#0f172a' }}>{access.full_name}</strong>.
-          </p>
+          <PageHeader
+            title="Dashboard"
+            description={`Welcome back, ${access.full_name}. Here is an overview of your events, system activity, and analytics.`}
+            breadcrumbs={[{ label: 'Admin', href: '/dashboard' }, { label: 'Dashboard' }]}
+          />
           <DashboardCharts />
         </>
       )}

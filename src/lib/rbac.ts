@@ -165,15 +165,40 @@ export function createFeatureMap(defaultValue: boolean): FeatureMap {
 
 export const ALL_FEATURES_ENABLED: FeatureMap = createFeatureMap(true);
 
-export const STARTER_MEDIA_FEATURES: FeatureMap = {
+export const ESSENTIAL_PLAN_FEATURES: FeatureMap = {
   ...createFeatureMap(false),
   event_basic: true,
   event_sessions: true,
   event_team: true,
   session_media_upload: true,
+  ai_recognition: true,
   event_qr: true,
-  sub_users_manage: true,
   venues_manage: true,
+  event_guests_export: true,
+  event_current_happening: true,
+  event_explore: true,
+  sub_users_manage: true,
+};
+
+export const SIGNATURE_PLAN_FEATURES: FeatureMap = {
+  ...createFeatureMap(true),
+};
+
+export const ELITE_PLAN_FEATURES: FeatureMap = {
+  ...createFeatureMap(true),
+};
+
+export const STARTER_MEDIA_FEATURES: FeatureMap = ESSENTIAL_PLAN_FEATURES;
+
+export type PlanSlug = 'essential' | 'signature' | 'elite' | (string & {});
+
+export const STANDARD_PLAN_LIMITS: Record<string, { max_event_admins: number; max_session_media_uploaders: number }> = {
+  essential: { max_event_admins: 2, max_session_media_uploaders: 1 },
+  signature: { max_event_admins: 5, max_session_media_uploaders: 3 },
+  elite: { max_event_admins: 10, max_session_media_uploaders: 10 },
+  'media-sessions-only': { max_event_admins: 2, max_session_media_uploaders: 1 },
+  'pro-planner': { max_event_admins: 5, max_session_media_uploaders: 3 },
+  enterprise: { max_event_admins: 10, max_session_media_uploaders: 10 },
 };
 
 export type AdminRoleName =

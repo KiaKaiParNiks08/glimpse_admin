@@ -46,17 +46,34 @@ async function dispatchEventPush(input: {
     if (!features.push_notifications) return;
   }
 
+  const payloadData: Record<string, string> = { ...(input.data || {}) };
+  if (input.eventId && !payloadData.event_id) {
+    payloadData.event_id = input.eventId;
+  }
+  if (!payloadData.routing && payloadData.screen) {
+    payloadData.routing = JSON.stringify({
+      screen: payloadData.screen,
+      event_id: payloadData.event_id || input.eventId || '',
+      ...(payloadData.post_id ? { post_id: payloadData.post_id } : {}),
+      ...(payloadData.event_session_id ? { event_session_id: payloadData.event_session_id } : {}),
+      ...(payloadData.comment_id ? { comment_id: payloadData.comment_id } : {}),
+      ...(payloadData.parent_comment_id ? { parent_comment_id: payloadData.parent_comment_id } : {}),
+      ...(payloadData.type ? { type: payloadData.type } : {}),
+    });
+  }
+
   const tokens = await getDeviceTokensForUsers(input.userIds);
   if (tokens.length > 0) {
     await sendFcmPush({
       tokens,
       notification: input.notification,
-      data: input.data,
+      data: payloadData,
     });
   }
 }
 
 interface InAppNotificationInput {
+  event_id: string;
   recipient_user_id: string;
   sender_user_id?: string | null;
   notification_type: notification_type;
@@ -73,6 +90,7 @@ async function recordNotification(input: InAppNotificationInput) {
   try {
     return await prisma.notifications.create({
       data: {
+        event_id: input.event_id,
         recipient_user_id: input.recipient_user_id,
         sender_user_id: input.sender_user_id ?? null,
         notification_type: input.notification_type,
@@ -96,6 +114,7 @@ async function recordNotificationsBulk(inputs: InAppNotificationInput[]) {
   try {
     await prisma.notifications.createMany({
       data: inputs.map((input) => ({
+        event_id: input.event_id,
         recipient_user_id: input.recipient_user_id,
         sender_user_id: input.sender_user_id ?? null,
         notification_type: input.notification_type,
@@ -152,6 +171,7 @@ export async function notifySessionMediaUploaded(input: SessionMediaUploadBroadc
     // Save in-app notification records for all recipients
     await recordNotificationsBulk(
       recipientUserIds.map((userId) => ({
+        event_id: eventId,
         recipient_user_id: userId,
         sender_user_id: uploaderUserId ?? null,
         notification_type: 'event_update',
@@ -213,6 +233,7 @@ export async function notifySessionFaceRecognized(input: SessionFaceRecognizedIn
     const body = `${total} media files uploaded to the ${sessionName} session. You have been recognized in ${recognizedCount} media files.`;
 
     await recordNotification({
+      event_id: eventId,
       recipient_user_id: userId,
       notification_type: 'event_update',
       reference_id: eventSessionId,
@@ -276,7 +297,8 @@ export async function notifyPostLiked(input: PostLikedInput): Promise<void> {
       }),
     ]);
 
-    if (!post) return;
+    if (!post || !post.event_id) return;
+    const postEventId = post.event_id;
     const likerName = liker?.full_name || 'Someone';
 
     // 2. Notify Post Author (Someone liked your post ❤️)
@@ -285,6 +307,7 @@ export async function notifyPostLiked(input: PostLikedInput): Promise<void> {
       const authorBody = `${likerName} liked your post.`;
 
       await recordNotification({
+        event_id: postEventId,
         recipient_user_id: post.user_id,
         sender_user_id: likerUserId,
         notification_type: 'post_like',
@@ -295,13 +318,13 @@ export async function notifyPostLiked(input: PostLikedInput): Promise<void> {
       });
 
       await dispatchEventPush({
-        eventId: post.event_id,
+        eventId: postEventId,
         userIds: [post.user_id],
         notification: { title: authorTitle, body: authorBody },
         data: {
           screen: 'post_details',
           type: 'post_like',
-          event_id: post.event_id ?? '',
+          event_id: postEventId,
           post_id: postId,
         },
       });
@@ -326,6 +349,7 @@ export async function notifyPostLiked(input: PostLikedInput): Promise<void> {
 
       await recordNotificationsBulk(
         recognizedList.map((userId) => ({
+          event_id: postEventId,
           recipient_user_id: userId,
           sender_user_id: likerUserId,
           notification_type: 'post_like',
@@ -337,13 +361,13 @@ export async function notifyPostLiked(input: PostLikedInput): Promise<void> {
       );
 
       await dispatchEventPush({
-        eventId: post.event_id,
+        eventId: postEventId,
         userIds: recognizedList,
         notification: { title: recognizedTitle, body: recognizedBody },
         data: {
           screen: 'post_details',
           type: 'recognized_post_liked',
-          event_id: post.event_id ?? '',
+          event_id: postEventId,
           post_id: postId,
         },
       });
@@ -379,7 +403,8 @@ export async function notifyCommentAdded(input: CommentAddedInput): Promise<void
       }),
     ]);
 
-    if (!post) return;
+    if (!post || !post.event_id) return;
+    const postEventId = post.event_id;
     const authorName = author?.full_name || 'Someone';
     const preview = commentText.length > 80 ? commentText.slice(0, 77) + '...' : commentText;
 
@@ -395,6 +420,7 @@ export async function notifyCommentAdded(input: CommentAddedInput): Promise<void
         const replyBody = `${authorName} replied to your comment: "${preview}"`;
 
         await recordNotification({
+          event_id: postEventId,
           recipient_user_id: parentComment.user_id,
           sender_user_id: authorUserId,
           notification_type: 'post_comment',
@@ -405,13 +431,13 @@ export async function notifyCommentAdded(input: CommentAddedInput): Promise<void
         });
 
         await dispatchEventPush({
-          eventId: post.event_id,
+          eventId: postEventId,
           userIds: [parentComment.user_id],
           notification: { title: replyTitle, body: replyBody },
           data: {
             screen: 'post_details',
             type: 'comment_reply',
-            event_id: post.event_id ?? '',
+            event_id: postEventId,
             post_id: postId,
             comment_id: commentId,
             parent_comment_id: parentCommentId,
@@ -425,6 +451,7 @@ export async function notifyCommentAdded(input: CommentAddedInput): Promise<void
         const commentBody = `${authorName} commented on your post: "${preview}"`;
 
         await recordNotification({
+          event_id: postEventId,
           recipient_user_id: post.user_id,
           sender_user_id: authorUserId,
           notification_type: 'post_comment',
@@ -435,13 +462,13 @@ export async function notifyCommentAdded(input: CommentAddedInput): Promise<void
         });
 
         await dispatchEventPush({
-          eventId: post.event_id,
+          eventId: postEventId,
           userIds: [post.user_id],
           notification: { title: commentTitle, body: commentBody },
           data: {
             screen: 'post_details',
             type: 'post_comment',
-            event_id: post.event_id ?? '',
+            event_id: postEventId,
             post_id: postId,
             comment_id: commentId,
           },
@@ -494,6 +521,7 @@ export async function notifyNewPostInEvent(input: NewPostInEventInput): Promise<
 
     await recordNotificationsBulk(
       recipientUserIds.map((userId) => ({
+        event_id: eventId,
         recipient_user_id: userId,
         sender_user_id: authorUserId,
         notification_type: 'general',
@@ -545,6 +573,7 @@ export async function notifySpotlightPost(input: SpotlightPostInput): Promise<vo
     const body = `${authorName} shared a new post, and you've been recognized in it. Tap to view!`;
 
     await recordNotification({
+      event_id: eventId,
       recipient_user_id: recognizedUserId,
       sender_user_id: authorUserId,
       notification_type: 'general',
@@ -567,5 +596,49 @@ export async function notifySpotlightPost(input: SpotlightPostInput): Promise<vo
     });
   } catch (err) {
     console.error('[notifications] Error in notifySpotlightPost:', err);
+  }
+}
+
+/**
+ * Notify post creator when their post has been moderated / removed.
+ */
+export async function notifyPostModerated(input: {
+  eventId: string;
+  postId: string;
+  creatorUserId: string;
+  eventTitle: string;
+  reason?: string | null;
+  moderatedByUserId?: string | null;
+}): Promise<void> {
+  try {
+    const reasonText = input.reason ? ` Reason: ${input.reason}.` : '';
+    const title = 'Post Removed';
+    const message = `Your post in "${input.eventTitle}" was removed by an event moderator.${reasonText}`;
+
+    await Promise.all([
+      recordNotification({
+        event_id: input.eventId,
+        recipient_user_id: input.creatorUserId,
+        sender_user_id: input.moderatedByUserId ?? null,
+        notification_type: 'general',
+        reference_id: input.postId,
+        reference_type: 'post',
+        title,
+        message,
+      }),
+      dispatchEventPush({
+        eventId: input.eventId,
+        userIds: [input.creatorUserId],
+        notification: { title, body: message },
+        data: {
+          screen: 'notifications',
+          event_id: input.eventId,
+          post_id: input.postId,
+          type: 'post_moderated',
+        },
+      }),
+    ]);
+  } catch (err) {
+    console.error('[notifications] Error in notifyPostModerated:', err);
   }
 }

@@ -5,6 +5,8 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { useRouteProgress } from '@/components/navigation/NavigationProvider';
 import { ContentSkeleton } from '@/components/navigation/ContentSkeleton';
 import { useAdminAccess } from '@/components/auth/AdminAccessContext';
+import { PageHeader } from '@/components/ui/PageHeader';
+import { ArrowLeft } from '@/components/icons';
 import styles from '../events.module.scss';
 import { CreateEventWizard } from '../CreateEventWizard';
 import {
@@ -96,20 +98,30 @@ export default function AddEditEventPage() {
 
   return (
     <div className={styles.page}>
-      <div className={styles.headerRow}>
-        <div className={styles.headerText}>
-          <h1>{pageTitle}</h1>
-          <p>{mode === 'edit' ? 'Update event details and enabled features.' : 'Create a new event and configure enabled steps.'}</p>
-        </div>
-        <button
-          type="button"
-          onClick={() => navigate('/dashboard/events')}
-          className={styles.btnSecondary}
-          aria-busy={pendingHref === '/dashboard/events' || undefined}
-        >
-          Back to events
-        </button>
-      </div>
+      <PageHeader
+        title={pageTitle}
+        subtitle={
+          mode === 'edit'
+            ? 'Update event details and enabled features.'
+            : 'Create a new event and configure enabled steps.'
+        }
+        breadcrumbs={[
+          { label: 'Admin', href: '/dashboard' },
+          { label: 'Events', href: '/dashboard/events' },
+          { label: pageTitle },
+        ]}
+        actions={
+          <button
+            type="button"
+            onClick={() => navigate('/dashboard/events')}
+            className={styles.btnSecondary}
+            aria-busy={pendingHref === '/dashboard/events' || undefined}
+            style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4rem' }}
+          >
+            <ArrowLeft size={14} /> Back to events
+          </button>
+        }
+      />
 
       {error && <p className={styles.errorText}>{error}</p>}
 

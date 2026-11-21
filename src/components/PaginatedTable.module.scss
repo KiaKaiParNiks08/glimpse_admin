@@ -1,60 +1,77 @@
 .wrapper {
-  border-radius: 0.75rem;
-  border: 1px solid #e2e8f0;
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--border-color);
   overflow: hidden;
-  background: radial-gradient(circle at top left, rgba(37, 99, 235, 0.08), transparent), #ffffff;
+  background: var(--bg-surface);
+  box-shadow: var(--shadow-card);
+  transition: background-color 0.15s ease, border-color 0.15s ease;
 }
 
 .table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 0.875rem;
+  font-size: 0.84rem;
+  color: var(--text-primary);
 }
 
 .headRow {
-  background-color: #f8fafc;
+  background-color: var(--bg-surface-secondary);
+  border-bottom: 1px solid var(--border-color);
 }
 
 .cell {
-  padding: 0.55rem 0.9rem;
-  font-size: 0.8rem;
-  color: #0f172a;
+  padding: 0.65rem 0.95rem;
+  font-size: 0.82rem;
+  color: var(--text-primary);
+  vertical-align: middle;
 }
 
 .headCell {
   text-align: left;
-  padding: 0.6rem 0.9rem;
-  font-size: 0.75rem;
-  font-weight: 500;
+  padding: 0.65rem 0.95rem;
+  font-size: 0.73rem;
+  font-weight: 600;
   text-transform: uppercase;
-  letter-spacing: 0.06em;
-  color: #64748b;
+  letter-spacing: 0.05em;
+  color: var(--text-secondary);
+  border-bottom: 1px solid var(--border-color);
 }
 
 .headCellActions {
-  @extend .headCell;
   text-align: right;
+  padding: 0.65rem 0.95rem;
+  font-size: 0.73rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-secondary);
+  border-bottom: 1px solid var(--border-color);
 }
 
 .rowDivider {
-  border-top: 1px solid #e2e8f0;
+  border-top: 1px solid var(--border-color);
+  transition: background-color 0.12s ease;
+
+  &:hover {
+    background-color: var(--bg-surface-hover);
+  }
 }
 
 .emptyCell {
-  padding: 0.9rem;
+  padding: 2.5rem 1rem;
   text-align: center;
-  color: #64748b;
+  color: var(--text-muted);
   font-size: 0.85rem;
 }
 
 .skeletonBar {
   display: block;
-  height: 0.75rem;
+  height: 0.85rem;
   width: 100%;
-  border-radius: 0.375rem;
-  background: linear-gradient(90deg, #e2e8f0 0%, #f8fafc 50%, #e2e8f0 100%);
+  border-radius: var(--radius-sm);
+  background: linear-gradient(90deg, var(--bg-surface-secondary) 0%, var(--bg-surface-hover) 50%, var(--bg-surface-secondary) 100%);
   background-size: 200% 100%;
-  animation: tableSkeleton 1.2s ease-in-out infinite;
+  animation: tableSkeleton 1.3s ease-in-out infinite;
 }
 
 .srOnly {
@@ -81,7 +98,7 @@
 @media (prefers-reduced-motion: reduce) {
   .skeletonBar {
     animation: none;
-    background: #e2e8f0;
+    background: var(--bg-surface-secondary);
   }
 }
 
@@ -92,48 +109,57 @@
   justify-content: space-between;
   gap: 0.75rem;
   margin-top: 1rem;
-  padding: 0.5rem 0;
-  font-size: 0.875rem;
-  color: #64748b;
+  padding: 0.5rem 0.25rem;
+  font-size: 0.82rem;
+  color: var(--text-secondary);
 }
 
 .paginationSummary {
-  font-size: 0.8125rem;
-  color: #64748b;
+  font-size: 0.8rem;
+  color: var(--text-secondary);
 }
 
 .pagination {
   display: flex;
   align-items: center;
-  gap: 0.25rem;
-  font-size: 0.75rem;
-  color: #64748b;
+  gap: 0.35rem;
 }
 
 .paginationButton {
-  min-width: 2rem;
-  padding: 0.35rem 0.6rem;
-  border-radius: 0.375rem;
-  border: 1px solid #e2e8f0;
-  background-color: #ffffff;
-  color: #0f172a;
-  font-size: 0.75rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 30px;
+  height: 30px;
+  padding: 0 0.5rem;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-color);
+  background: var(--bg-surface);
+  color: var(--text-primary);
+  font-size: 0.8rem;
+  font-weight: 500;
   cursor: pointer;
+  transition: all 0.12s ease;
+
+  &:hover:not(:disabled) {
+    background: var(--bg-surface-hover);
+    border-color: var(--primary-accent);
+  }
 
   &:disabled {
-    background-color: #ffffff;
-    cursor: default;
+    opacity: 0.45;
+    cursor: not-allowed;
   }
 }
 
 .paginationButtonActive {
-  background-color: #0f172a;
-  border-color: #0f172a;
-  color: #ffffff;
+  background: var(--primary-accent) !important;
+  color: var(--primary-accent-text) !important;
+  border-color: var(--primary-accent) !important;
+  font-weight: 600;
 }
 
 .paginationEllipsis {
-  padding: 0 0.25rem;
-  color: #64748b;
-  user-select: none;
+  padding: 0 0.35rem;
+  color: var(--text-muted);
 }

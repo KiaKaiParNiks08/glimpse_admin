@@ -1,4 +1,5 @@
 import prisma from '@/server/prisma';
+import { getEventEffectiveEntitlements } from '@/server/access';
 
 export type SessionUploader = {
   id: string;
@@ -77,6 +78,64 @@ export function uploaderMatchesUser(
   return mobilesMatch(uploader.mobile_number, user.mobile_number) || emailsMatch(uploader.email, user.email);
 }
 
+export function clusterUniqueUploaders(
+  rows: Array<{ mobile_number: string | null; email: string | null }>
+): Array<{ mobile_number: string | null; email: string | null }> {
+  const unique: Array<{ mobile_number: string | null; email: string | null }> = [];
+  for (const row of rows) {
+    const found = unique.some((u) => uploaderMatchesUser(u, row));
+    if (!found) {
+      unique.push(row);
+    }
+  }
+  return unique;
+}
+
+export async function countUniqueEventUploaders(eventId: string): Promise<number> {
+  const rows = await prisma.event_session_uploaders.findMany({
+    where: {
+      OR: [
+        { all_sessions: true, event_id: eventId },
+        { event_sessions: { event_days: { event_id: eventId } } },
+      ],
+    },
+    select: { mobile_number: true, email: true },
+  });
+  return clusterUniqueUploaders(rows).length;
+}
+
+export async function checkEventUploaderQuota(
+  eventId: string,
+  candidate: { mobile_number?: string | null; email?: string | null }
+): Promise<void> {
+  const rows = await prisma.event_session_uploaders.findMany({
+    where: {
+      OR: [
+        { all_sessions: true, event_id: eventId },
+        { event_sessions: { event_days: { event_id: eventId } } },
+      ],
+    },
+    select: { mobile_number: true, email: true },
+  });
+  const uniqueUploaders = clusterUniqueUploaders(rows);
+  const alreadyActive = uniqueUploaders.some((u) =>
+    uploaderMatchesUser(u, {
+      mobile_number: candidate.mobile_number ?? null,
+      email: candidate.email ?? null,
+    })
+  );
+
+  if (!alreadyActive) {
+    const entitlements = await getEventEffectiveEntitlements(eventId);
+    const maxUploaders = entitlements.limits.max_session_media_uploaders;
+    if (uniqueUploaders.length >= maxUploaders) {
+      throw new Error(
+        `Plan limit reached: this event allows up to ${maxUploaders} unique guest uploader(s). Current active uploaders: ${uniqueUploaders.length}.`
+      );
+    }
+  }
+}
+
 export async function listUploadersForEvent(eventId: string): Promise<SessionUploader[]> {
   const rows = await prisma.event_session_uploaders.findMany({
     where: {
@@ -119,6 +178,8 @@ export async function addSessionUploader(input: {
   if (!mobile_number && !email) throw new Error('CONTACT_REQUIRED');
   if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new Error('INVALID_EMAIL');
   if (mobile_number && normalizeMobile(mobile_number).length < 8) throw new Error('INVALID_MOBILE');
+
+  await checkEventUploaderQuota(input.eventId, { mobile_number, email });
 
   const existing = await prisma.event_session_uploaders.findFirst({
     where: {
@@ -163,6 +224,9 @@ export async function grantSessionUpload(input: {
   if (!mobile_number && !email) throw new Error('CONTACT_REQUIRED');
   if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new Error('INVALID_EMAIL');
   if (mobile_number && normalizeMobile(mobile_number).length < 8) throw new Error('INVALID_MOBILE');
+
+  await checkEventUploaderQuota(input.eventId, { mobile_number, email });
+
   const contact = contactWhere(mobile_number, email);
   const onThisEvent = {
     OR: [

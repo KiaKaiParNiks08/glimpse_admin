@@ -20,6 +20,8 @@ import {
 } from '@/app/actions/plans';
 import { useAdminAccess } from '@/components/auth/AdminAccessContext';
 import { ContentSkeleton } from '@/components/navigation/ContentSkeleton';
+import { PageHeader } from '@/components/ui/PageHeader';
+import { Plus, Edit2, Trash2, Sparkles, Check, X } from '@/components/icons';
 import styles from './plans.module.scss';
 
 const GROUP_LABELS: Record<'event' | 'media_ai' | 'mobile' | 'workspace', string> = {
@@ -42,6 +44,9 @@ export default function PurchasePlansPage() {
   const [description, setDescription] = useState('');
   const [maxEvents, setMaxEvents] = useState('');
   const [maxSubUsers, setMaxSubUsers] = useState('');
+  const [maxEventAdmins, setMaxEventAdmins] = useState('');
+  const [maxSessionMediaUploaders, setMaxSessionMediaUploaders] = useState('');
+  const [isRecommended, setIsRecommended] = useState(false);
   const [isActive, setIsActive] = useState(true);
   const [isDefault, setIsDefault] = useState(false);
   const [features, setFeatures] = useState<FeatureMap>({ ...ALL_FEATURES_ENABLED });
@@ -77,6 +82,9 @@ export default function PurchasePlansPage() {
     setDescription('');
     setMaxEvents('');
     setMaxSubUsers('');
+    setMaxEventAdmins('2');
+    setMaxSessionMediaUploaders('1');
+    setIsRecommended(false);
     setIsActive(true);
     setIsDefault(false);
     setFeatures({ ...STARTER_MEDIA_FEATURES });
@@ -90,6 +98,9 @@ export default function PurchasePlansPage() {
     setDescription(plan.description ?? '');
     setMaxEvents(plan.max_events != null ? String(plan.max_events) : '');
     setMaxSubUsers(plan.max_sub_users != null ? String(plan.max_sub_users) : '');
+    setMaxEventAdmins(plan.max_event_admins != null ? String(plan.max_event_admins) : '');
+    setMaxSessionMediaUploaders(plan.max_session_media_uploaders != null ? String(plan.max_session_media_uploaders) : '');
+    setIsRecommended(Boolean(plan.is_recommended));
     setIsActive(plan.is_active);
     setIsDefault(plan.is_default);
     setFeatures({ ...plan.features });
@@ -109,12 +120,23 @@ export default function PurchasePlansPage() {
     }
     const parsedMaxEvents = maxEvents.trim() ? Number.parseInt(maxEvents.trim(), 10) : null;
     const parsedMaxSub = maxSubUsers.trim() ? Number.parseInt(maxSubUsers.trim(), 10) : null;
+    const parsedMaxAdmins = maxEventAdmins.trim() ? Number.parseInt(maxEventAdmins.trim(), 10) : null;
+    const parsedMaxUploaders = maxSessionMediaUploaders.trim() ? Number.parseInt(maxSessionMediaUploaders.trim(), 10) : null;
+
     if (maxEvents.trim() && (!Number.isFinite(parsedMaxEvents) || (parsedMaxEvents ?? 0) < 0)) {
       setModalError('Max events must be a non-negative integer or blank for unlimited');
       return;
     }
     if (maxSubUsers.trim() && (!Number.isFinite(parsedMaxSub) || (parsedMaxSub ?? 0) < 0)) {
       setModalError('Max sub-users must be a non-negative integer or blank for unlimited');
+      return;
+    }
+    if (maxEventAdmins.trim() && (!Number.isFinite(parsedMaxAdmins) || (parsedMaxAdmins ?? 0) < 1)) {
+      setModalError('Max event admins must be at least 1 or blank for unlimited');
+      return;
+    }
+    if (maxSessionMediaUploaders.trim() && (!Number.isFinite(parsedMaxUploaders) || (parsedMaxUploaders ?? 0) < 1)) {
+      setModalError('Max session uploaders must be at least 1 or blank for unlimited');
       return;
     }
 
@@ -128,6 +150,9 @@ export default function PurchasePlansPage() {
           features,
           max_events: parsedMaxEvents,
           max_sub_users: parsedMaxSub,
+          max_event_admins: parsedMaxAdmins,
+          max_session_media_uploaders: parsedMaxUploaders,
+          is_recommended: isRecommended,
           is_active: isActive,
           is_default: isDefault,
         });
@@ -139,6 +164,9 @@ export default function PurchasePlansPage() {
           features,
           max_events: parsedMaxEvents,
           max_sub_users: parsedMaxSub,
+          max_event_admins: parsedMaxAdmins,
+          max_session_media_uploaders: parsedMaxUploaders,
+          is_recommended: isRecommended,
           is_active: isActive,
           is_default: isDefault,
         });
@@ -177,17 +205,16 @@ export default function PurchasePlansPage() {
 
   return (
     <div className={styles.page}>
-      <div className={styles.headerRow}>
-        <div className={styles.headerText}>
-          <h1>Purchase Plans &amp; Feature Bundles</h1>
-          <p>
-            Define subscription plans controlling event quotas, team size, dashboard tools, and mobile app features.
-          </p>
-        </div>
-        <button type="button" className={styles.primaryBtn} onClick={openCreate}>
-          + New Purchase Plan
-        </button>
-      </div>
+      <PageHeader
+        title="Purchase Plans & Feature Bundles"
+        subtitle="Define subscription plans controlling event quotas, team size, dashboard tools, and mobile app features."
+        breadcrumbs={[{ label: 'Admin', href: '/dashboard' }, { label: 'Purchase Plans' }]}
+        actions={
+          <button type="button" className={styles.primaryBtn} onClick={openCreate}>
+            <Plus size={16} /> New Purchase Plan
+          </button>
+        }
+      />
 
       {error && <p className={styles.errorText}>{error}</p>}
 
@@ -195,13 +222,22 @@ export default function PurchasePlansPage() {
         {plans.map((plan) => {
           const enabledCount = FEATURE_KEYS.filter((k) => plan.features[k]).length;
           return (
-            <div key={plan.id} className={styles.planCard}>
+            <div
+              key={plan.id}
+              className={`${styles.planCard} ${plan.is_recommended ? styles.recommended : ''}`}
+            >
               <div className={styles.planCardTop}>
                 <div>
                   <div className={styles.planTitle}>{plan.name}</div>
                   {plan.description && <div className={styles.planDesc}>{plan.description}</div>}
                 </div>
                 <div className={styles.badges}>
+                  {plan.is_recommended && (
+                    <span className={styles.badgeRecommended}>
+                      ★ Recommended
+                    </span>
+                  )}
+                  {plan.is_custom && <span className={styles.badgeDefault}>Custom</span>}
                   {plan.is_default && <span className={styles.badgeDefault}>Default</span>}
                   <span className={plan.is_active ? styles.badgeActive : styles.badgeInactive}>
                     {plan.is_active ? 'Active' : 'Inactive'}
@@ -212,6 +248,12 @@ export default function PurchasePlansPage() {
               <div className={styles.quotaRow}>
                 <span>
                   Events: <strong>{plan.max_events == null ? 'Unlimited' : plan.max_events}</strong>
+                </span>
+                <span>
+                  Event Admins: <strong>{plan.max_event_admins ?? 'N/A'}</strong>
+                </span>
+                <span>
+                  Session Uploaders: <strong>{plan.max_session_media_uploaders ?? 'N/A'}</strong>
                 </span>
                 <span>
                   Team sub-users: <strong>{plan.max_sub_users == null ? 'Unlimited' : plan.max_sub_users}</strong>
@@ -237,7 +279,7 @@ export default function PurchasePlansPage() {
 
               <div className={styles.cardActions}>
                 <button type="button" className={styles.secondaryBtn} onClick={() => openEdit(plan)}>
-                  Edit Plan
+                  <Edit2 size={13} /> Edit Plan
                 </button>
                 <button
                   type="button"
@@ -250,7 +292,7 @@ export default function PurchasePlansPage() {
                   }
                   onClick={() => void handleDelete(plan)}
                 >
-                  Delete
+                  <Trash2 size={13} /> Delete
                 </button>
               </div>
             </div>
@@ -305,6 +347,28 @@ export default function PurchasePlansPage() {
                     placeholder="Unlimited"
                   />
                 </div>
+                <div>
+                  <label className={styles.label}>Max event admins</label>
+                  <input
+                    className={styles.input}
+                    type="number"
+                    min={1}
+                    value={maxEventAdmins}
+                    onChange={(e) => setMaxEventAdmins(e.target.value)}
+                    placeholder="2 (Essential), 5 (Signature), 10 (Elite)"
+                  />
+                </div>
+                <div>
+                  <label className={styles.label}>Max session uploaders</label>
+                  <input
+                    className={styles.input}
+                    type="number"
+                    min={1}
+                    value={maxSessionMediaUploaders}
+                    onChange={(e) => setMaxSessionMediaUploaders(e.target.value)}
+                    placeholder="1 (Essential), 3 (Signature), 10 (Elite)"
+                  />
+                </div>
               </div>
 
               <div>
@@ -327,13 +391,21 @@ export default function PurchasePlansPage() {
                   />
                   Active
                 </label>
-                <label style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem', fontSize: '0.82rem', marginRight: 'auto' }}>
+                <label style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem', fontSize: '0.82rem' }}>
                   <input
                     type="checkbox"
                     checked={isDefault}
                     onChange={(e) => setIsDefault(e.target.checked)}
                   />
                   Default plan for new clients
+                </label>
+                <label style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem', fontSize: '0.82rem', marginRight: 'auto' }}>
+                  <input
+                    type="checkbox"
+                    checked={isRecommended}
+                    onChange={(e) => setIsRecommended(e.target.checked)}
+                  />
+                  Recommended (Featured)
                 </label>
 
                 <button

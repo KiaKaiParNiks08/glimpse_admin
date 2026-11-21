@@ -1,0 +1,93 @@
+.card {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-lg);
+  padding: 0.95rem 1.1rem;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  box-shadow: var(--shadow-card);
+  transition: all 0.15s ease;
+
+  &:hover {
+    border-color: var(--primary-accent);
+    box-shadow: var(--shadow-md);
+  }
+}
+
+.clickable {
+  cursor: pointer;
+}
+
+.topRow {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.5rem;
+}
+
+.label {
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.iconWrap {
+  width: 34px;
+  height: 34px;
+  border-radius: var(--radius-md);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.primary {
+  background: var(--primary-accent-light);
+  color: var(--primary-accent);
+}
+
+.success {
+  background: var(--success-light);
+  color: var(--success);
+}
+
+.warning {
+  background: var(--warning-light);
+  color: var(--warning);
+}
+
+.info {
+  background: var(--info-light);
+  color: var(--info);
+}
+
+.purple {
+  background: rgba(147, 51, 234, 0.12);
+  color: #9333ea;
+}
+
+:root[data-theme='dark'] .purple {
+  background: rgba(168, 85, 247, 0.2);
+  color: #c084fc;
+}
+
+.valueRow {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+}
+
+.value {
+  font-size: 1.55rem;
+  font-weight: 700;
+  color: var(--text-primary);
+  line-height: 1.1;
+  letter-spacing: -0.02em;
+}
+
+.subtitle {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}

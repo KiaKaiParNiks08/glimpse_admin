@@ -1,11 +1,34 @@
 /**
  * Upload limits and validation (no Node fs — safe for client + server).
  */
-import {
-  ALLOWED_IMAGE_TYPES,
-  ALLOWED_PDF_TYPES,
-  ALLOWED_VIDEO_TYPES,
-} from '@/lib/media-types';
+
+/** Allowed MIME types for images */
+export const ALLOWED_IMAGE_TYPES = [
+  'image/jpeg',
+  'image/png',
+  'image/gif',
+  'image/webp',
+  'image/heic',
+  'image/heif',
+] as const;
+
+/** Allowed MIME types for videos */
+export const ALLOWED_VIDEO_TYPES = [
+  'video/mp4',
+  'video/webm',
+  'video/quicktime', // mov
+  'video/x-matroska', // mkv
+  'video/3gpp', // 3gp
+] as const;
+
+/** Allowed MIME types for PDF documents (e.g. e-invite) */
+export const ALLOWED_PDF_TYPES = ['application/pdf'] as const;
+
+export const ALLOWED_MEDIA_TYPES = [
+  ...ALLOWED_IMAGE_TYPES,
+  ...ALLOWED_VIDEO_TYPES,
+  ...ALLOWED_PDF_TYPES,
+] as const;
 
 export const MIN_IMAGE_SIZE_BYTES = 1;
 export const MAX_IMAGE_SIZE_BYTES = 10 * 1024 * 1024;
@@ -29,9 +52,14 @@ const EXTENSION_MIME: Record<string, string> = {
   png: 'image/png',
   gif: 'image/gif',
   webp: 'image/webp',
+  heic: 'image/heic',
+  heif: 'image/heif',
   mp4: 'video/mp4',
-  webm: 'video/webm',
+  m4v: 'video/mp4',
   mov: 'video/quicktime',
+  webm: 'video/webm',
+  mkv: 'video/x-matroska',
+  '3gp': 'video/3gpp',
   pdf: 'application/pdf',
 };
 
@@ -43,17 +71,36 @@ export function mimeFromFilename(filename: string): string | null {
   return EXTENSION_MIME[base.slice(dot + 1)] ?? null;
 }
 
+/** Standard file extension from MIME type. */
+export function getExtensionFromMime(mime: string): string {
+  const map: Record<string, string> = {
+    'image/jpeg': '.jpg',
+    'image/png': '.png',
+    'image/gif': '.gif',
+    'image/webp': '.webp',
+    'image/heic': '.heic',
+    'image/heif': '.heif',
+    'video/mp4': '.mp4',
+    'video/webm': '.webm',
+    'video/quicktime': '.mov',
+    'video/x-matroska': '.mkv',
+    'video/3gpp': '.3gp',
+    'application/pdf': '.pdf',
+  };
+  return map[mime] ?? '.bin';
+}
+
 /**
  * Declared MIME, or the filename when the phone sends an empty or generic type.
  */
 export function resolveUploadMime(type: string, filename: string): string {
-  const mime = type.split(';')[0].trim().toLowerCase();
+  const mime = (type || '').split(';')[0].trim().toLowerCase();
   if (mime && mime !== 'application/octet-stream' && getMediaKind(mime)) return mime;
   return mimeFromFilename(filename) ?? mime;
 }
 
 export function getMediaKind(mime: string): RulesMediaKind | null {
-  const normalized = mime.split(';')[0].trim().toLowerCase();
+  const normalized = (mime || '').split(';')[0].trim().toLowerCase();
   if (ALLOWED_IMAGE_TYPES.includes(normalized as (typeof ALLOWED_IMAGE_TYPES)[number])) return 'image';
   if (ALLOWED_VIDEO_TYPES.includes(normalized as (typeof ALLOWED_VIDEO_TYPES)[number])) return 'video';
   if (ALLOWED_PDF_TYPES.includes(normalized as (typeof ALLOWED_PDF_TYPES)[number])) return 'pdf';
@@ -64,7 +111,7 @@ export function validateMediaFile(
   file: { type: string; size: number },
   kind: RulesMediaKind
 ): string | null {
-  const mimeType = file.type.split(';')[0].trim().toLowerCase();
+  const mimeType = (file.type || '').split(';')[0].trim().toLowerCase();
   const allowed =
     kind === 'image'
       ? ALLOWED_IMAGE_TYPES
@@ -105,6 +152,9 @@ export function validateProbedVideoDuration(probedSeconds: number | null): strin
   if (probedSeconds > MAX_VIDEO_DURATION_SECONDS + 0.05) {
     return `Video must be at most ${MAX_VIDEO_DURATION_SECONDS} seconds (this file is about ${Math.ceil(probedSeconds)}s).`;
   }
+  if (probedSeconds < 0.1) {
+    return 'Video duration is too short.';
+  }
   return null;
 }
 
@@ -120,8 +170,8 @@ export function validateDeclaredVideoDuration(raw: unknown): string | null {
   return null;
 }
 
-export const IMAGE_UPLOAD_LIMITS_NOTE = `JPEG, PNG, GIF, or WebP — max ${MAX_IMAGE_SIZE_MB} MB per file.`;
+export const IMAGE_UPLOAD_LIMITS_NOTE = `JPEG, PNG, GIF, WebP, HEIC, or HEIF — max ${MAX_IMAGE_SIZE_MB} MB per file.`;
 
-export const IMAGE_AND_VIDEO_UPLOAD_LIMITS_NOTE = `Images: JPEG, PNG, GIF, WebP — max ${MAX_IMAGE_SIZE_MB} MB. Videos: MP4, WebM, MOV — max ${MAX_VIDEO_SIZE_MB} MB and max ${MAX_VIDEO_DURATION_SECONDS}s length.`;
+export const IMAGE_AND_VIDEO_UPLOAD_LIMITS_NOTE = `Images: JPEG, PNG, GIF, WebP, HEIC, HEIF — max ${MAX_IMAGE_SIZE_MB} MB. Videos: MP4, WebM, MOV, MKV, 3GP — max ${MAX_VIDEO_SIZE_MB} MB and max ${MAX_VIDEO_DURATION_SECONDS}s length.`;
 
 export const PDF_UPLOAD_LIMITS_NOTE = `PDF only — max ${MAX_PDF_SIZE_MB} MB.`;

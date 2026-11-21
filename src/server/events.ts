@@ -1,6 +1,7 @@
 import type { Prisma } from '@prisma/client';
 import prisma from '@/server/prisma';
 import { emailDomainSuffix, isCorporateCategory, normalizeEmailSuffix } from '@/lib/event-categories';
+import { getEventEffectiveEntitlements } from '@/server/access';
 import type {
   ListEventsQuery,
   CreateEventInput,
@@ -1218,21 +1219,23 @@ export async function getEventAdminUserIds(eventId: string): Promise<string[]> {
 
 /**
  * Replace event admins for an event. (Delete existing, insert provided.)
+ * Enforces plan Event Admin quota (max_event_admins).
  */
 export async function setEventAdmins(
   eventId: string,
   adminUserIds: string[],
   assignedBy?: string | null
 ) {
-  await prisma.event_admins.deleteMany({ where: { event_id: eventId } });
-  if (adminUserIds.length === 0) return;
-
-  // Server-side guard: only allow assigning active tenant admins/sub-users (never guest or super_admin).
   const eventRow = await prisma.events.findUnique({
     where: { id: eventId },
-    select: { tenant_owner_id: true },
+    select: { tenant_owner_id: true, created_by: true },
   });
-  const tenantFilter: Prisma.usersWhereInput = eventRow?.tenant_owner_id
+  if (!eventRow) {
+    throw new Error('Event not found');
+  }
+
+  // Server-side guard: only allow assigning active tenant admins/sub-users (never guest or super_admin).
+  const tenantFilter: Prisma.usersWhereInput = eventRow.tenant_owner_id
     ? { OR: [{ id: eventRow.tenant_owner_id }, { tenant_owner_id: eventRow.tenant_owner_id }] }
     : {};
   const allowed = await prisma.users.findMany({
@@ -1245,6 +1248,27 @@ export async function setEventAdmins(
   });
   const allowedIds = new Set(allowed.map((u) => u.id));
   const filteredIds = adminUserIds.filter((id) => allowedIds.has(id));
+
+  // Entitlement quota check:
+  // Total unique admins = creator (initial admin) + assigned admins
+  const entitlements = await getEventEffectiveEntitlements(eventId);
+  const maxAdmins = entitlements.limits.max_event_admins;
+
+  const allAdmins = new Set<string>();
+  if (eventRow.created_by) {
+    allAdmins.add(eventRow.created_by);
+  }
+  for (const uid of filteredIds) {
+    allAdmins.add(uid);
+  }
+
+  if (allAdmins.size > maxAdmins) {
+    throw new Error(
+      `Plan limit reached: this event allows up to ${maxAdmins} Event Admins (1 initial + ${maxAdmins - 1} additional). Attempted total: ${allAdmins.size}.`
+    );
+  }
+
+  await prisma.event_admins.deleteMany({ where: { event_id: eventId } });
   if (filteredIds.length === 0) return;
 
   await prisma.event_admins.createMany({

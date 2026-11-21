@@ -1,5 +1,5 @@
 import { NextRequest } from 'next/server';
-import { forbidden, ok, serverError, unauthorized } from '@/lib/api-response';
+import { badRequest, forbidden, ok, serverError, unauthorized } from '@/lib/api-response';
 import { getAdminFromAuthorizationHeader, getUserFromAuthorizationHeader } from '@/lib/jwt';
 import prisma from '@/server/prisma';
 
@@ -18,10 +18,31 @@ export async function GET(request: NextRequest) {
     const page = Math.max(1, Number.parseInt(searchParams.get('page') || '1', 10) || 1);
     const limit = Math.min(100, Math.max(1, Number.parseInt(searchParams.get('limit') || '20', 10) || 20));
     const isReadParam = searchParams.get('is_read');
+    const queryEventId = searchParams.get('event_id')?.trim();
+    const sessionEventId = user?.event_id;
+
+    // Reject query event_id if it directly conflicts with JWT active session event
+    if (queryEventId && sessionEventId && queryEventId !== sessionEventId) {
+      return badRequest('Requested event_id conflicts with active session event');
+    }
+
+    const targetEventId = queryEventId || sessionEventId || null;
+
+    // If app user provides queryEventId without session event in JWT, ensure user joined it
+    if (user && !sessionEventId && targetEventId) {
+      const guest = await prisma.event_guests.findFirst({
+        where: { user_id: user.id, event_id: targetEventId },
+        select: { id: true },
+      });
+      if (!guest) {
+        return forbidden('You have not joined this event');
+      }
+    }
 
     const where = {
       recipient_user_id: userId,
       is_deleted: false,
+      ...(targetEventId ? { event_id: targetEventId } : {}),
       ...(isReadParam === 'true'
         ? { is_read: true }
         : isReadParam === 'false'
@@ -36,6 +57,7 @@ export async function GET(request: NextRequest) {
           recipient_user_id: userId,
           is_deleted: false,
           is_read: false,
+          ...(targetEventId ? { event_id: targetEventId } : {}),
         },
       }),
       prisma.notifications.findMany({
@@ -164,6 +186,7 @@ export async function GET(request: NextRequest) {
 
       return {
         id: row.id,
+        event_id: row.event_id,
         title: row.title,
         message: row.message,
         notification_type: row.notification_type,
@@ -175,7 +198,7 @@ export async function GET(request: NextRequest) {
         routing: {
           screen,
           type: routingType,
-          event_id: eventId,
+          event_id: row.event_id || eventId,
           event_session_id: eventSessionId,
           post_id: postId,
           comment_id: commentId,

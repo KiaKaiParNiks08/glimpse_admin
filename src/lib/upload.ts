@@ -8,8 +8,8 @@ import {
   ALLOWED_MEDIA_TYPES,
 } from '@/lib/media-types';
 import {
-  getMediaKind,
   validateMediaFile,
+  getExtensionFromMime,
 } from '@/lib/upload-rules';
 
 /** Disk path under public (project/public/uploads). Served at /uploads/... */
@@ -23,6 +23,7 @@ export {
   getMediaKind,
   resolveUploadMime,
   validateMediaFile,
+  getExtensionFromMime,
   MIN_IMAGE_SIZE_BYTES,
   MAX_IMAGE_SIZE_BYTES,
   MIN_VIDEO_SIZE_BYTES,
@@ -37,19 +38,7 @@ export {
 
 export type MediaKind = import('@/lib/upload-rules').RulesMediaKind;
 
-function getExtensionFromMime(mime: string): string {
-  const map: Record<string, string> = {
-    'image/jpeg': '.jpg',
-    'image/png': '.png',
-    'image/gif': '.gif',
-    'image/webp': '.webp',
-    'video/mp4': '.mp4',
-    'video/webm': '.webm',
-    'video/quicktime': '.mov',
-    'application/pdf': '.pdf',
-  };
-  return map[mime] ?? '.bin';
-}
+// getExtensionFromMime re-exported from upload-rules
 
 function getExtensionFromFilename(filename: string): string {
   const ext = path.extname(filename).toLowerCase();

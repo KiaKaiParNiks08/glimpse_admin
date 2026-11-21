@@ -1,6 +1,6 @@
 import sharp from 'sharp';
 
-export type RekognitionImageKind = 'jpeg' | 'png' | 'webp' | 'gif' | 'unknown';
+export type RekognitionImageKind = 'jpeg' | 'png' | 'webp' | 'gif' | 'heic' | 'unknown';
 
 /** Rekognition DetectFaces/CompareFaces Image.Bytes accepts JPEG and PNG only. */
 export function sniffImageKind(bytes: Buffer): RekognitionImageKind {
@@ -22,6 +22,19 @@ export function sniffImageKind(bytes: Buffer): RekognitionImageKind {
     bytes.subarray(8, 12).toString('ascii') === 'WEBP'
   ) {
     return 'webp';
+  }
+  if (bytes.length >= 12 && bytes.subarray(4, 8).toString('ascii') === 'ftyp') {
+    const brand = bytes.subarray(8, 12).toString('ascii').toLowerCase();
+    if (
+      brand === 'heic' ||
+      brand === 'heix' ||
+      brand === 'hevc' ||
+      brand === 'hevx' ||
+      brand === 'mif1' ||
+      brand === 'msf1'
+    ) {
+      return 'heic';
+    }
   }
   return 'unknown';
 }

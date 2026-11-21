@@ -85,6 +85,8 @@ import {
   buildAccessibleEventsWhere,
   canContextAccessEvent,
   getEventEffectiveFeatures,
+  getEventEffectiveEntitlements,
+  type EventEffectiveEntitlements,
   type AdminAccessContext,
 } from '@/server/access';
 import type { FeatureMap, PermissionKey } from '@/lib/rbac';
@@ -292,6 +294,24 @@ export async function getEventEffectiveFeaturesAction(
   } catch (e) {
     console.error(e);
     return { ok: false, error: 'Unable to resolve event features' };
+  }
+}
+
+export async function getEventEntitlementsAction(
+  eventId: string
+): Promise<{ ok: true; data: EventEffectiveEntitlements } | { ok: false; error: string }> {
+  const guard = await requireEventPerm(
+    eventId,
+    ['events.view', 'events.edit', 'media.view', 'sessions.view', 'team.view'],
+    'Event not found'
+  );
+  if (!guard.ok) return { ok: false, error: guard.error };
+  try {
+    const data = await getEventEffectiveEntitlements(eventId);
+    return { ok: true, data };
+  } catch (e) {
+    console.error(e);
+    return { ok: false, error: 'Unable to resolve event entitlements' };
   }
 }
 
@@ -1192,8 +1212,8 @@ export async function setEventAdminsAction(
   try {
     await setEventAdmins(eventId, parsed.data.admin_user_ids, guard.ctx.id);
     return { ok: true };
-  } catch (e) {
+  } catch (e: any) {
     console.error(e);
-    return { ok: false, error: 'Unable to save event admins' };
+    return { ok: false, error: e?.message || 'Unable to save event admins' };
   }
 }

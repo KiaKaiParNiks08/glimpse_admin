@@ -11,7 +11,7 @@ export function aspectRatio(width: number, height: number): number | null {
 
 /**
  * Read display width and height from image or video bytes.
- * JPEG EXIF orientation and MP4/MOV track rotation are applied.
+ * JPEG EXIF orientation, HEIC spatial extents, and MP4/MOV track rotation are applied.
  * Returns null when the file has no readable size. Does not throw.
  */
 export function readMediaDimensions(bytes: Buffer, kind: 'image' | 'video'): PixelSize | null {
@@ -35,6 +35,34 @@ function readImageSize(bytes: Buffer): PixelSize | null {
     return readWebpSize(bytes);
   }
   if (bytes.length >= 4 && bytes[0] === 0xff && bytes[1] === 0xd8) return readJpegSize(bytes);
+  return readHeicSize(bytes);
+}
+
+function readHeicSize(bytes: Buffer): PixelSize | null {
+  if (bytes.length < 16) return null;
+  if (bytes.subarray(4, 8).toString('ascii') !== 'ftyp') return null;
+  const brand = bytes.subarray(8, 12).toString('ascii').toLowerCase();
+  const validBrands = ['heic', 'heix', 'hevc', 'hevx', 'mif1', 'msf1'];
+  if (!validBrands.includes(brand)) return null;
+
+  // Search for 'ispe' box in bytes (image spatial extents property)
+  const searchLimit = Math.min(bytes.length - 12, 65536);
+  for (let i = 12; i <= searchLimit; i++) {
+    if (
+      bytes[i] === 0x69 && // 'i'
+      bytes[i + 1] === 0x73 && // 's'
+      bytes[i + 2] === 0x70 && // 'p'
+      bytes[i + 3] === 0x65    // 'e'
+    ) {
+      if (i + 16 <= bytes.length) {
+        const width = bytes.readUInt32BE(i + 8);
+        const height = bytes.readUInt32BE(i + 12);
+        if (width > 0 && width <= MAX_PIXELS && height > 0 && height <= MAX_PIXELS) {
+          return { width, height };
+        }
+      }
+    }
+  }
   return null;
 }
 

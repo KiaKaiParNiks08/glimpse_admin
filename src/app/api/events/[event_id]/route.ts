@@ -25,7 +25,7 @@ import { getFavoritedItemIds } from '@/server/favorites';
 import { getCurrentHappeningByEventId } from '@/server/current-happening';
 import { sessionIdsViewerCanUpload } from '@/server/session-uploaders';
 import { getEventTeam } from '@/server/event-team';
-import { getEventEffectiveFeatures } from '@/server/access';
+import { getEventEffectiveEntitlements } from '@/server/access';
 
 /**
  * GET /api/events/[event_id]
@@ -82,13 +82,14 @@ export async function GET(
     const previewPhase = getAdminFromAuthorizationHeader(request) ? query.phase : undefined;
     const current = previewPhase ?? actualPhase;
 
-    const [days, mediaRows, team, enabledFeatures, rawHappening] = await Promise.all([
+    const [days, mediaRows, team, entitlements, rawHappening] = await Promise.all([
       getEventDaysByEventId(event.id),
       getEventDayMediaByEventId(event.id),
       getEventTeam(event.id),
-      getEventEffectiveFeatures(event.id),
+      getEventEffectiveEntitlements(event.id),
       getCurrentHappeningByEventId(event.id),
     ]);
+    const enabledFeatures = entitlements.enabled_features;
 
     const sessionIds = days.flatMap((day) => day.event_sessions.map((s) => s.id));
     const admin = getAdminFromAuthorizationHeader(request);
@@ -267,6 +268,8 @@ export async function GET(
         event_sessions,
         can_upload_media,
         enabled_features: enabledFeatures,
+        limits: entitlements.limits,
+        plan: entitlements.plan,
         ...(deviceStatus !== null && { needs_fcm_token_sync: !deviceStatus.has_fcm_token }),
         ...(watermark && { watermark }),
         media_sections,

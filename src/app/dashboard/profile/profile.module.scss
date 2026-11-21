@@ -14,21 +14,21 @@
 
 .title {
   margin: 0;
-  color: #0f172a;
+  color: var(--text-primary);
   font-size: 1.6rem;
 }
 
 .subtitle {
   margin: 0.25rem 0 0;
-  color: #64748b;
+  color: var(--text-secondary);
   font-size: 0.9rem;
 }
 
 .card {
-  border: 1px solid #e2e8f0;
+  border: 1px solid var(--border-color);
   border-radius: 0.85rem;
   padding: 1rem;
-  background: #ffffff;
+  background: var(--bg-surface);
 }
 
 .topSection {
@@ -36,7 +36,7 @@
   align-items: center;
   gap: 1rem;
   padding-bottom: 1rem;
-  border-bottom: 1px solid #e2e8f0;
+  border-bottom: 1px solid var(--border-color);
   margin-bottom: 1rem;
 }
 
@@ -45,7 +45,7 @@
   height: 84px;
   border-radius: 999px;
   overflow: hidden;
-  border: 2px solid #e2e8f0;
+  border: 2px solid var(--border-color);
   flex-shrink: 0;
 }
 
@@ -62,7 +62,7 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  color: #0f172a;
+  color: var(--text-primary);
   background: linear-gradient(135deg, #2563eb, #4f46e5);
   font-weight: 700;
   font-size: 1.1rem;
@@ -70,13 +70,13 @@
 
 .topMeta h2 {
   margin: 0;
-  color: #0f172a;
+  color: var(--text-primary);
   font-size: 1.1rem;
 }
 
 .topMeta p {
   margin: 0.2rem 0 0;
-  color: #64748b;
+  color: var(--text-secondary);
 }
 
 .roleBadge {
@@ -86,7 +86,7 @@
   font-size: 0.75rem;
   border-radius: 999px;
   background: rgba(15, 23, 42, 0.08);
-  color: #0f172a;
+  color: var(--text-primary);
   text-transform: capitalize;
 }
 
@@ -103,16 +103,16 @@
 }
 
 .field label {
-  color: #334155;
+  color: var(--text-primary);
   font-size: 0.82rem;
 }
 
 .input {
   width: 100%;
-  border: 1px solid #e2e8f0;
+  border: 1px solid var(--border-color);
   border-radius: 0.55rem;
-  background: #ffffff;
-  color: #0f172a;
+  background: var(--bg-surface);
+  color: var(--text-primary);
   font-size: 0.9rem;
   padding: 0.56rem 0.7rem;
 }
@@ -120,8 +120,8 @@
 .value {
   border: 1px solid transparent;
   border-radius: 0.55rem;
-  background: #f8fafc;
-  color: #0f172a;
+  background: var(--bg-surface-secondary);
+  color: var(--text-primary);
   font-size: 0.9rem;
   padding: 0.56rem 0.7rem;
   min-height: 2.3rem;
@@ -132,7 +132,7 @@
 .imageSection {
   margin-top: 1rem;
   padding-top: 1rem;
-  border-top: 1px solid #e2e8f0;
+  border-top: 1px solid var(--border-color);
 }
 
 .actions {
@@ -146,12 +146,12 @@
 .passwordSection {
   margin-top: 1rem;
   padding-top: 1rem;
-  border-top: 1px solid #e2e8f0;
+  border-top: 1px solid var(--border-color);
 }
 
 .passwordSection h3 {
   margin: 0 0 0.75rem;
-  color: #0f172a;
+  color: var(--text-primary);
   font-size: 1rem;
 }
 
@@ -167,12 +167,12 @@
   border: none;
   color: #ffffff;
   font-weight: 600;
-  background: #0f172a;
+  background: var(--text-primary);
 }
 
 .secondaryBtn {
-  border: 1px solid #e2e8f0;
-  color: #0f172a;
+  border: 1px solid var(--border-color);
+  color: var(--text-primary);
   background: transparent;
 }
 
@@ -187,7 +187,7 @@
 }
 
 .loading {
-  color: #64748b;
+  color: var(--text-secondary);
 }
 
 @media (max-width: 768px) {

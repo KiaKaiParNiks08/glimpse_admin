@@ -366,15 +366,19 @@ export async function sendAdminPushNotificationAction(input: {
 
     // 1. Bulk record in-app notifications tied to each user's event
     await prisma.notifications.createMany({
-      data: userIds.map((userId) => ({
-        recipient_user_id: userId,
-        sender_user_id: session.id,
-        notification_type: 'event_update',
-        reference_id: userEventMap.get(userId) || primaryEventId,
-        reference_type: 'event',
-        title,
-        message: body,
-      })),
+      data: userIds.map((userId) => {
+        const targetEventId = userEventMap.get(userId) || primaryEventId;
+        return {
+          event_id: targetEventId,
+          recipient_user_id: userId,
+          sender_user_id: session.id,
+          notification_type: 'event_update',
+          reference_id: targetEventId,
+          reference_type: 'event',
+          title,
+          message: body,
+        };
+      }),
     });
 
     // 2. Fetch active FCM device tokens for all selected users
@@ -431,6 +435,11 @@ export async function sendAdminPushNotificationAction(input: {
           screen: 'notifications',
           type: 'announcement',
           event_id: evtId,
+          routing: JSON.stringify({
+            screen: 'notifications',
+            event_id: evtId,
+            type: 'announcement',
+          }),
           ...(fcmImageUrl ? { image: fcmImageUrl, image_url: fcmImageUrl } : {}),
         },
       });

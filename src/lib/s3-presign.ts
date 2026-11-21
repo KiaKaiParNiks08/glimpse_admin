@@ -15,9 +15,13 @@ const MIME_EXT: Record<string, string> = {
   'image/png': '.png',
   'image/gif': '.gif',
   'image/webp': '.webp',
+  'image/heic': '.heic',
+  'image/heif': '.heif',
   'video/mp4': '.mp4',
   'video/webm': '.webm',
   'video/quicktime': '.mov',
+  'video/x-matroska': '.mkv',
+  'video/3gpp': '.3gp',
   'application/pdf': '.pdf',
 };
 
@@ -162,7 +166,7 @@ function validateContentType(contentType: string): string {
   const normalized = contentType.split(';')[0].trim().toLowerCase();
   if (!(ALLOWED_TYPES as readonly string[]).includes(normalized)) {
     throw new Error(
-      `Invalid content type: ${contentType}. Allowed: images (JPEG, PNG, GIF, WebP), videos (MP4, WebM, MOV), PDF.`
+      `Unsupported media type: ${contentType}. Allowed: images (JPEG, PNG, GIF, WebP, HEIC, HEIF), videos (MP4, WebM, MOV, MKV, 3GP), PDF.`
     );
   }
   return MIME_EXT[normalized] ?? '.bin';

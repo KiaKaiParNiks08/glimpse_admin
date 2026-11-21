@@ -38,7 +38,7 @@ export function partitionMediaFiles(files: File[]): {
     if (kind !== 'image' && kind !== 'video') {
       excluded.push({
         name: baseName,
-        reason: 'Unsupported file type (only images and videos allowed)',
+        reason: 'Unsupported file type (only images: JPEG, PNG, GIF, WebP, HEIC, HEIF and videos: MP4, WebM, MOV, MKV, 3GP allowed)',
       });
       continue;
     }

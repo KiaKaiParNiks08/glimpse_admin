@@ -9,6 +9,7 @@ import {
   modulesFromAccess,
   PERMISSION_KEYS,
   PERMISSION_REQUIRED_FEATURE,
+  STANDARD_PLAN_LIMITS,
   type AdminModule,
   type AdminTier,
   type FeatureKey,
@@ -289,48 +290,183 @@ export async function canContextAccessEvent(
   return false;
 }
 
+export type EventPlanLimits = {
+  max_event_admins: number;
+  max_session_media_uploaders: number;
+};
+
+export type EventEffectiveEntitlements = {
+  event_id: string;
+  plan: {
+    id: string | null;
+    name: string | null;
+    slug: string | null;
+    is_custom: boolean;
+    type: 'standard' | 'custom' | 'none';
+  };
+  enabled_features: FeatureMap;
+  limits: EventPlanLimits;
+  hasFeature: (feature: FeatureKey) => boolean;
+};
+
 /**
- * Resolve effective plan features for any event (used by Mobile APIs & Event pages).
- * Priority: event's tenant_owner plan -> event creator's tenant_owner/plan -> all enabled.
+ * Resolve effective plan entitlements for any event (used by Mobile APIs, Admin pages, Quota guards).
+ * Priority:
+ *   1. Super Admin custom event configuration (`events.custom_plan_id`)
+ *   2. Tenant-owner purchase plan (`users.purchase_plan_id` + feature overrides)
+ *   3. Platform fallback (all features enabled)
  */
-export async function getEventEffectiveFeatures(eventId: string): Promise<FeatureMap> {
+export async function getEventEffectiveEntitlements(
+  eventId: string
+): Promise<EventEffectiveEntitlements> {
   await ensureRbacBootstrapped();
+  const defaultLimits: EventPlanLimits = {
+    max_event_admins: 10,
+    max_session_media_uploaders: 10,
+  };
+
   const event = await prisma.events.findUnique({
     where: { id: eventId },
     select: {
-      tenant_owner_id: true,
-      created_by: true,
-    },
-  });
-  if (!event) return { ...ALL_FEATURES_ENABLED };
-
-  const targetOwnerId = event.tenant_owner_id ?? event.created_by;
-  if (!targetOwnerId) return { ...ALL_FEATURES_ENABLED };
-
-  const owner = await prisma.users.findUnique({
-    where: { id: targetOwnerId },
-    select: {
       id: true,
       tenant_owner_id: true,
-      feature_overrides: true,
-      purchase_plan: { select: { features: true } },
-      tenant_owner: {
+      created_by: true,
+      custom_plan_id: true,
+      custom_plan: {
         select: {
-          feature_overrides: true,
-          purchase_plan: { select: { features: true } },
+          id: true,
+          name: true,
+          slug: true,
+          features: true,
+          max_event_admins: true,
+          max_session_media_uploaders: true,
+          is_custom: true,
         },
       },
-      roles: { select: { name: true, scope: true } },
     },
   });
-  if (!owner) return { ...ALL_FEATURES_ENABLED };
-  if (owner.roles.name === 'super_admin') return { ...ALL_FEATURES_ENABLED };
 
-  const planHolder = owner.tenant_owner ?? owner;
-  if (!planHolder.purchase_plan && !planHolder.feature_overrides) {
-    return { ...ALL_FEATURES_ENABLED };
+  if (!event) {
+    return {
+      event_id: eventId,
+      plan: { id: null, name: null, slug: null, is_custom: false, type: 'none' },
+      enabled_features: { ...ALL_FEATURES_ENABLED },
+      limits: defaultLimits,
+      hasFeature: () => true,
+    };
   }
-  return computeEffectiveFeatures(planHolder.purchase_plan?.features, planHolder.feature_overrides);
+
+  // Priority 1: Super Admin custom event configuration
+  if (event.custom_plan) {
+    const cp = event.custom_plan;
+    const features = computeEffectiveFeatures(cp.features, null);
+    const limits: EventPlanLimits = {
+      max_event_admins: cp.max_event_admins ?? defaultLimits.max_event_admins,
+      max_session_media_uploaders:
+        cp.max_session_media_uploaders ?? defaultLimits.max_session_media_uploaders,
+    };
+    return {
+      event_id: event.id,
+      plan: {
+        id: cp.id,
+        name: cp.name,
+        slug: cp.slug,
+        is_custom: true,
+        type: 'custom',
+      },
+      enabled_features: features,
+      limits,
+      hasFeature: (k: FeatureKey) => Boolean(features[k]),
+    };
+  }
+
+  // Priority 2: Tenant-owner purchase plan + feature overrides
+  const targetOwnerId = event.tenant_owner_id ?? event.created_by;
+  if (targetOwnerId) {
+    const owner = await prisma.users.findUnique({
+      where: { id: targetOwnerId },
+      select: {
+        id: true,
+        tenant_owner_id: true,
+        feature_overrides: true,
+        purchase_plan: {
+          select: {
+            id: true,
+            name: true,
+            slug: true,
+            features: true,
+            max_event_admins: true,
+            max_session_media_uploaders: true,
+            is_custom: true,
+          },
+        },
+        tenant_owner: {
+          select: {
+            feature_overrides: true,
+            purchase_plan: {
+              select: {
+                id: true,
+                name: true,
+                slug: true,
+                features: true,
+                max_event_admins: true,
+                max_session_media_uploaders: true,
+                is_custom: true,
+              },
+            },
+          },
+        },
+        roles: { select: { name: true, scope: true } },
+      },
+    });
+
+    if (owner && owner.roles.name !== 'super_admin') {
+      const planHolder = owner.tenant_owner ?? owner;
+      const plan = planHolder.purchase_plan;
+      if (plan || planHolder.feature_overrides) {
+        const features = computeEffectiveFeatures(plan?.features, planHolder.feature_overrides);
+        const standardLimits = plan?.slug ? STANDARD_PLAN_LIMITS[plan.slug] : null;
+        const limits: EventPlanLimits = {
+          max_event_admins:
+            plan?.max_event_admins ?? standardLimits?.max_event_admins ?? defaultLimits.max_event_admins,
+          max_session_media_uploaders:
+            plan?.max_session_media_uploaders ??
+            standardLimits?.max_session_media_uploaders ??
+            defaultLimits.max_session_media_uploaders,
+        };
+        return {
+          event_id: event.id,
+          plan: {
+            id: plan?.id ?? null,
+            name: plan?.name ?? null,
+            slug: plan?.slug ?? null,
+            is_custom: plan?.is_custom ?? false,
+            type: plan?.is_custom ? 'custom' : 'standard',
+          },
+          enabled_features: features,
+          limits,
+          hasFeature: (k: FeatureKey) => Boolean(features[k]),
+        };
+      }
+    }
+  }
+
+  // Priority 3: Platform fallback (all features enabled)
+  return {
+    event_id: event.id,
+    plan: { id: null, name: null, slug: null, is_custom: false, type: 'none' },
+    enabled_features: { ...ALL_FEATURES_ENABLED },
+    limits: defaultLimits,
+    hasFeature: () => true,
+  };
+}
+
+/**
+ * Resolve effective plan features for any event (used by Mobile APIs & Event pages).
+ */
+export async function getEventEffectiveFeatures(eventId: string): Promise<FeatureMap> {
+  const entitlements = await getEventEffectiveEntitlements(eventId);
+  return entitlements.enabled_features;
 }
 
 /** Serialize context safely to client components (no Set methods). */

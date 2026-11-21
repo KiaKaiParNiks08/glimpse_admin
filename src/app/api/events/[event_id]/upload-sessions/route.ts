@@ -1,8 +1,9 @@
 import { z } from 'zod';
-import { badRequest, forbidden, notFound, ok, serverError } from '@/lib/api-response';
+import { badRequest, forbidden, notFound, ok, serverError, unsupportedMediaType } from '@/lib/api-response';
 import { getAdminFromAuthorizationHeader, getUserFromAuthorizationHeader } from '@/lib/jwt';
 import { uuidSchema } from '@/lib/validations/common';
 import { parseParams } from '@/lib/validations';
+import { getMediaKind, resolveUploadMime, validateMediaFile } from '@/lib/upload';
 import { createUploadSession } from '@/server/upload-sessions';
 import { getEventEffectiveFeatures } from '@/server/access';
 import prisma from '@/server/prisma';
@@ -57,6 +58,28 @@ export async function POST(
       return badRequest('Invalid upload session parameters', parsed.error.flatten().fieldErrors);
     }
 
+    const resolvedMime = resolveUploadMime(parsed.data.content_type, parsed.data.filename);
+    const kind = getMediaKind(resolvedMime);
+    if (!kind || kind === 'pdf') {
+      return unsupportedMediaType(
+        `Unsupported media type: ${parsed.data.content_type}. Allowed: images (JPEG, PNG, GIF, WebP, HEIC, HEIF) and videos (MP4, WebM, MOV, MKV, 3GP).`
+      );
+    }
+
+    if (
+      (parsed.data.purpose === 'session_thumbnail' || parsed.data.purpose === 'feed_thumbnail') &&
+      kind !== 'image'
+    ) {
+      return unsupportedMediaType(
+        `Unsupported thumbnail media type: ${parsed.data.content_type}. Thumbnails must be an image (JPEG, PNG, GIF, WebP, HEIC, HEIF).`
+      );
+    }
+
+    const sizeError = validateMediaFile({ type: resolvedMime, size: parsed.data.file_size }, kind);
+    if (sizeError) {
+      return badRequest(sizeError);
+    }
+
     const features = await getEventEffectiveFeatures(params.event_id);
     if (
       (parsed.data.purpose === 'session_media' || parsed.data.purpose === 'session_thumbnail') &&
@@ -76,7 +99,7 @@ export async function POST(
       eventId: params.event_id,
       filename: parsed.data.filename,
       fileSizeBytes: parsed.data.file_size,
-      contentType: parsed.data.content_type,
+      contentType: resolvedMime,
       purpose: parsed.data.purpose,
       meta: parsed.data.meta,
     });

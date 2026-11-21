@@ -6,7 +6,7 @@ import {
   getStoredObjectUrl,
   putObjectFromBuffer,
 } from '@/lib/s3-presign';
-import { getMediaKind, validateMediaFile } from '@/lib/upload';
+import { getMediaKind, resolveUploadMime, validateMediaFile } from '@/lib/upload';
 import { validateDeclaredVideoDuration } from '@/lib/upload-rules';
 
 const ALLOWED_PREFIXES = [
@@ -45,12 +45,13 @@ export async function uploadFileServerAction(
     return { ok: false, error: 'No file provided or invalid file' };
   }
 
-  const mimeType = (file.type || '').split(';')[0].trim().toLowerCase() || 'application/octet-stream';
+  const fileName = 'name' in file && typeof file.name === 'string' ? file.name : '';
+  const mimeType = resolveUploadMime(file.type || '', fileName) || 'application/octet-stream';
   const kind = getMediaKind(mimeType);
   if (!kind) {
     return {
       ok: false,
-      error: 'Invalid file type. Use image (JPEG, PNG, GIF, WebP), video (MP4, WebM, MOV), or PDF.',
+      error: `Unsupported media type: ${file.type || fileName || 'unknown'}. Use image (JPEG, PNG, GIF, WebP, HEIC, HEIF), video (MP4, WebM, MOV, MKV, 3GP), or PDF.`,
     };
   }
 
@@ -86,6 +87,7 @@ export async function uploadFileServerAction(
     const message = e instanceof Error ? e.message : 'Upload failed';
     console.error('[uploadFileServerAction]', e);
     if (
+      message.startsWith('Unsupported media type') ||
       message.startsWith('Invalid content type') ||
       message.startsWith('AWS_') ||
       message.startsWith('S3_') ||
@@ -109,10 +111,14 @@ export async function uploadNotificationImageAction(
     return { ok: false, error: 'No image file provided' };
   }
 
-  const mimeType = (file.type || '').split(';')[0].trim().toLowerCase() || 'application/octet-stream';
+  const fileName = 'name' in file && typeof file.name === 'string' ? file.name : '';
+  const mimeType = resolveUploadMime(file.type || '', fileName) || 'application/octet-stream';
   const kind = getMediaKind(mimeType);
   if (kind !== 'image') {
-    return { ok: false, error: 'Invalid file type. Use an image (JPEG, PNG, GIF, WebP).' };
+    return {
+      ok: false,
+      error: `Unsupported media type: ${file.type || fileName || 'unknown'}. Use an image (JPEG, PNG, GIF, WebP, HEIC, HEIF).`,
+    };
   }
 
   const validationError = validateMediaFile({ type: mimeType, size: file.size }, 'image');
@@ -126,7 +132,7 @@ export async function uploadNotificationImageAction(
     let outMime = mimeType;
 
     // Android FCM recommends <= 1MB; iOS UNNotificationAttachment requires JPEG/PNG/GIF (no WebP).
-    if (mimeType === 'image/webp' || rawBuffer.length > 800 * 1024) {
+    if (mimeType === 'image/webp' || mimeType === 'image/heic' || mimeType === 'image/heif' || rawBuffer.length > 800 * 1024) {
       try {
         outBuffer = await sharp(rawBuffer)
           .rotate()
