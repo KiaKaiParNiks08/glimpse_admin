@@ -3,7 +3,7 @@ import { badRequest, forbidden, notFound, ok, serverError, unauthorized } from '
 import { getAdminFromAuthorizationHeader, getUserFromAuthorizationHeader } from '@/lib/jwt';
 import prisma from '@/server/prisma';
 
-export async function handleMarkRead(request: NextRequest) {
+async function handleMarkRead(request: NextRequest) {
   try {
     const user = getUserFromAuthorizationHeader(request);
     const admin = getAdminFromAuthorizationHeader(request);
