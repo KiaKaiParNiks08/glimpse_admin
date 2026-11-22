@@ -11,6 +11,7 @@ import {
   type PostModerationAuditItem,
 } from '@/app/actions/feed-moderation';
 import styles from './feed.module.scss';
+import { resolveMediaUrl } from '@/lib/media-url';
 
 const MODERATION_REASONS = [
   'Inappropriate Content',
@@ -172,7 +173,7 @@ export default function EventFeedModerationPage({
                   <div className={styles.authorInfo}>
                     {post.author.avatar_url ? (
                       <img
-                        src={post.author.avatar_url}
+                        src={resolveMediaUrl(post.author.avatar_url) ?? post.author.avatar_url}
                         alt={post.author.full_name}
                         className={styles.avatar}
                       />
@@ -197,13 +198,13 @@ export default function EventFeedModerationPage({
                   <div className={styles.mediaContainer}>
                     {firstMedia.media_type === 'video' ? (
                       <video
-                        src={firstMedia.media_url}
+                        src={resolveMediaUrl(firstMedia.media_url) ?? firstMedia.media_url}
                         controls
                         style={{ width: '100%', height: '100%', objectFit: 'contain' }}
                       />
                     ) : (
                       <img
-                        src={firstMedia.media_url}
+                        src={resolveMediaUrl(firstMedia.media_url) ?? firstMedia.media_url}
                         alt={post.caption || 'Media'}
                         className={styles.mediaImage}
                       />

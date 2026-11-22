@@ -1,13 +1,13 @@
 :root,
 :root[data-theme='light'] {
-  --bg-app: #F5F7FB;
+  --bg-app: #F4F7FC;
   --bg-surface: #FFFFFF;
   --bg-surface-secondary: #F8FAFC;
   --bg-surface-hover: #F1F5F9;
 
   --bg-sidebar: #17243A;
-  --bg-sidebar-hover: rgba(255, 255, 255, 0.06);
-  --bg-sidebar-active: #20314E;
+  --bg-sidebar-hover: rgba(255, 255, 255, 0.08);
+  --bg-sidebar-active: linear-gradient(135deg, #7C3AED 0%, #6366F1 100%);
   --text-sidebar: #94A3B8;
   --text-sidebar-active: #FFFFFF;
   --border-sidebar: rgba(255, 255, 255, 0.08);
@@ -19,10 +19,11 @@
   --border-color: #E2E8F0;
   --border-subtle: #F1F5F9;
 
-  --primary-accent: #4F46E5;
-  --primary-accent-hover: #4338CA;
+  --primary-accent: #6545E8;
+  --primary-accent-hover: #5835E5;
   --primary-accent-light: #EEF2FF;
   --primary-accent-text: #FFFFFF;
+  --primary-gradient: linear-gradient(135deg, #7C3AED 0%, #6366F1 100%);
 
   --success: #16A36A;
   --success-light: #DCFCE7;
@@ -58,8 +59,8 @@
   --bg-surface-hover: #23334E;
 
   --bg-sidebar: #111C30;
-  --bg-sidebar-hover: rgba(255, 255, 255, 0.05);
-  --bg-sidebar-active: #1C2D4A;
+  --bg-sidebar-hover: rgba(255, 255, 255, 0.06);
+  --bg-sidebar-active: linear-gradient(135deg, #6366F1 0%, #4F46E5 100%);
   --text-sidebar: #94A3B8;
   --text-sidebar-active: #FFFFFF;
   --border-sidebar: rgba(255, 255, 255, 0.06);
@@ -75,6 +76,7 @@
   --primary-accent-hover: #6366F1;
   --primary-accent-light: rgba(99, 102, 241, 0.15);
   --primary-accent-text: #FFFFFF;
+  --primary-gradient: linear-gradient(135deg, #6366F1 0%, #4F46E5 100%);
 
   --success: #34D399;
   --success-light: rgba(52, 211, 153, 0.15);

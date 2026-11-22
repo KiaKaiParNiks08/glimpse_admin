@@ -10,8 +10,10 @@ import { useRouteProgress } from '@/components/navigation/NavigationProvider';
 import { useAdminAccess } from '@/components/auth/AdminAccessContext';
 import { PageHeader } from '@/components/ui/PageHeader';
 import { SearchInput } from '@/components/ui/SearchInput';
+import { ImageThumbnail } from '@/components/ui/ImageThumbnail';
 import {
   Plus,
+  Calendar,
   Edit2,
   Sparkles,
   QrCode,
@@ -272,7 +274,19 @@ export default function DashboardEventsPage() {
         {events.map((ev) => (
           <tr key={ev.id} className={styles.rowDivider}>
             <td className={styles.td}>
-              <strong>{ev.title}</strong>
+              <div className={styles.eventTitleCell}>
+                <ImageThumbnail
+                  src={ev.cover_image}
+                  alt={ev.title}
+                  size={48}
+                  borderRadius={8}
+                  icon={<Calendar size={20} />}
+                />
+                <div className={styles.eventTitleInfo}>
+                  <strong className={styles.eventTitleText}>{ev.title}</strong>
+                  {ev.slug ? <span className={styles.eventTitleSlug}>/{ev.slug}</span> : null}
+                </div>
+              </div>
             </td>
             <td className={styles.td}>
               <code>{ev.event_code}</code>

@@ -1,0 +1,120 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 280" width="100%" height="100%" preserveAspectRatio="xMidYMid slice">
+  <defs>
+    <!-- Sky twilight and sunset gradient -->
+    <linearGradient id="skyGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#1e1b4b" />
+      <stop offset="25%" stop-color="#4c1d95" />
+      <stop offset="50%" stop-color="#831843" />
+      <stop offset="70%" stop-color="#db2777" />
+      <stop offset="85%" stop-color="#f43f5e" />
+      <stop offset="95%" stop-color="#fb923c" />
+      <stop offset="100%" stop-color="#fbbf24" />
+    </linearGradient>
+
+    <!-- Sun glow radial gradient -->
+    <radialGradient id="sunGlow" cx="68%" cy="65%" r="45%">
+      <stop offset="0%" stop-color="#fff176" stop-opacity="0.9" />
+      <stop offset="20%" stop-color="#f472b6" stop-opacity="0.6" />
+      <stop offset="55%" stop-color="#a855f7" stop-opacity="0.3" />
+      <stop offset="100%" stop-color="#4c1d95" stop-opacity="0" />
+    </radialGradient>
+
+    <!-- Festoon event lights glow -->
+    <radialGradient id="lightOrb" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.95" />
+      <stop offset="40%" stop-color="#fde047" stop-opacity="0.7" />
+      <stop offset="100%" stop-color="#f59e0b" stop-opacity="0" />
+    </radialGradient>
+
+    <!-- Deep bottom navy blend to sidebar background -->
+    <linearGradient id="bottomNavyBlend" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#17243A" stop-opacity="0" />
+      <stop offset="35%" stop-color="#17243A" stop-opacity="0.35" />
+      <stop offset="70%" stop-color="#17243A" stop-opacity="0.85" />
+      <stop offset="100%" stop-color="#17243A" stop-opacity="1" />
+    </linearGradient>
+
+    <!-- Top dark fade so it fades out toward menu items -->
+    <linearGradient id="topFade" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#17243A" stop-opacity="0.9" />
+      <stop offset="25%" stop-color="#17243A" stop-opacity="0.35" />
+      <stop offset="50%" stop-color="#17243A" stop-opacity="0" />
+    </linearGradient>
+  </defs>
+
+  <!-- Sky background -->
+  <rect width="320" height="280" fill="url(#skyGrad)" />
+
+  <!-- Sun glow behind mountains/horizon -->
+  <circle cx="220" cy="180" r="110" fill="url(#sunGlow)" />
+
+  <!-- Bokeh and event sparkles in the air -->
+  <circle cx="240" cy="140" r="6" fill="#ffffff" opacity="0.6" />
+  <circle cx="200" cy="110" r="10" fill="#f472b6" opacity="0.35" />
+  <circle cx="270" cy="90" r="16" fill="#fbbf24" opacity="0.2" />
+  <circle cx="160" cy="80" r="12" fill="#c084fc" opacity="0.25" />
+  <circle cx="290" cy="150" r="8" fill="#fda4af" opacity="0.3" />
+  <circle cx="120" cy="130" r="7" fill="#fef08a" opacity="0.3" />
+
+  <!-- String of event festoon fairy lights -->
+  <path d="M-10,40 Q80,75 170,55 T330,45" fill="none" stroke="rgba(255,255,255,0.25)" stroke-width="1" />
+  <circle cx="40" cy="60" r="3.5" fill="url(#lightOrb)" />
+  <circle cx="90" cy="70" r="4" fill="url(#lightOrb)" />
+  <circle cx="140" cy="64" r="3.5" fill="url(#lightOrb)" />
+  <circle cx="190" cy="54" r="4" fill="url(#lightOrb)" />
+  <circle cx="240" cy="50" r="3.5" fill="url(#lightOrb)" />
+  <circle cx="290" cy="46" r="4" fill="url(#lightOrb)" />
+
+  <!-- Distant mountain / skyline layer -->
+  <path d="M0,205 Q70,185 140,195 T260,185 T320,198 L320,280 L0,280 Z" fill="#2e1065" opacity="0.6" />
+
+  <!-- Midground landscape / event venue silhouettes -->
+  <path d="M0,220 Q60,205 130,215 Q190,200 250,212 Q290,208 320,218 L320,280 L0,280 Z" fill="#1e1035" opacity="0.85" />
+
+  <!-- Foreground silhouetted ground/hill on left -->
+  <path d="M0,230 Q80,218 160,235 T320,240 L320,280 L0,280 Z" fill="#0d131f" />
+
+  <!-- Photographer Silhouette (Standing on left, aiming camera toward right sunset/event) -->
+  <g fill="#0a0f18">
+    <!-- Legs / Lower body -->
+    <path d="M 74,235 L 70,265 L 77,265 L 82,238 L 88,265 L 95,265 L 90,234 Z" />
+
+    <!-- Torso / Jacket -->
+    <path d="M 72,175 C 68,185 67,205 70,235 L 93,234 C 95,205 93,185 88,175 Z" />
+
+    <!-- Head / Cap turned right facing viewfinder -->
+    <rect x="78" y="166" width="8" height="10" rx="2" />
+    <ellipse cx="81" cy="158" rx="7" ry="8" />
+    <path d="M 75,152 Q 83,148 90,154 Q 96,155 99,157 Q 92,159 86,158 Z" />
+
+    <!-- Camera Body and Telephoto/Zoom Lens -->
+    <!-- Left Hand supporting lens -->
+    <path d="M 84,182 Q 95,188 102,175 Q 106,172 104,168 L 96,172 Z" />
+    <!-- Right Arm holding camera grip -->
+    <path d="M 72,176 Q 66,165 77,160 Q 86,158 90,162 L 86,170 Q 77,170 74,180 Z" />
+    <!-- Camera body -->
+    <rect x="88" y="156" width="12" height="9" rx="1.5" />
+    <!-- Viewfinder bump -->
+    <rect x="89" y="153" width="5" height="3" rx="1" />
+    <!-- Camera Lens pointing right towards the sunset -->
+    <polygon points="100,157 114,156 116,154 118,166 114,164 100,163" />
+    <rect x="116" y="154" width="3" height="12" rx="1" />
+
+    <!-- Camera strap hanging -->
+    <path d="M 89,165 Q 82,185 86,205" fill="none" stroke="#0a0f18" stroke-width="1.8" />
+
+    <!-- Monopod/Tripod leg subtle touch to ground -->
+    <line x1="93" y1="165" x2="98" y2="265" stroke="#0a0f18" stroke-width="1.5" />
+  </g>
+
+  <!-- Camera lens flare / flash glint -->
+  <circle cx="118" cy="160" r="2.5" fill="#ffffff" opacity="0.9" />
+  <line x1="118" y1="152" x2="118" y2="168" stroke="#ffffff" stroke-width="0.8" opacity="0.8" />
+  <line x1="110" y1="160" x2="126" y2="160" stroke="#ffffff" stroke-width="0.8" opacity="0.8" />
+
+  <!-- Top fade to navy overlay -->
+  <rect width="320" height="80" fill="url(#topFade)" />
+
+  <!-- Bottom fade to navy overlay for seamless sidebar blending -->
+  <rect y="160" width="320" height="120" fill="url(#bottomNavyBlend)" />
+</svg>

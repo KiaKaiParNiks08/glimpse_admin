@@ -9,7 +9,8 @@ import { useAdminAccess } from '@/components/auth/AdminAccessContext';
 import { ContentSkeleton } from '@/components/navigation/ContentSkeleton';
 import { PageHeader } from '@/components/ui/PageHeader';
 import { SearchInput } from '@/components/ui/SearchInput';
-import { Plus, Edit2, Trash2 } from '@/components/icons';
+import { ImageThumbnail } from '@/components/ui/ImageThumbnail';
+import { Plus, Edit2, Trash2, Compass } from '@/components/icons';
 import {
   getExploreCategoriesAction,
   deleteExploreCategoryAction,
@@ -195,7 +196,18 @@ export default function ExploreCategoriesPage() {
           return (
             <tr key={cat.id} className={styles.rowDivider}>
               <td className={styles.td}>
-                <strong>{cat.title}</strong>
+                <div className={styles.categoryTitleCell}>
+                  <ImageThumbnail
+                    src={cat.background_url}
+                    alt={cat.title}
+                    size={44}
+                    borderRadius={8}
+                    icon={<Compass size={20} />}
+                  />
+                  <div className={styles.categoryTitleInfo}>
+                    <strong className={styles.categoryTitleText}>{cat.title}</strong>
+                  </div>
+                </div>
               </td>
               <td className={styles.td}>
                 <span

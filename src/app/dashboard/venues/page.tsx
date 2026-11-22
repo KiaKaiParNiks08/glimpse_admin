@@ -9,7 +9,8 @@ import { useAdminAccess } from '@/components/auth/AdminAccessContext';
 import { ContentSkeleton } from '@/components/navigation/ContentSkeleton';
 import { PageHeader } from '@/components/ui/PageHeader';
 import { SearchInput } from '@/components/ui/SearchInput';
-import { Plus, Edit2, Trash2 } from '@/components/icons';
+import { ImageThumbnail } from '@/components/ui/ImageThumbnail';
+import { Plus, Edit2, Trash2, Building2 } from '@/components/icons';
 import {
   getVenuesAction,
   deleteVenueAction,
@@ -24,6 +25,7 @@ export type VenueListItem = {
   country: string | null;
   tenant_owner_id: string | null;
   created_at: string | null;
+  bg_image_url: string | null;
 };
 
 type FormMode = 'create' | 'edit';
@@ -193,7 +195,23 @@ export default function DashboardVenuesPage() {
           return (
             <tr key={venue.id} className={styles.rowDivider}>
               <td className={styles.td}>
-                <strong>{venue.name}</strong>
+                <div className={styles.venueTitleCell}>
+                  <ImageThumbnail
+                    src={venue.bg_image_url}
+                    alt={venue.name}
+                    size={44}
+                    borderRadius={8}
+                    icon={<Building2 size={20} />}
+                  />
+                  <div className={styles.venueTitleInfo}>
+                    <strong className={styles.venueTitleText}>{venue.name}</strong>
+                    {venue.city ? (
+                      <span className={styles.venueTitleSub}>
+                        {venue.city}{venue.state_name ? `, ${venue.state_name}` : ''}
+                      </span>
+                    ) : null}
+                  </div>
+                </div>
               </td>
               <td className={styles.td}>
                 <span

@@ -12,6 +12,7 @@ const venueListSelect = {
   country: true,
   tenant_owner_id: true,
   created_at: true,
+  bg_image_url: true,
 } as const;
 
 export type VenueListItem = {
@@ -23,6 +24,7 @@ export type VenueListItem = {
   country: string | null;
   tenant_owner_id: string | null;
   created_at: Date | null;
+  bg_image_url: string | null;
 };
 
 /**

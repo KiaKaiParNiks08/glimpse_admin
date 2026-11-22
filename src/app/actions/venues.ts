@@ -50,6 +50,7 @@ export type VenueListItem = {
   country: string | null;
   tenant_owner_id: string | null;
   created_at: string | null;
+  bg_image_url: string | null;
 };
 
 export type GetVenuesResult =

@@ -208,3 +208,28 @@
   line-height: 1;
   padding: 0.25rem;
 }
+
+.venueTitleCell {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.venueTitleInfo {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  min-width: 0;
+}
+
+.venueTitleText {
+  font-weight: 600;
+  color: var(--text-primary);
+  font-size: 0.88rem;
+  line-height: 1.25;
+}
+
+.venueTitleSub {
+  font-size: 0.72rem;
+  color: var(--text-secondary);
+}

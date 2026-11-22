@@ -21,6 +21,7 @@ import { AdminAccessProvider } from '@/components/auth/AdminAccessContext';
 import { DashboardUploadProvider } from '@/components/upload/DashboardUploadProvider';
 import { UploadProgressDock } from '@/components/upload/UploadProgressDock';
 import { ThemeToggle } from '@/components/ui/ThemeToggle';
+import { SidebarArtwork } from '@/components/ui/SidebarArtwork';
 import {
   LayoutDashboard,
   Calendar,
@@ -185,7 +186,10 @@ export default function DashboardLayout({
           <div className={styles.sidebarBrand}>
             <div className={styles.brandLogo}>
               <div className={styles.logoIcon}>G</div>
-              <span className={styles.brandTitle}>Glimpse</span>
+              <div className={styles.brandTitleWrap}>
+                <span className={styles.brandTitle}>Glimpse Admin</span>
+                <span className={styles.brandSubtitle}>Event Platform</span>
+              </div>
             </div>
           </div>
         </aside>
@@ -217,7 +221,12 @@ export default function DashboardLayout({
             <div className={styles.sidebarBrand}>
               <Link href="/dashboard" className={styles.brandLogo}>
                 <div className={styles.logoIcon}>G</div>
-                {!sidebarCollapsed && <span className={styles.brandTitle}>Glimpse Admin</span>}
+                {!sidebarCollapsed && (
+                  <div className={styles.brandTitleWrap}>
+                    <span className={styles.brandTitle}>Glimpse Admin</span>
+                    <span className={styles.brandSubtitle}>Event Platform</span>
+                  </div>
+                )}
               </Link>
               <button
                 type="button"
@@ -248,9 +257,10 @@ export default function DashboardLayout({
                 );
               })}
             </nav>
+            <SidebarArtwork collapsed={sidebarCollapsed} />
           </aside>
 
-          <div className={styles.mainArea}>
+          <div className={`${styles.mainArea} ${sidebarCollapsed ? styles.mainAreaCollapsed : ''}`}>
             <header className={styles.header}>
               <div className={styles.headerLeft}>
                 <div className={styles.currentModuleLabel}>
