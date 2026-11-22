@@ -169,12 +169,13 @@ export async function listEventGuestsForExport(
   const rows: EventGuestExportRow[] = guests.map((g) => {
     const u = g.users_event_guests_user_idTousers;
     const mobile = [u.country_code, u.mobile_number].filter(Boolean).join(' ').trim();
-    let wedding_side = '';
-    if (isWedding) {
-      if (g.wedding_side === 'groom') wedding_side = 'Groom side';
-      else if (g.wedding_side === 'bride') wedding_side = 'Bride side';
-    }
     const author = resolveAuthorUserWithEventProfile(u, eventProfileMap.get(u.id));
+    let wedding_side = '';
+    const side = author.wedding_side || g.wedding_side;
+    if (isWedding) {
+      if (side === 'groom') wedding_side = 'Groom side';
+      else if (side === 'bride') wedding_side = 'Bride side';
+    }
     return {
       full_name: author.full_name,
       mobile,

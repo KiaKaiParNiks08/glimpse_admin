@@ -2,6 +2,7 @@ import type { Prisma } from '@prisma/client';
 import prisma from '@/server/prisma';
 import { emailDomainSuffix, isCorporateCategory, normalizeEmailSuffix } from '@/lib/event-categories';
 import { getEventEffectiveEntitlements } from '@/server/access';
+import { invalidateEventThemeCache } from './event-theme';
 import type {
   ListEventsQuery,
   CreateEventInput,
@@ -539,6 +540,10 @@ export async function updateEvent(eventId: string, data: UpdateEventInput) {
   if (data.description !== undefined) updatePayload.description = data.description ?? null;
   if (data.app_theme_id !== undefined) {
     if (data.app_theme_id) {
+      const entitlements = await getEventEffectiveEntitlements(eventId);
+      if (!entitlements.hasFeature('app_themes_manage')) {
+        throw new Error("Custom App Themes is not included in this event's purchase plan");
+      }
       const t = await prisma.app_themes.findUnique({
         where: { id: data.app_theme_id },
         select: { name: true },
@@ -549,6 +554,7 @@ export async function updateEvent(eventId: string, data: UpdateEventInput) {
       updatePayload.theme = null;
       updatePayload.app_themes = { disconnect: true };
     }
+    invalidateEventThemeCache(eventId);
   }
   const coverImages = resolveCoverImages(data.cover_images, data.cover_image);
   if (coverImages) {

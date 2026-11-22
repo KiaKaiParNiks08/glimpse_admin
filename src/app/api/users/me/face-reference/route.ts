@@ -1,4 +1,4 @@
-import { badRequest, forbidden, ok, serverError, unsupportedMediaType } from '@/lib/api-response';
+import { badRequest, conflict, forbidden, ok, serverError, unsupportedMediaType } from '@/lib/api-response';
 import { getUserFromAuthorizationHeader } from '@/lib/jwt';
 import { faceReferenceRevokeSchema } from '@/lib/validations/people-media';
 import { parseBody } from '@/lib/validations/parse';
@@ -51,6 +51,12 @@ export async function PUT(request: Request) {
     if (formData.get('consent') !== 'true') {
       return badRequest('consent must be true before a face reference can be stored');
     }
+
+    const currentStatus = await getFaceReferenceStatus(user.id);
+    if (currentStatus?.consent && currentStatus.processing_status !== 'failed' && currentStatus.has_embedding) {
+      return conflict('Face reference is permanently established and cannot be changed.');
+    }
+
     const file = formData.get('file');
     if (!file || !(file instanceof File) || file.size === 0) {
       return badRequest('Send an image in the file field');

@@ -3,6 +3,9 @@ export type UserEventProfileFields = {
   avatar_url: string | null;
   instagram_id: string | null;
   linkedin_url: string | null;
+  is_instagram_visible?: boolean | null;
+  is_linkedin_visible?: boolean | null;
+  wedding_side?: string | null;
 };
 
 const LINKEDIN_HINT_RE = /linkedin\.com/i;
@@ -107,9 +110,53 @@ export function overlayEventProfile<T extends UserEventProfileFields>(
   if (!profile) return user;
   return {
     ...user,
-    full_name: profile.full_name,
-    avatar_url: profile.avatar_url,
-    instagram_id: profile.instagram_id,
-    linkedin_url: profile.linkedin_url,
+    full_name: profile.full_name || user.full_name,
+    avatar_url: user.avatar_url, // Canonical global avatar is preserved across all events
+    instagram_id: profile.instagram_id ?? user.instagram_id,
+    linkedin_url: profile.linkedin_url ?? user.linkedin_url,
+    is_instagram_visible: profile.is_instagram_visible ?? true,
+    is_linkedin_visible: profile.is_linkedin_visible ?? true,
+    wedding_side: profile.wedding_side ?? user.wedding_side ?? null,
+  };
+}
+
+export function resolveAuthorUserWithEventProfile(
+  user: {
+    full_name: string;
+    avatar_url: string | null;
+    instagram_id: string | null;
+    linkedin_url: string | null;
+  },
+  eventProfile?: UserEventProfileFields | null,
+  options?: { isOwnProfile?: boolean }
+): {
+  full_name: string;
+  avatar_url: string | null;
+  instagram_id: string;
+  linkedin_url: string;
+  show_instagram: boolean;
+  show_linkedin: boolean;
+  is_instagram_visible: boolean;
+  is_linkedin_visible: boolean;
+  wedding_side: string | null;
+} {
+  const social = resolveSocialLinks(eventProfile ?? user);
+  const isInstagramVisible = eventProfile?.is_instagram_visible ?? true;
+  const isLinkedInVisible = eventProfile?.is_linkedin_visible ?? true;
+
+  // Privacy enforcement: hide social links in public event views when visibility is disabled
+  const showInstagram = options?.isOwnProfile ? true : isInstagramVisible;
+  const showLinkedIn = options?.isOwnProfile ? true : isLinkedInVisible;
+
+  return {
+    full_name: eventProfile?.full_name?.trim() || user.full_name,
+    avatar_url: user.avatar_url, // Canonical avatar across all events
+    instagram_id: showInstagram ? social.instagram_id : '',
+    linkedin_url: showLinkedIn ? social.linkedin_url : '',
+    show_instagram: isInstagramVisible,
+    show_linkedin: isLinkedInVisible,
+    is_instagram_visible: isInstagramVisible,
+    is_linkedin_visible: isLinkedInVisible,
+    wedding_side: eventProfile?.wedding_side ?? null,
   };
 }

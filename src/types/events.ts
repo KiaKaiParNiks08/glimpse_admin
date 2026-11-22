@@ -113,6 +113,8 @@ export interface EventDetailsAppTheme {
   name: string;
   primary_color: string;
   secondary_color: string;
+  button_primary_color?: string;
+  button_secondary_color?: string;
 }
 
 /** Full event details returned by getEventDetailsById */

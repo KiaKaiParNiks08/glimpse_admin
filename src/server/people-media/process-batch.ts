@@ -14,6 +14,7 @@ import {
   detectFacesOutcomeToError,
   detectRekognitionFaces,
   ensureMediaFace,
+  insertMediaFace,
   rekognitionClient,
 } from './rekognition';
 import {
@@ -35,49 +36,6 @@ function isPermanentJobError(error: unknown): boolean {
 function errorText(error: unknown): string {
   const message = error instanceof Error ? error.message : 'Face processing failed';
   return message.slice(0, 500);
-}
-
-async function insertMediaFace(
-  assetId: string,
-  index: number,
-  face: DetectedFace
-): Promise<string | null> {
-  const box = JSON.stringify(face.box);
-  try {
-    const vectorSql = Prisma.raw(`'${toVectorLiteral(face.embedding)}'::vector`);
-    const inserted = await prisma.$queryRaw<{ id: string }[]>`
-      INSERT INTO media_faces (id, media_asset_id, face_index, confidence, box, embedding)
-      VALUES (
-        gen_random_uuid(),
-        ${assetId}::uuid,
-        ${index},
-        ${face.confidence},
-        ${box}::jsonb,
-        ${vectorSql}
-      )
-      ON CONFLICT (media_asset_id, face_index) DO UPDATE SET
-        confidence = EXCLUDED.confidence,
-        box = EXCLUDED.box
-      RETURNING id
-    `;
-    return inserted[0]?.id ?? null;
-  } catch (error) {
-    console.error('[people-media] vector face insert failed, trying jsonb', error);
-    const inserted = await prisma.$queryRaw<{ id: string }[]>`
-      INSERT INTO media_faces (id, media_asset_id, face_index, confidence, box, embedding)
-      VALUES (
-        gen_random_uuid(),
-        ${assetId}::uuid,
-        ${index},
-        ${face.confidence},
-        ${box}::jsonb,
-        ${JSON.stringify(face.embedding)}::jsonb
-      )
-      ON CONFLICT (media_asset_id, face_index) DO UPDATE SET confidence = EXCLUDED.confidence
-      RETURNING id
-    `;
-    return inserted[0]?.id ?? null;
-  }
 }
 
 async function reclaimStuckJobs(): Promise<void> {

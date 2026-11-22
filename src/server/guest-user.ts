@@ -27,6 +27,8 @@ export async function findOrCreateGuestUser(
           mobile_number: true,
           country_code: true,
           role_id: true,
+          primary_login_type: true,
+          is_identifier_locked: true,
           roles: { select: { name: true } },
         },
       })
@@ -42,15 +44,25 @@ export async function findOrCreateGuestUser(
       throw new Error('MOBILE_REGISTERED_DIFFERENT_ROLE');
     }
 
-    const data: { email?: string; mobile_number?: string; country_code?: string } = {};
+    const data: { email?: string; mobile_number?: string; country_code?: string; primary_login_type?: string } = {};
+    const isLocked = Boolean((found as any).is_identifier_locked);
+    const primaryType = (found as any).primary_login_type;
+
     if (email && !email.endsWith(`@${GUEST_EMAIL_DOMAIN}`) && found.email !== email) {
-      data.email = email.slice(0, 150);
+      if (!isLocked || primaryType !== 'email') {
+        data.email = email.slice(0, 150);
+      }
     }
     if (mobile_number && found.mobile_number !== mobile_number) {
-      data.mobile_number = mobile_number;
+      if (!isLocked || primaryType !== 'mobile') {
+        data.mobile_number = mobile_number;
+      }
     }
     if (country_code && found.country_code !== country_code) {
       data.country_code = country_code;
+    }
+    if (!primaryType) {
+      data.primary_login_type = mobile_number ? 'mobile' : email ? 'email' : 'mobile';
     }
 
     if (Object.keys(data).length > 0) {
@@ -70,6 +82,8 @@ export async function findOrCreateGuestUser(
     ? `${country_code ?? ''}_${mobile_number}@${GUEST_EMAIL_DOMAIN}`.slice(0, 150)
     : `email_${Date.now()}@${GUEST_EMAIL_DOMAIN}`.slice(0, 150);
 
+  const primary_login_type = mobile_number ? 'mobile' : email && !email.endsWith(`@${GUEST_EMAIL_DOMAIN}`) ? 'email' : 'mobile';
+
   const newUser = await prisma.users.create({
     data: {
       full_name: '',
@@ -79,6 +93,8 @@ export async function findOrCreateGuestUser(
       country_code: country_code || null,
       mobile_number,
       is_active: true,
+      primary_login_type,
+      is_identifier_locked: false,
     },
     select: { id: true },
   });

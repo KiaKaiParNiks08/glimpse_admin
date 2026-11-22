@@ -154,6 +154,14 @@ async function ensureRecognitionV2Columns(): Promise<void> {
           SELECT 1 FROM information_schema.columns
           WHERE table_schema = 'public' AND table_name = 'media_assets' AND column_name = 'guest_scan_cursor'
         )
+        AND EXISTS (
+          SELECT 1 FROM information_schema.columns
+          WHERE table_schema = 'public' AND table_name = 'user_event_profiles' AND column_name = 'is_instagram_visible'
+        )
+        AND EXISTS (
+          SELECT 1 FROM information_schema.columns
+          WHERE table_schema = 'public' AND table_name = 'users' AND column_name = 'is_identifier_locked'
+        )
       ) AS ready
     `);
     if (check[0]?.ready) return;
@@ -173,6 +181,15 @@ async function ensureRecognitionV2Columns(): Promise<void> {
       ADD COLUMN IF NOT EXISTS reference_sha256 VARCHAR(64);
     ALTER TABLE user_face_references
       ADD COLUMN IF NOT EXISTS reference_version INTEGER NOT NULL DEFAULT 1;
+    ALTER TABLE user_event_profiles
+      ADD COLUMN IF NOT EXISTS linkedin_url VARCHAR(500),
+      ADD COLUMN IF NOT EXISTS is_instagram_visible BOOLEAN DEFAULT true,
+      ADD COLUMN IF NOT EXISTS is_linkedin_visible BOOLEAN DEFAULT true,
+      ADD COLUMN IF NOT EXISTS wedding_side VARCHAR(20);
+    ALTER TABLE users
+      ADD COLUMN IF NOT EXISTS primary_login_type VARCHAR(20),
+      ADD COLUMN IF NOT EXISTS is_identifier_locked BOOLEAN DEFAULT false,
+      ADD COLUMN IF NOT EXISTS is_avatar_locked BOOLEAN DEFAULT false;
     DELETE FROM media_matches a
     USING media_matches b
     WHERE a.media_asset_id = b.media_asset_id

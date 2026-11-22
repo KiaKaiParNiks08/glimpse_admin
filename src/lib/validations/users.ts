@@ -54,20 +54,140 @@ export const updateUserSchema = createUserSchema.partial().extend({
   linkedin_url: optionalLinkedInSchema,
 });
 
-/** PATCH /api/users/[user_id] — per-event profile when event_id is sent */
-export const patchUserBodySchema = updateUserSchema.extend({
-  full_name: z.string().max(100).optional(),
-  wedding_side: z.enum(['groom', 'bride']).nullable().optional(),
-  event_id: uuidSchema.optional(),
-}).superRefine((data, ctx) => {
-  if (data.wedding_side !== undefined && data.event_id === undefined) {
-    ctx.addIssue({
-      code: z.ZodIssueCode.custom,
-      message: 'event_id is required when wedding_side is provided',
-      path: ['event_id'],
-    });
-  }
-});
+/** PATCH /api/users/[user_id] — supports global update or event preferences */
+export const patchUserBodySchema = z
+  .object({
+    full_name: z.string().trim().min(1).max(100).optional(),
+    instagram_id: optionalInstagramSchema,
+    linkedin_url: optionalLinkedInSchema,
+    avatar_url: z.string().max(1000).optional().nullable(),
+    email: z.string().optional(),
+    mobile_number: z.string().optional(),
+    country_code: z.string().optional(),
+    password: z.string().optional(),
+    wedding_side: z
+      .preprocess(
+        (val) => (typeof val === 'string' ? val.toLowerCase().trim() : val),
+        z.enum(['groom', 'bride']).nullable()
+      )
+      .optional(),
+    is_instagram_visible: z.boolean().optional(),
+    is_linkedin_visible: z.boolean().optional(),
+    show_instagram: z.boolean().optional(),
+    show_linkedin: z.boolean().optional(),
+    event_id: uuidSchema.optional(),
+  })
+  .superRefine((data, ctx) => {
+    // 1. If event_id is absent: Global profile update
+    if (!data.event_id) {
+      if (data.email !== undefined) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['email'],
+          message: 'Email cannot be updated via PATCH users/{user_id}. Use login-change endpoints instead.',
+        });
+      }
+      if (data.mobile_number !== undefined) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['mobile_number'],
+          message: 'Mobile number cannot be updated via PATCH users/{user_id}. Use login-change endpoints instead.',
+        });
+      }
+      if (data.avatar_url !== undefined) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['avatar_url'],
+          message: 'Profile photo cannot be updated via PATCH users/{user_id}. Use POST users/{user_id}/profile-picture instead.',
+        });
+      }
+      if (
+        data.wedding_side !== undefined ||
+        data.is_instagram_visible !== undefined ||
+        data.is_linkedin_visible !== undefined ||
+        data.show_instagram !== undefined ||
+        data.show_linkedin !== undefined
+      ) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['event_id'],
+          message: 'event_id is required when updating event preferences.',
+        });
+      }
+    } else {
+      // 2. If event_id is present: Event preferences update
+      if (data.email !== undefined) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['email'],
+          message: 'Email cannot be updated via event preferences.',
+        });
+      }
+      if (data.mobile_number !== undefined) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['mobile_number'],
+          message: 'Mobile number cannot be updated via event preferences.',
+        });
+      }
+      if (data.avatar_url !== undefined) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['avatar_url'],
+          message: 'Profile photo cannot be updated via event preferences.',
+        });
+      }
+    }
+  });
+
+/** POST /api/users/[user_id]/login-change/request */
+export const requestLoginChangeSchema = z
+  .object({
+    email: z.string().trim().email('Invalid email address').max(150).optional(),
+    country_code: z.string().trim().max(10).optional(),
+    mobile_number: z.string().trim().max(20).optional(),
+  })
+  .superRefine((data, ctx) => {
+    const hasEmail = Boolean(data.email);
+    const hasMobile = Boolean(data.mobile_number);
+    if (!hasEmail && !hasMobile) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'Either email or mobile_number must be provided.',
+      });
+    }
+    if (hasEmail && hasMobile) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'Provide exactly one channel: email OR mobile_number.',
+      });
+    }
+  });
+
+/** POST /api/users/[user_id]/login-change/confirm */
+export const confirmLoginChangeSchema = z
+  .object({
+    email: z.string().trim().email('Invalid email address').max(150).optional(),
+    country_code: z.string().trim().max(10).optional(),
+    mobile_number: z.string().trim().max(20).optional(),
+    otp: z.string().trim().min(4, 'OTP must be at least 4 digits').max(10),
+  })
+  .superRefine((data, ctx) => {
+    const hasEmail = Boolean(data.email);
+    const hasMobile = Boolean(data.mobile_number);
+    if (!hasEmail && !hasMobile) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'Either email or mobile_number must be provided.',
+      });
+    }
+    if (hasEmail && hasMobile) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'Provide exactly one channel: email OR mobile_number.',
+      });
+    }
+  });
 
 /** User ID path/query param */
 export const userIdPathParamSchema = z.object({
@@ -97,6 +217,8 @@ export const listUsersQuerySchema = z.object({
 export type CreateUserInput = z.infer<typeof createUserSchema>;
 export type UpdateUserInput = z.infer<typeof updateUserSchema>;
 export type PatchUserBodyInput = z.infer<typeof patchUserBodySchema>;
+export type RequestLoginChangeInput = z.infer<typeof requestLoginChangeSchema>;
+export type ConfirmLoginChangeInput = z.infer<typeof confirmLoginChangeSchema>;
 
 /** Fields consumed by updateUser(); omit event-scoped profile keys when event_id is set. */
 export function toUpdateUserInput(body: PatchUserBodyInput): UpdateUserInput {

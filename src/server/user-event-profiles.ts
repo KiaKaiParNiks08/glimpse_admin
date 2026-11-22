@@ -1,18 +1,22 @@
 import {
   looksLikeLinkedInValue,
   overlayEventProfile,
+  resolveAuthorUserWithEventProfile,
   resolveSocialLinks,
   type UserEventProfileFields,
 } from '@/lib/user-event-profile';
 import prisma from '@/server/prisma';
 
-export { overlayEventProfile, type UserEventProfileFields };
+export { overlayEventProfile, resolveAuthorUserWithEventProfile, type UserEventProfileFields };
 
 const eventProfileSelect = {
   full_name: true,
   avatar_url: true,
   instagram_id: true,
   linkedin_url: true,
+  is_instagram_visible: true,
+  is_linkedin_visible: true,
+  wedding_side: true,
 } as const;
 
 export async function getUserEventProfile(
@@ -59,13 +63,15 @@ export async function upsertUserEventProfile(
 
   const data = {
     ...(fields.full_name !== undefined ? { full_name: fields.full_name } : {}),
-    ...(fields.avatar_url !== undefined ? { avatar_url: fields.avatar_url } : {}),
     ...(fields.instagram_id !== undefined
       ? { instagram_id: fields.instagram_id }
       : clearLegacyLinkedInFallback
         ? { instagram_id: null }
         : {}),
     ...(fields.linkedin_url !== undefined ? { linkedin_url: fields.linkedin_url } : {}),
+    ...(fields.is_instagram_visible !== undefined ? { is_instagram_visible: fields.is_instagram_visible } : {}),
+    ...(fields.is_linkedin_visible !== undefined ? { is_linkedin_visible: fields.is_linkedin_visible } : {}),
+    ...(fields.wedding_side !== undefined ? { wedding_side: fields.wedding_side } : {}),
   };
 
   return prisma.user_event_profiles.upsert({
@@ -74,9 +80,12 @@ export async function upsertUserEventProfile(
       user_id: userId,
       event_id: eventId,
       full_name: fields.full_name ?? '',
-      avatar_url: fields.avatar_url ?? null,
+      avatar_url: null,
       instagram_id: fields.instagram_id ?? null,
       linkedin_url: fields.linkedin_url ?? null,
+      is_instagram_visible: fields.is_instagram_visible ?? true,
+      is_linkedin_visible: fields.is_linkedin_visible ?? true,
+      wedding_side: fields.wedding_side ?? null,
     },
     update: data,
     select: eventProfileSelect,
@@ -84,8 +93,8 @@ export async function upsertUserEventProfile(
 }
 
 /**
- * Batch-load event-scoped profile overrides (`full_name`, `avatar_url`, `instagram_id`, `linkedin_url`)
- * for display on feed authors, comments, and likes, applying corporate LinkedIn-in-`instagram_id` read fallback.
+ * Batch-load event-scoped profile preferences (`full_name`, `instagram_id`, `linkedin_url`, `is_instagram_visible`, `is_linkedin_visible`, `wedding_side`)
+ * for display on feed authors, comments, and likes.
  */
 export async function getEventProfileMapForUsers(
   eventId: string | null | undefined,
@@ -102,46 +111,13 @@ export async function getEventProfileMapForUsers(
   for (const row of rows) {
     map.set(row.user_id, {
       full_name: row.full_name,
-      avatar_url: row.avatar_url,
+      avatar_url: null,
       instagram_id: row.instagram_id,
       linkedin_url: row.linkedin_url,
+      is_instagram_visible: row.is_instagram_visible,
+      is_linkedin_visible: row.is_linkedin_visible,
+      wedding_side: row.wedding_side,
     });
   }
   return map;
-}
-
-export function resolveAuthorUserWithEventProfile(
-  user: {
-    full_name: string;
-    avatar_url: string | null;
-    instagram_id: string | null;
-    linkedin_url: string | null;
-  },
-  eventProfile?: UserEventProfileFields | null
-): {
-  full_name: string;
-  avatar_url: string | null;
-  instagram_id: string;
-  linkedin_url: string;
-} {
-  const useEventProfile =
-    eventProfile &&
-    (Boolean(eventProfile.full_name?.trim()) ||
-      eventProfile.avatar_url !== null ||
-      eventProfile.instagram_id !== null ||
-      eventProfile.linkedin_url !== null);
-
-  const source = useEventProfile
-    ? {
-        full_name: eventProfile.full_name?.trim() || user.full_name,
-        avatar_url: eventProfile.avatar_url ?? user.avatar_url,
-        ...resolveSocialLinks(eventProfile),
-      }
-    : {
-        full_name: user.full_name,
-        avatar_url: user.avatar_url,
-        ...resolveSocialLinks(user),
-      };
-
-  return source;
 }

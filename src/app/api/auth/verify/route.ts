@@ -54,6 +54,12 @@ export async function POST(request: Request) {
       return badRequest('Invalid or expired OTP. Please request a new one.');
     }
 
+    // Lock verified primary login identifier permanently
+    await prisma.users.update({
+      where: { id: body.user_id },
+      data: { is_identifier_locked: true },
+    });
+
     const guest = guestRows[0];
     if (!guest) {
       return badRequest('User event context not found. Please request OTP again.');

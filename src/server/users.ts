@@ -172,6 +172,26 @@ export async function findUserByIdMinimal(
 }
 
 /**
+ * Find a user by email. Returns { id } or null.
+ * When excludeUserId is set, ignores that user (for update uniqueness check).
+ */
+export async function findUserByEmail(
+  email: string,
+  excludeUserId?: string
+): Promise<{ id: string } | null> {
+  const trimmed = email.trim().toLowerCase();
+  if (!trimmed) return null;
+  const user = await prisma.users.findFirst({
+    where: {
+      email: trimmed,
+      ...(excludeUserId && { id: { not: excludeUserId } }),
+    },
+    select: { id: true },
+  });
+  return user;
+}
+
+/**
  * Find a user by mobile_number. Returns { id } or null.
  * When excludeUserId is set, ignores that user (for update uniqueness check).
  */

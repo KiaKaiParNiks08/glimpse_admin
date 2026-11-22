@@ -4,18 +4,22 @@ import { badRequest, forbidden, notFound, ok, serverError, unsupportedMediaType 
 import { getUserFromAuthorizationHeader } from '@/lib/jwt';
 import { getMediaKind, resolveUploadMime, saveUploadedBuffer, validateMediaFile } from '@/lib/upload';
 import { isEventGuest } from '@/server/event-guests';
-import { enrollStoredFaceReference, queueExistingFaceReference } from '@/server/people-media/face-reference';
+import { enrollStoredFaceReference } from '@/server/people-media/face-reference';
 import { verifyProfileFace } from '@/server/people-media/profile-verify';
-import { overlayEventProfile, upsertUserEventProfile } from '@/server/user-event-profiles';
-import { getUserById, updateUser } from '@/server/users';
+import { ensureUserEventScans } from '@/server/people-media/scans';
+import { scheduleFaceProcessing } from '@/server/people-media/schedule';
+import { sha256Hex } from '@/server/people-media/storage';
+import prisma from '@/server/prisma';
 
 /** Profile upload also enrolls the face reference and runs matching. */
 export const maxDuration = 60;
 
 /**
  * POST /api/users/[user_id]/profile-picture
- * First photo with one face becomes the account person. Later photos must be that person.
- * Body: multipart/form-data with field "file" and event_id for the event profile photo.
+ * Global canonical profile photo.
+ * First upload: enrolls facial reference.
+ * Later uploads: verifies same person against facial reference (403 if mismatch).
+ * Body: multipart/form-data with field "file".
  */
 export async function POST(
   request: NextRequest,
@@ -44,6 +48,24 @@ export async function POST(
       if (!guest) return forbidden('User is not a guest of this event');
     }
 
+    const user = await prisma.users.findUnique({
+      where: { id: path.user_id },
+      select: {
+        id: true,
+        avatar_url: true,
+        is_avatar_locked: true,
+        user_face_references: {
+          select: {
+            id: true,
+            consent: true,
+            processing_status: true,
+            storage_key: true,
+          },
+        },
+      },
+    });
+    if (!user) return notFound('User not found');
+
     if (!file || !(file instanceof File) || file.size === 0) {
       return badRequest('No image file provided. Send a file in the "file" field.');
     }
@@ -64,8 +86,17 @@ export async function POST(
     const bytes = Buffer.from(await file.arrayBuffer());
     if (bytes.length === 0) return badRequest('The image did not finish uploading. Please try again.');
 
-    const faceCheck = await verifyProfileFace(path.user_id, bytes);
-    if (!faceCheck.ok) return badRequest(faceCheck.message);
+    // Enforce same-person match for re-uploads, or single face check for first upload
+    const faceCheck = await verifyProfileFace(user.id, bytes);
+    if (!faceCheck.ok) {
+      if (
+        faceCheck.message.includes('different person') ||
+        faceCheck.message.includes('could not confirm')
+      ) {
+        return forbidden(faceCheck.message);
+      }
+      return badRequest(faceCheck.message);
+    }
 
     const saved = await saveUploadedBuffer(bytes, 'image', process.cwd(), {
       prefix: 'profile-pictures',
@@ -73,21 +104,22 @@ export async function POST(
       fileName: file.name,
     });
 
-    let user = event_id ? await getUserById(path.user_id) : await updateUser(path.user_id, { avatar_url: saved.relativeUrl });
-    if (!user) return notFound('User not found');
-    if (event_id) {
-      const eventProfile = await upsertUserEventProfile(path.user_id, event_id, {
+    await prisma.users.update({
+      where: { id: user.id },
+      data: {
         avatar_url: saved.relativeUrl,
-      });
-      user = overlayEventProfile(user, eventProfile);
-    }
+        is_avatar_locked: true,
+      },
+    });
 
     let face_reference = null;
     if (faceCheck.first) {
       try {
         face_reference = await enrollStoredFaceReference(user.id, saved.storageKey, {
-          verifiedSingleFace: faceCheck.verified === true,
+          verifiedSingleFace: true,
         });
+        await ensureUserEventScans(user.id, sha256Hex(saved.storageKey));
+        await scheduleFaceProcessing();
       } catch (error) {
         console.error('[profile-picture] face reference was not enrolled', error);
         face_reference = {
@@ -98,19 +130,17 @@ export async function POST(
         };
       }
     } else {
-      try {
-        face_reference = await queueExistingFaceReference(user.id);
-      } catch (error) {
-        console.error('[profile-picture] existing face reference was not reused', error);
-      }
+      face_reference = user.user_face_references;
     }
+
     return ok(
       {
         user_id: user.id,
-        avatar_url: user.avatar_url,
+        avatar_url: saved.relativeUrl,
+        can_replace_profile_photo: false,
         face_reference,
       },
-      'Profile picture updated'
+      'Profile picture registered'
     );
   } catch (e) {
     console.error(e);

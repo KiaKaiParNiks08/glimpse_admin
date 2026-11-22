@@ -1,4 +1,5 @@
 import prisma from '@/server/prisma';
+import { getEventEffectiveEntitlements } from '@/server/access';
 import type { AppInfoQuery } from '@/lib/validations/app-info';
 import { normalizeFcmToken } from '@/lib/push-device';
 import {
@@ -15,6 +16,10 @@ export type AppInfoResult = {
   secondary_color: string | null;
   button_primary_color: string | null;
   button_secondary_color: string | null;
+  primaryColor?: string | null;
+  secondaryColor?: string | null;
+  buttonPrimaryColor?: string | null;
+  buttonSecondaryColor?: string | null;
   event_status: string | null;
   allow_new_event_login: boolean;
   needs_fcm_token_sync: boolean;
@@ -123,13 +128,27 @@ export async function getAppInfo(query: AppInfoQuery): Promise<AppInfoResult | n
     needs_fcm_token_sync = needsSync;
   }
 
-  const theme = event?.app_themes;
+  let customThemeAllowed = true;
+  if (query.event_id) {
+    const entitlements = await getEventEffectiveEntitlements(query.event_id);
+    customThemeAllowed = entitlements.hasFeature('app_themes_manage');
+  }
+
+  const theme = customThemeAllowed ? event?.app_themes : null;
+  const pColor = theme?.primary_color ?? null;
+  const sColor = theme?.secondary_color ?? null;
+  const bpColor = theme?.button_primary_color ?? null;
+  const bsColor = theme?.button_secondary_color ?? null;
 
   return {
-    primary_color: theme?.primary_color ?? null,
-    secondary_color: theme?.secondary_color ?? null,
-    button_primary_color: theme?.button_primary_color ?? null,
-    button_secondary_color: theme?.button_secondary_color ?? null,
+    primary_color: pColor,
+    secondary_color: sColor,
+    button_primary_color: bpColor,
+    button_secondary_color: bsColor,
+    primaryColor: pColor,
+    secondaryColor: sColor,
+    buttonPrimaryColor: bpColor,
+    buttonSecondaryColor: bsColor,
     event_status: event?.status ?? null,
     allow_new_event_login: true,
     needs_fcm_token_sync,

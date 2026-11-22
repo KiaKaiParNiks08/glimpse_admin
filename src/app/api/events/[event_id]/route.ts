@@ -240,6 +240,16 @@ export async function GET(
     /* eslint-enable @typescript-eslint/no-unused-vars */
 
     const visibleTeam = enabledFeatures.event_team ? team : null;
+    const visibleAppTheme =
+      enabledFeatures.app_themes_manage && event.app_themes
+        ? {
+            ...event.app_themes,
+            primaryColor: event.app_themes.primary_color,
+            secondaryColor: event.app_themes.secondary_color,
+            buttonPrimaryColor: event.app_themes.button_primary_color,
+            buttonSecondaryColor: event.app_themes.button_secondary_color,
+          }
+        : null;
     const fallbackOrganizers =
       event.event_organizers && event.event_organizers.length > 0
         ? event.event_organizers
@@ -259,6 +269,8 @@ export async function GET(
     const res = ok({
       data: {
         ...eventFields,
+        app_themes: visibleAppTheme,
+        app_theme_id: visibleAppTheme ? event.app_theme_id : null,
         event_organizers: fallbackOrganizers,
         event_team: visibleTeam,
         event_planner: visibleTeam?.planner ?? null,

@@ -53,6 +53,10 @@ export type JoinEventResult =
         secondary_color: string | null;
         button_primary_color: string | null;
         button_secondary_color: string | null;
+        primaryColor?: string | null;
+        secondaryColor?: string | null;
+        buttonPrimaryColor?: string | null;
+        buttonSecondaryColor?: string | null;
         enabled_features: FeatureMap;
         needs_fcm_token_sync: boolean;
       };
@@ -160,7 +164,12 @@ export async function joinAuthenticatedUserToEvent(input: {
   const issued = createUserJwtToken({ user_id: input.userId, event_id: event.id });
   const enabled_features = await getEventEffectiveFeatures(event.id);
   const category = toAuthCategoryFields(event.event_categories);
-  const theme = event.app_themes;
+  const customThemeAllowed = Boolean(enabled_features.app_themes_manage);
+  const theme = customThemeAllowed ? event.app_themes : null;
+  const pColor = theme?.primary_color ?? null;
+  const sColor = theme?.secondary_color ?? null;
+  const bpColor = theme?.button_primary_color ?? null;
+  const bsColor = theme?.button_secondary_color ?? null;
   return {
     ok: true,
     data: {
@@ -171,10 +180,14 @@ export async function joinAuthenticatedUserToEvent(input: {
       event_code: event.event_code,
       event_type: category.event_type,
       show_wedding_side: category.show_wedding_side,
-      primary_color: theme?.primary_color ?? null,
-      secondary_color: theme?.secondary_color ?? null,
-      button_primary_color: theme?.button_primary_color ?? null,
-      button_secondary_color: theme?.button_secondary_color ?? null,
+      primary_color: pColor,
+      secondary_color: sColor,
+      button_primary_color: bpColor,
+      button_secondary_color: bsColor,
+      primaryColor: pColor,
+      secondaryColor: sColor,
+      buttonPrimaryColor: bpColor,
+      buttonSecondaryColor: bsColor,
       enabled_features,
       needs_fcm_token_sync,
     },

@@ -6,6 +6,7 @@ import { ensurePeopleMediaSchema } from './ensure-schema';
 import { clearFaceEmbedding, deleteMatchesForUser, toVectorLiteral } from './match';
 import {
   compareReferenceToAsset,
+  compareReferenceToAssetDetailed,
   detectFacesOutcomeToError,
   detectRekognitionFaces,
   ensureMediaFace,
@@ -375,10 +376,11 @@ export async function processUserEventScan(
         continue;
       }
 
-      const compared = await compareReferenceToAsset({
+      const compared = await compareReferenceToAssetDetailed({
         referenceBytes,
         targetBytes: loaded.bytes,
         mediaType: loaded.mediaType,
+        mediaAssetId: asset.id,
       });
       if (!compared.ok) {
         if (compared.reason === 'throttled') {
@@ -401,14 +403,9 @@ export async function processUserEventScan(
         continue;
       }
 
-      const mediaFaceId = await ensureMediaFace(asset.id);
-      if (!mediaFaceId) {
-        await markAssetCheckedForUser(asset.id, userId, ref.content_sha256);
-        continue;
-      }
       await upsertRekognitionMatch({
         mediaAssetId: asset.id,
-        mediaFaceId,
+        mediaFaceId: compared.mediaFaceId,
         userId,
         similarity: compared.similarity / 100,
         referenceSha256: ref.content_sha256,
