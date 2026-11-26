@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, useCallback } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useRouteProgress } from '@/components/navigation/NavigationProvider';
 import { ContentSkeleton } from '@/components/navigation/ContentSkeleton';
@@ -35,40 +35,62 @@ export default function AddEditEventPage() {
   const [venues, setVenues] = useState<VenueOption[]>([]);
   const [themes, setThemes] = useState<AppThemeOption[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [isAuthError, setIsAuthError] = useState(false);
 
   const pageTitle = useMemo(
     () => (mode === 'edit' ? 'Edit event' : 'Create event'),
     [mode]
   );
 
-  useEffect(() => {
-    let cancelled = false;
+  const loadOptions = useCallback(async () => {
     setLoadingOptions(true);
-    Promise.all([
-      getEventCategoriesAction(),
-      getVenuesForSelectAction(),
-      getAppThemesForSelectAction(),
-    ])
-      .then(([catRes, venRes, themeRes]) => {
-        if (cancelled) return;
-        if (!catRes.ok || !venRes.ok || !themeRes.ok) {
-          setError('Failed to load form options');
-          return;
+    setError(null);
+    setIsAuthError(false);
+
+    try {
+      const [catRes, venRes, themeRes] = await Promise.all([
+        getEventCategoriesAction(),
+        getVenuesForSelectAction(),
+        getAppThemesForSelectAction(),
+      ]);
+
+      if (!catRes.ok || !venRes.ok || !themeRes.ok) {
+        const failedActions: string[] = [];
+        let authFailed = false;
+
+        if (!catRes.ok) {
+          failedActions.push(`Categories (${catRes.error})`);
+          if (catRes.error?.toLowerCase().includes('authenticated')) authFailed = true;
         }
-        setCategories(catRes.data);
-        setVenues(venRes.data);
-        setThemes(themeRes.data);
-      })
-      .catch(() => {
-        if (!cancelled) setError('Failed to load form options');
-      })
-      .finally(() => {
-        if (!cancelled) setLoadingOptions(false);
-      });
-    return () => {
-      cancelled = true;
-    };
+        if (!venRes.ok) {
+          failedActions.push(`Venues (${venRes.error})`);
+          if (venRes.error?.toLowerCase().includes('authenticated')) authFailed = true;
+        }
+        if (!themeRes.ok) {
+          failedActions.push(`App themes (${themeRes.error})`);
+          if (themeRes.error?.toLowerCase().includes('authenticated')) authFailed = true;
+        }
+
+        setIsAuthError(authFailed);
+        setError(`Failed to load options: ${failedActions.join(' • ')}`);
+        return;
+      }
+
+      setCategories(catRes.data);
+      setVenues(venRes.data);
+      setThemes(themeRes.data);
+    } catch (err) {
+      setError(
+        err instanceof Error ? err.message : 'Unexpected network error loading form options'
+      );
+    } finally {
+      setLoadingOptions(false);
+    }
   }, []);
+
+  useEffect(() => {
+    loadOptions();
+  }, [loadOptions]);
 
   useEffect(() => {
     if (mode === 'edit' && !eventId) {
@@ -123,7 +145,72 @@ export default function AddEditEventPage() {
         }
       />
 
-      {error && <p className={styles.errorText}>{error}</p>}
+      {error && (
+        <div
+          style={{
+            margin: '1.5rem 0',
+            padding: '1.25rem',
+            borderRadius: '0.5rem',
+            background: 'var(--color-danger-subtle, #fef2f2)',
+            border: '1px solid var(--color-danger-border, #fecaca)',
+            color: 'var(--color-danger-text, #991b1b)',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '0.75rem',
+          }}
+        >
+          <div style={{ fontWeight: 600, fontSize: '0.95rem' }}>
+            {isAuthError
+              ? 'Your admin session has expired or is unauthorized'
+              : 'Unable to initialize event form options'}
+          </div>
+          <div style={{ fontSize: '0.875rem', opacity: 0.9 }}>{error}</div>
+          <div style={{ display: 'flex', gap: '0.75rem', marginTop: '0.25rem' }}>
+            {isAuthError ? (
+              <a
+                href="/login"
+                className={styles.btnPrimary}
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  padding: '0.5rem 1rem',
+                  fontSize: '0.875rem',
+                  textDecoration: 'none',
+                }}
+              >
+                Sign In Again
+              </a>
+            ) : (
+              <button
+                type="button"
+                onClick={loadOptions}
+                className={styles.btnPrimary}
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  padding: '0.5rem 1rem',
+                  fontSize: '0.875rem',
+                }}
+              >
+                Try Again
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={() => navigate('/dashboard/events')}
+              className={styles.btnSecondary}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                padding: '0.5rem 1rem',
+                fontSize: '0.875rem',
+              }}
+            >
+              Back to Events
+            </button>
+          </div>
+        </div>
+      )}
 
       {!error && (
         <CreateEventWizard
