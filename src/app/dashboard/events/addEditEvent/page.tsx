@@ -54,7 +54,7 @@ export default function AddEditEventPage() {
         getAppThemesForSelectAction(),
       ]);
 
-      if (!catRes.ok || !venRes.ok || !themeRes.ok) {
+      if (!catRes.ok || !venRes.ok) {
         const failedActions: string[] = [];
         let authFailed = false;
 
@@ -66,10 +66,6 @@ export default function AddEditEventPage() {
           failedActions.push(`Venues (${venRes.error})`);
           if (venRes.error?.toLowerCase().includes('authenticated')) authFailed = true;
         }
-        if (!themeRes.ok) {
-          failedActions.push(`App themes (${themeRes.error})`);
-          if (themeRes.error?.toLowerCase().includes('authenticated')) authFailed = true;
-        }
 
         setIsAuthError(authFailed);
         setError(`Failed to load options: ${failedActions.join(' • ')}`);
@@ -78,7 +74,12 @@ export default function AddEditEventPage() {
 
       setCategories(catRes.data);
       setVenues(venRes.data);
-      setThemes(themeRes.data);
+      if (themeRes.ok) {
+        setThemes(themeRes.data);
+      } else {
+        console.warn('App themes could not be loaded, proceeding with empty theme list:', themeRes.error);
+        setThemes([]);
+      }
     } catch (err) {
       setError(
         err instanceof Error ? err.message : 'Unexpected network error loading form options'

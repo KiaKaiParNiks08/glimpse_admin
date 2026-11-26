@@ -36,11 +36,38 @@ const appThemeSelect = {
 } as const;
 
 export async function listAppThemesForSelect(tenantOwnerId?: string | null): Promise<AppThemeListItem[]> {
-  return prisma.app_themes.findMany({
-    where: buildTenantSelectWhere(tenantOwnerId),
-    orderBy: { name: 'asc' },
-    select: appThemeSelect,
-  });
+  try {
+    return await prisma.app_themes.findMany({
+      where: buildTenantSelectWhere(tenantOwnerId),
+      orderBy: { name: 'asc' },
+      select: appThemeSelect,
+    });
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    if (msg.includes('text_color') || msg.includes('body_text_color') || msg.includes('Unknown field')) {
+      const fallbackRows = await prisma.app_themes.findMany({
+        where: buildTenantSelectWhere(tenantOwnerId),
+        orderBy: { name: 'asc' },
+        select: {
+          id: true,
+          name: true,
+          primary_color: true,
+          secondary_color: true,
+          button_primary_color: true,
+          button_secondary_color: true,
+          tenant_owner_id: true,
+          created_at: true,
+          updated_at: true,
+        },
+      });
+      return fallbackRows.map((r) => ({
+        ...r,
+        text_color: '#FFFFFF',
+        body_text_color: '#CBD5E1',
+      }));
+    }
+    throw err;
+  }
 }
 
 export async function createAppTheme(
@@ -84,18 +111,51 @@ export async function getAppThemes(
   const where: Prisma.app_themesWhereInput | undefined =
     clauses.length === 0 ? undefined : clauses.length === 1 ? clauses[0] : { AND: clauses };
 
-  const [rows, total] = await Promise.all([
-    prisma.app_themes.findMany({
-      where,
-      orderBy: { name: 'asc' },
-      skip,
-      take: limit,
-      select: appThemeSelect,
-    }),
-    prisma.app_themes.count({ where }),
-  ]);
+  try {
+    const [rows, total] = await Promise.all([
+      prisma.app_themes.findMany({
+        where,
+        orderBy: { name: 'asc' },
+        skip,
+        take: limit,
+        select: appThemeSelect,
+      }),
+      prisma.app_themes.count({ where }),
+    ]);
 
-  return { data: rows, total, page, limit, totalPages: Math.ceil(total / limit) };
+    return { data: rows, total, page, limit, totalPages: Math.ceil(total / limit) };
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    if (msg.includes('text_color') || msg.includes('body_text_color') || msg.includes('Unknown field')) {
+      const [rows, total] = await Promise.all([
+        prisma.app_themes.findMany({
+          where,
+          orderBy: { name: 'asc' },
+          skip,
+          take: limit,
+          select: {
+            id: true,
+            name: true,
+            primary_color: true,
+            secondary_color: true,
+            button_primary_color: true,
+            button_secondary_color: true,
+            tenant_owner_id: true,
+            created_at: true,
+            updated_at: true,
+          },
+        }),
+        prisma.app_themes.count({ where }),
+      ]);
+      const mapped = rows.map((r) => ({
+        ...r,
+        text_color: '#FFFFFF',
+        body_text_color: '#CBD5E1',
+      }));
+      return { data: mapped, total, page, limit, totalPages: Math.ceil(total / limit) };
+    }
+    throw err;
+  }
 }
 
 export async function updateAppTheme(

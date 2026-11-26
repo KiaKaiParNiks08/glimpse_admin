@@ -428,10 +428,21 @@ export async function getAppThemesForSelectAction(): Promise<GetAppThemesResult>
     const auth = await requireAdminContextFromCookies();
     if (!auth.ok) return { ok: false, error: auth.error };
     const themes = await listAppThemesForSelect(resolveTenantScope(auth.ctx));
-    return { ok: true, data: themes };
-  } catch (e) {
-    console.error(e);
-    return { ok: false, error: 'Unable to fetch app themes' };
+    const data: AppThemeOption[] = themes.map((t) => ({
+      id: t.id,
+      name: t.name,
+      primary_color: t.primary_color,
+      secondary_color: t.secondary_color,
+      button_primary_color: t.button_primary_color,
+      button_secondary_color: t.button_secondary_color,
+      text_color: t.text_color ?? '#FFFFFF',
+      body_text_color: t.body_text_color ?? '#CBD5E1',
+    }));
+    return { ok: true, data };
+  } catch (e: unknown) {
+    console.error('getAppThemesForSelectAction error:', e);
+    const msg = e instanceof Error ? e.message : 'Unable to fetch app themes';
+    return { ok: false, error: msg };
   }
 }
 
