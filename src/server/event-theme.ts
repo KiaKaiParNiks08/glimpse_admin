@@ -54,6 +54,12 @@ export async function getEventTheme(
         title: true,
         cover_image: true,
         app_theme_id: true,
+        created_by: true,
+        users: {
+          select: {
+            roles: { select: { name: true } },
+          },
+        },
         app_themes: {
           select: {
             id: true,
@@ -62,6 +68,8 @@ export async function getEventTheme(
             secondary_color: true,
             button_primary_color: true,
             button_secondary_color: true,
+            text_color: true,
+            body_text_color: true,
             created_at: true,
             updated_at: true,
           },
@@ -78,7 +86,8 @@ export async function getEventTheme(
 
   if (!event) return null;
 
-  const customThemesEnabled = entitlements.hasFeature('app_themes_manage');
+  const isCreatedBySuperAdmin = event.users?.roles?.name === 'super_admin';
+  const customThemesEnabled = isCreatedBySuperAdmin || entitlements.hasFeature('app_themes_manage');
 
   // Real preview assets from existing event data
   const [sampleSession, sampleMedia] = await Promise.all([
@@ -124,20 +133,29 @@ export async function getEventTheme(
 export async function saveEventTheme(
   eventId: string,
   input: NormalizedEventThemeInput,
-  tenantOwnerId?: string | null
+  tenantOwnerId?: string | null,
+  isSuperAdmin: boolean = false
 ): Promise<EventThemeResult> {
   const event = await prisma.events.findUnique({
     where: { id: eventId },
-    select: { id: true, app_theme_id: true },
+    select: {
+      id: true,
+      app_theme_id: true,
+      created_by: true,
+      users: { select: { roles: { select: { name: true } } } },
+    },
   });
   if (!event) {
     throw new Error('Event not found');
   }
 
-  // 1. Enforce purchase entitlement
-  const entitlements = await getEventEffectiveEntitlements(eventId);
-  if (!entitlements.hasFeature('app_themes_manage')) {
-    throw new CustomThemeEntitlementError();
+  // 1. Enforce purchase entitlement (Super Admin is always exempt)
+  const isSuperAdminEvent = isSuperAdmin || event.users?.roles?.name === 'super_admin';
+  if (!isSuperAdminEvent) {
+    const entitlements = await getEventEffectiveEntitlements(eventId);
+    if (!entitlements.hasFeature('app_themes_manage')) {
+      throw new CustomThemeEntitlementError();
+    }
   }
 
   // 2. Link existing preset theme OR create/update custom theme
@@ -172,6 +190,8 @@ export async function saveEventTheme(
             secondary_color: input.secondary_color!,
             button_primary_color: input.button_primary_color!,
             button_secondary_color: input.button_secondary_color!,
+            text_color: input.text_color ?? '#FFFFFF',
+            body_text_color: input.body_text_color ?? '#CBD5E1',
           },
         });
         themeIdToUse = updated.id;
@@ -187,6 +207,8 @@ export async function saveEventTheme(
           secondary_color: input.secondary_color!,
           button_primary_color: input.button_primary_color!,
           button_secondary_color: input.button_secondary_color!,
+          text_color: input.text_color ?? '#FFFFFF',
+          body_text_color: input.body_text_color ?? '#CBD5E1',
           tenant_owner_id: tenantOwnerId ?? null,
         },
       });

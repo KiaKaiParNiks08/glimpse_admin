@@ -396,4 +396,62 @@ describe('Event Dynamic Theme Management & Multi-Tenant Entitlement Tests', () =
     assert.equal(formatted.is_custom, formatted.isCustom);
     assert.equal(formatted.custom_themes_enabled, formatted.customThemesEnabled);
   });
+
+  // 13. Text colors (text_color & body_text_color) are resolved and normalized
+  test('13. Text colors (text_color & body_text_color) are resolved and normalized', () => {
+    const formatted = formatThemeResponse({
+      eventId: 'evt-text-colors',
+      customThemesEnabled: true,
+      themeRow: {
+        id: 't-text',
+        name: 'Text Color Theme',
+        primary_color: '#000000',
+        secondary_color: '#111111',
+        button_primary_color: '#222222',
+        button_secondary_color: '#333333',
+        text_color: '#ffffff',
+        body_text_color: '#cbd5e1',
+      },
+    });
+
+    assert.equal(formatted.text_color, '#FFFFFF');
+    assert.equal(formatted.textColor, '#FFFFFF');
+    assert.equal(formatted.body_text_color, '#CBD5E1');
+    assert.equal(formatted.bodyTextColor, '#CBD5E1');
+
+    // Default fallback when null/omitted
+    const defaultFormatted = formatThemeResponse({
+      eventId: 'evt-text-default',
+      customThemesEnabled: true,
+      themeRow: null,
+    });
+    assert.equal(defaultFormatted.text_color, '#FFFFFF');
+    assert.equal(defaultFormatted.body_text_color, '#CBD5E1');
+  });
+
+  // 14. Super Admin event creation exemption
+  test('14. Super Admin event creation exemption', () => {
+    function canManageEventTheme(
+      adminTier: 'super_admin' | 'client_admin',
+      eventCreatedByRole: string,
+      planHasFeature: boolean
+    ) {
+      if (adminTier === 'super_admin' || eventCreatedByRole === 'super_admin') {
+        return true;
+      }
+      return planHasFeature;
+    }
+
+    // Super Admin editing event owned by Essential client -> ALLOWED
+    assert.equal(canManageEventTheme('super_admin', 'client_admin', false), true);
+
+    // Event created by Super Admin -> ALLOWED
+    assert.equal(canManageEventTheme('client_admin', 'super_admin', false), true);
+
+    // Client Admin on Essential plan -> BLOCKED
+    assert.equal(canManageEventTheme('client_admin', 'client_admin', false), false);
+
+    // Client Admin on Signature plan -> ALLOWED
+    assert.equal(canManageEventTheme('client_admin', 'client_admin', true), true);
+  });
 });

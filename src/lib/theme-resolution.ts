@@ -60,6 +60,8 @@ export const DEFAULT_APP_THEME = {
   secondary_color: '#F97316',
   button_primary_color: '#4338CA',
   button_secondary_color: '#0369A1',
+  text_color: '#FFFFFF',
+  body_text_color: '#CBD5E1',
 } as const;
 
 /**
@@ -127,6 +129,10 @@ export interface FormattedThemePayload {
   buttonPrimaryColor: string;
   button_secondary_color: string;
   buttonSecondaryColor: string;
+  text_color: string;
+  textColor: string;
+  body_text_color: string;
+  bodyTextColor: string;
   background_style: ThemeStyle;
   backgroundStyle: ThemeStyle;
   button_style: ThemeStyle;
@@ -161,6 +167,8 @@ export function formatThemeResponse(options: {
     secondary_color: string;
     button_primary_color: string;
     button_secondary_color: string;
+    text_color?: string | null;
+    body_text_color?: string | null;
     created_at?: Date | null;
     updated_at?: Date | null;
   } | null;
@@ -175,6 +183,8 @@ export function formatThemeResponse(options: {
     secondary_color: DEFAULT_APP_THEME.secondary_color,
     button_primary_color: DEFAULT_APP_THEME.button_primary_color,
     button_secondary_color: DEFAULT_APP_THEME.button_secondary_color,
+    text_color: DEFAULT_APP_THEME.text_color,
+    body_text_color: DEFAULT_APP_THEME.body_text_color,
     created_at: null,
     updated_at: null,
   };
@@ -183,6 +193,8 @@ export function formatThemeResponse(options: {
   const secondary = normalizeHexColor(activeTheme.secondary_color) ?? DEFAULT_APP_THEME.secondary_color;
   const buttonPrimary = normalizeHexColor(activeTheme.button_primary_color) ?? DEFAULT_APP_THEME.button_primary_color;
   const buttonSecondary = normalizeHexColor(activeTheme.button_secondary_color) ?? DEFAULT_APP_THEME.button_secondary_color;
+  const textColor = normalizeHexColor(activeTheme.text_color) ?? DEFAULT_APP_THEME.text_color;
+  const bodyTextColor = normalizeHexColor(activeTheme.body_text_color) ?? DEFAULT_APP_THEME.body_text_color;
 
   const bgStyle = resolveGradientStyle(primary, secondary);
   const btnStyle = resolveGradientStyle(buttonPrimary, buttonSecondary);
@@ -200,6 +212,10 @@ export function formatThemeResponse(options: {
     buttonPrimaryColor: buttonPrimary,
     button_secondary_color: buttonSecondary,
     buttonSecondaryColor: buttonSecondary,
+    text_color: textColor,
+    textColor: textColor,
+    body_text_color: bodyTextColor,
+    bodyTextColor: bodyTextColor,
     background_style: bgStyle,
     backgroundStyle: bgStyle,
     button_style: btnStyle,

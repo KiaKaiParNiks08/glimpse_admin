@@ -12,6 +12,8 @@ export const createAppThemeSchema = z.object({
   secondary_color: hexColorSchema,
   button_primary_color: hexColorSchema,
   button_secondary_color: hexColorSchema,
+  text_color: hexColorSchema.optional().default('#FFFFFF'),
+  body_text_color: hexColorSchema.optional().default('#CBD5E1'),
 });
 
 export const listAppThemesQuerySchema = z.object({

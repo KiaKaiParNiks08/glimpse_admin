@@ -27,6 +27,8 @@ export type AppThemeRow = {
   secondary_color: string;
   button_primary_color: string;
   button_secondary_color: string;
+  text_color?: string | null;
+  body_text_color?: string | null;
   tenant_owner_id: string | null;
   created_at: Date | null;
   updated_at: Date | null;

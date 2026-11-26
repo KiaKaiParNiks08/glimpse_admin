@@ -468,6 +468,8 @@ export function getOpenApiSpec(serverUrl: string) {
                           secondary_color: { type: 'string', nullable: true, example: '#F97316' },
                           button_primary_color: { type: 'string', nullable: true, example: '#4338CA' },
                           button_secondary_color: { type: 'string', nullable: true, example: '#0369A1' },
+                          text_color: { type: 'string', nullable: true, example: '#FFFFFF' },
+                          body_text_color: { type: 'string', nullable: true, example: '#CBD5E1' },
                           enabled_features: { type: 'object' },
                           needs_fcm_token_sync: { type: 'boolean', example: false },
                         },
@@ -2491,6 +2493,8 @@ export function getOpenApiSpec(serverUrl: string) {
                           secondary_color: { type: 'string', nullable: true, example: '#F97316' },
                           button_primary_color: { type: 'string', nullable: true, example: '#4338CA' },
                           button_secondary_color: { type: 'string', nullable: true, example: '#0369A1' },
+                          text_color: { type: 'string', nullable: true, example: '#FFFFFF' },
+                          body_text_color: { type: 'string', nullable: true, example: '#CBD5E1' },
                           event_status: {
                             type: 'string',
                             nullable: true,
@@ -2801,6 +2805,53 @@ export function getOpenApiSpec(serverUrl: string) {
             '400': { description: 'Invalid event_id, phase or viewer_user_id' },
             '404': { description: 'Event not found' },
             '500': { description: 'Server error' },
+          },
+        },
+      },
+      '/api/events/{event_id}/theme': {
+        get: {
+          summary: 'Get dynamic theme and preview assets for an event',
+          description:
+            'Returns the resolved dynamic theme colors (primary_color, secondary_color, button_primary_color, button_secondary_color, text_color, body_text_color) with computed gradient styles (background_style, button_style), plan entitlement flags, and preview_assets. Includes camelCase aliases.',
+          tags: ['Events'],
+          parameters: [
+            { name: 'event_id', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } },
+          ],
+          responses: {
+            '200': {
+              description: 'Resolved dynamic theme payload',
+              content: {
+                'application/json': {
+                  schema: {
+                    type: 'object',
+                    properties: {
+                      message: { type: 'string', example: 'Success' },
+                      data: {
+                        type: 'object',
+                        properties: {
+                          id: { type: 'string', nullable: true },
+                          name: { type: 'string', example: 'Ocean Royal' },
+                          primary_color: { type: 'string', example: '#0F172A' },
+                          secondary_color: { type: 'string', example: '#F97316' },
+                          button_primary_color: { type: 'string', example: '#4338CA' },
+                          button_secondary_color: { type: 'string', example: '#0369A1' },
+                          text_color: { type: 'string', example: '#FFFFFF' },
+                          body_text_color: { type: 'string', example: '#CBD5E1' },
+                          background_style: { type: 'string', enum: ['solid', 'gradient'], example: 'gradient' },
+                          button_style: { type: 'string', enum: ['solid', 'gradient'], example: 'gradient' },
+                          is_background_gradient: { type: 'boolean', example: true },
+                          is_button_gradient: { type: 'boolean', example: true },
+                          is_custom: { type: 'boolean', example: true },
+                          custom_themes_enabled: { type: 'boolean', example: true },
+                          event_id: { type: 'string', format: 'uuid' },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+            '404': { description: 'Event not found' },
           },
         },
       },

@@ -20,6 +20,8 @@ import {
 } from '@/lib/event-categories';
 import type { AppThemeOption, EventCategoryOption, VenueOption } from '@/app/actions/events';
 import { AppThemeAddModal } from '@/components/EventForm/AppThemeAddModal';
+import { DEFAULT_APP_THEME } from '@/lib/theme-resolution';
+import { MobileThemePreview } from '@/components/theme/MobileThemePreview';
 
 export type EventFormValues = {
   category_id: string;
@@ -287,6 +289,7 @@ export function EventForm({
   const [error, setError] = useState<string | null>(null);
   const [themeModalOpen, setThemeModalOpen] = useState(false);
   const [themeOptions, setThemeOptions] = useState<AppThemeOption[]>(themes);
+  const [showMobilePreview, setShowMobilePreview] = useState(true);
 
   useEffect(() => {
     const list = [...themes];
@@ -635,7 +638,31 @@ export function EventForm({
             >
               Add new theme…
             </button>
+            <button
+              type="button"
+              className={styles.themeAddBtn}
+              onClick={() => setShowMobilePreview((prev) => !prev)}
+            >
+              {showMobilePreview ? 'Hide mobile preview' : 'Show mobile preview'}
+            </button>
           </div>
+          {showMobilePreview && (
+            <div style={{ marginTop: '1rem', display: 'flex', justifyContent: 'center' }}>
+              <MobileThemePreview
+                primaryColor={selectedTheme?.primary_color ?? DEFAULT_APP_THEME.primary_color}
+                secondaryColor={selectedTheme?.secondary_color ?? DEFAULT_APP_THEME.secondary_color}
+                buttonPrimaryColor={selectedTheme?.button_primary_color ?? DEFAULT_APP_THEME.button_primary_color}
+                buttonSecondaryColor={selectedTheme?.button_secondary_color ?? DEFAULT_APP_THEME.button_secondary_color}
+                textColor={selectedTheme?.text_color ?? DEFAULT_APP_THEME.text_color}
+                bodyTextColor={selectedTheme?.body_text_color ?? DEFAULT_APP_THEME.body_text_color}
+                eventTitle={values.title}
+                greetingsText={values.greetings_text}
+                bannerImage={values.cover_images?.[0] || null}
+                groomName={values.groom_name}
+                brideName={values.bride_name}
+              />
+            </div>
+          )}
         </div>
         <div className={styles.field} style={{ marginTop: '0.5rem' }}>
           <CoverImagesField

@@ -82,7 +82,8 @@ async function handleSave(request: Request, context: RouteContext) {
     const updatedTheme = await saveEventTheme(
       path.event_id,
       normalized,
-      adminCtx.tenant_owner_id ?? adminCtx.id
+      adminCtx.tenant_owner_id ?? adminCtx.id,
+      adminCtx.tier === 'super_admin'
     );
 
     const res = ok(updatedTheme);

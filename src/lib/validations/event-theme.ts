@@ -36,12 +36,16 @@ export const setEventThemeBodySchema = z
     secondary_color: hexColorField.optional(),
     button_primary_color: hexColorField.optional(),
     button_secondary_color: hexColorField.optional(),
+    text_color: hexColorField.optional(),
+    body_text_color: hexColorField.optional(),
 
     // Colors: camelCase
     primaryColor: hexColorField.optional(),
     secondaryColor: hexColorField.optional(),
     buttonPrimaryColor: hexColorField.optional(),
     buttonSecondaryColor: hexColorField.optional(),
+    textColor: hexColorField.optional(),
+    bodyTextColor: hexColorField.optional(),
 
     // Existing preset linking
     app_theme_id: uuidSchema.optional().nullable(),
@@ -103,6 +107,8 @@ export interface NormalizedEventThemeInput {
   secondary_color?: string;
   button_primary_color?: string;
   button_secondary_color?: string;
+  text_color?: string;
+  body_text_color?: string;
 }
 
 export function normalizeEventThemeInput(input: SetEventThemeBodyInput): NormalizedEventThemeInput {
@@ -116,6 +122,8 @@ export function normalizeEventThemeInput(input: SetEventThemeBodyInput): Normali
   const secondary = normalizeHexColor(input.secondary_color || input.secondaryColor)!;
   const btnPrimary = normalizeHexColor(input.button_primary_color || input.buttonPrimaryColor)!;
   const btnSecondary = normalizeHexColor(input.button_secondary_color || input.buttonSecondaryColor)!;
+  const textColor = normalizeHexColor(input.text_color || input.textColor) ?? '#FFFFFF';
+  const bodyTextColor = normalizeHexColor(input.body_text_color || input.bodyTextColor) ?? '#CBD5E1';
 
   return {
     name,
@@ -123,5 +131,7 @@ export function normalizeEventThemeInput(input: SetEventThemeBodyInput): Normali
     secondary_color: secondary,
     button_primary_color: btnPrimary,
     button_secondary_color: btnSecondary,
+    text_color: textColor,
+    body_text_color: bodyTextColor,
   };
 }

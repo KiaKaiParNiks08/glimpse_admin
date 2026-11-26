@@ -7,6 +7,7 @@ import {
   updateAppThemeAction,
   type AppThemeRow,
 } from '@/app/actions/app-themes';
+import { MobileThemePreview } from '@/components/theme/MobileThemePreview';
 import styles from './app-themes.module.scss';
 
 type AppThemeFormModalProps = {
@@ -54,6 +55,8 @@ export function AppThemeFormModal({ open, mode, row, onClose, onSuccess }: AppTh
   const [secondary, setSecondary] = useState('#38bdf8');
   const [buttonPrimary, setButtonPrimary] = useState('#4338ca');
   const [buttonSecondary, setButtonSecondary] = useState('#0369a1');
+  const [textColor, setTextColor] = useState('#FFFFFF');
+  const [bodyTextColor, setBodyTextColor] = useState('#CBD5E1');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -66,6 +69,8 @@ export function AppThemeFormModal({ open, mode, row, onClose, onSuccess }: AppTh
       setSecondary(row.secondary_color);
       setButtonPrimary(row.button_primary_color);
       setButtonSecondary(row.button_secondary_color);
+      setTextColor(row.text_color ?? '#FFFFFF');
+      setBodyTextColor(row.body_text_color ?? '#CBD5E1');
       return;
     }
     setName('');
@@ -73,6 +78,8 @@ export function AppThemeFormModal({ open, mode, row, onClose, onSuccess }: AppTh
     setSecondary('#38bdf8');
     setButtonPrimary('#4338ca');
     setButtonSecondary('#0369a1');
+    setTextColor('#FFFFFF');
+    setBodyTextColor('#CBD5E1');
   }, [open, mode, row]);
 
   if (!open) return null;
@@ -88,6 +95,8 @@ export function AppThemeFormModal({ open, mode, row, onClose, onSuccess }: AppTh
         secondary_color: secondary,
         button_primary_color: buttonPrimary,
         button_secondary_color: buttonSecondary,
+        text_color: textColor,
+        body_text_color: bodyTextColor,
       };
       if (mode === 'create') {
         const result = await createAppThemeAdminAction(body);
@@ -113,6 +122,7 @@ export function AppThemeFormModal({ open, mode, row, onClose, onSuccess }: AppTh
     <div className={styles.overlay} role="presentation" onClick={onClose}>
       <div
         className={`${styles.modal} ${styles.modalWide}`}
+        style={{ maxWidth: '64rem' }}
         role="dialog"
         aria-modal="true"
         aria-labelledby="app-theme-modal-title"
@@ -127,57 +137,82 @@ export function AppThemeFormModal({ open, mode, row, onClose, onSuccess }: AppTh
           </button>
         </div>
 
-        <form onSubmit={handleSubmit} className={styles.formStack}>
-          <label className={styles.label}>
-            Theme name
-            <input
-              className={styles.input}
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              maxLength={150}
-              required
-              placeholder="e.g. Ocean night"
-            />
-          </label>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '1.5rem', alignItems: 'start' }}>
+          <form onSubmit={handleSubmit} className={styles.formStack}>
+            <label className={styles.label}>
+              Theme name
+              <input
+                className={styles.input}
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                maxLength={150}
+                required
+                placeholder="e.g. Ocean night"
+              />
+            </label>
 
-          <div className={styles.colorRow}>
-            <ColorBlock
-              label="Primary"
-              value={primary}
-              onChange={setPrimary}
-              inputId="theme-primary-color"
-            />
-            <ColorBlock
-              label="Secondary"
-              value={secondary}
-              onChange={setSecondary}
-              inputId="theme-secondary-color"
-            />
-            <ColorBlock
-              label="Button Primary"
-              value={buttonPrimary}
-              onChange={setButtonPrimary}
-              inputId="theme-button-primary-color"
-            />
-            <ColorBlock
-              label="Button Secondary"
-              value={buttonSecondary}
-              onChange={setButtonSecondary}
-              inputId="theme-button-secondary-color"
+            <div className={styles.colorRow}>
+              <ColorBlock
+                label="Primary (Screen Start)"
+                value={primary}
+                onChange={setPrimary}
+                inputId="theme-primary-color"
+              />
+              <ColorBlock
+                label="Secondary (Screen End)"
+                value={secondary}
+                onChange={setSecondary}
+                inputId="theme-secondary-color"
+              />
+              <ColorBlock
+                label="Button Primary"
+                value={buttonPrimary}
+                onChange={setButtonPrimary}
+                inputId="theme-button-primary-color"
+              />
+              <ColorBlock
+                label="Button Secondary"
+                value={buttonSecondary}
+                onChange={setButtonSecondary}
+                inputId="theme-button-secondary-color"
+              />
+              <ColorBlock
+                label="Title Text Color"
+                value={textColor}
+                onChange={setTextColor}
+                inputId="theme-text-color"
+              />
+              <ColorBlock
+                label="Body Text Color"
+                value={bodyTextColor}
+                onChange={setBodyTextColor}
+                inputId="theme-body-text-color"
+              />
+            </div>
+
+            {error && <p className={styles.errorText}>{error}</p>}
+
+            <div className={styles.modalFooter}>
+              <button type="button" className={styles.btnSecondary} onClick={onClose}>
+                Cancel
+              </button>
+              <button type="submit" className={styles.btnPrimary} disabled={submitting}>
+                {submitting ? 'Saving…' : mode === 'create' ? 'Create' : 'Save'}
+              </button>
+            </div>
+          </form>
+
+          <div>
+            <MobileThemePreview
+              primaryColor={primary}
+              secondaryColor={secondary}
+              buttonPrimaryColor={buttonPrimary}
+              buttonSecondaryColor={buttonSecondary}
+              textColor={textColor}
+              bodyTextColor={bodyTextColor}
             />
           </div>
-
-          {error && <p className={styles.errorText}>{error}</p>}
-
-          <div className={styles.modalFooter}>
-            <button type="button" className={styles.btnSecondary} onClick={onClose}>
-              Cancel
-            </button>
-            <button type="submit" className={styles.btnPrimary} disabled={submitting}>
-              {submitting ? 'Saving…' : mode === 'create' ? 'Create' : 'Save'}
-            </button>
-          </div>
-        </form>
+        </div>
       </div>
     </div>
   );

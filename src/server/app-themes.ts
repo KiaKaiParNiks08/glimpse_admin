@@ -14,6 +14,8 @@ export type AppThemeListItem = {
   secondary_color: string;
   button_primary_color: string;
   button_secondary_color: string;
+  text_color?: string | null;
+  body_text_color?: string | null;
   tenant_owner_id: string | null;
   created_at?: Date | null;
   updated_at?: Date | null;
@@ -26,6 +28,8 @@ const appThemeSelect = {
   secondary_color: true,
   button_primary_color: true,
   button_secondary_color: true,
+  text_color: true,
+  body_text_color: true,
   tenant_owner_id: true,
   created_at: true,
   updated_at: true,
@@ -50,6 +54,8 @@ export async function createAppTheme(
       secondary_color: data.secondary_color,
       button_primary_color: data.button_primary_color,
       button_secondary_color: data.button_secondary_color,
+      text_color: data.text_color ?? '#FFFFFF',
+      body_text_color: data.body_text_color ?? '#CBD5E1',
       tenant_owner_id: tenantOwnerId ?? null,
     },
     select: appThemeSelect,
@@ -102,6 +108,8 @@ export async function updateAppTheme(
   if (input.secondary_color !== undefined) data.secondary_color = input.secondary_color;
   if (input.button_primary_color !== undefined) data.button_primary_color = input.button_primary_color;
   if (input.button_secondary_color !== undefined) data.button_secondary_color = input.button_secondary_color;
+  if (input.text_color !== undefined) data.text_color = input.text_color;
+  if (input.body_text_color !== undefined) data.body_text_color = input.body_text_color;
 
   if (Object.keys(data).length === 0) {
     return prisma.app_themes.findUnique({

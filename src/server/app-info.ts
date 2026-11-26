@@ -16,10 +16,14 @@ export type AppInfoResult = {
   secondary_color: string | null;
   button_primary_color: string | null;
   button_secondary_color: string | null;
+  text_color?: string | null;
+  body_text_color?: string | null;
   primaryColor?: string | null;
   secondaryColor?: string | null;
   buttonPrimaryColor?: string | null;
   buttonSecondaryColor?: string | null;
+  textColor?: string | null;
+  bodyTextColor?: string | null;
   event_status: string | null;
   allow_new_event_login: boolean;
   needs_fcm_token_sync: boolean;
@@ -70,6 +74,8 @@ export async function getAppInfo(query: AppInfoQuery): Promise<AppInfoResult | n
                 secondary_color: true,
                 button_primary_color: true,
                 button_secondary_color: true,
+                text_color: true,
+                body_text_color: true,
               },
             },
           },
@@ -139,16 +145,22 @@ export async function getAppInfo(query: AppInfoQuery): Promise<AppInfoResult | n
   const sColor = theme?.secondary_color ?? null;
   const bpColor = theme?.button_primary_color ?? null;
   const bsColor = theme?.button_secondary_color ?? null;
+  const tColor = theme?.text_color ?? '#FFFFFF';
+  const btColor = theme?.body_text_color ?? '#CBD5E1';
 
   return {
     primary_color: pColor,
     secondary_color: sColor,
     button_primary_color: bpColor,
     button_secondary_color: bsColor,
+    text_color: tColor,
+    body_text_color: btColor,
     primaryColor: pColor,
     secondaryColor: sColor,
     buttonPrimaryColor: bpColor,
     buttonSecondaryColor: bsColor,
+    textColor: tColor,
+    bodyTextColor: btColor,
     event_status: event?.status ?? null,
     allow_new_event_login: true,
     needs_fcm_token_sync,

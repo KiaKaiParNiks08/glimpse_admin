@@ -165,6 +165,8 @@ export type AppThemeOption = {
   secondary_color: string;
   button_primary_color: string;
   button_secondary_color: string;
+  text_color?: string | null;
+  body_text_color?: string | null;
 };
 
 export type GetEventsResult =
