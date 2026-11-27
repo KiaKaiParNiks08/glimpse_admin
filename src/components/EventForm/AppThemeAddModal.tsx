@@ -185,6 +185,8 @@ export function AppThemeAddModal({ open, onClose, onCreated }: AppThemeAddModalP
               buttonSecondaryColor={buttonSecondary}
               textColor={textColor}
               bodyTextColor={bodyTextColor}
+              hasThemeSelected={true}
+              layout="single"
             />
           </div>
         </div>

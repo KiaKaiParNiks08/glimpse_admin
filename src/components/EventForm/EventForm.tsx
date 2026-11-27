@@ -647,19 +647,22 @@ export function EventForm({
             </button>
           </div>
           {showMobilePreview && (
-            <div style={{ marginTop: '1rem', display: 'flex', justifyContent: 'center' }}>
+            <div style={{ marginTop: '1rem', width: '100%' }}>
               <MobileThemePreview
-                primaryColor={selectedTheme?.primary_color ?? DEFAULT_APP_THEME.primary_color}
-                secondaryColor={selectedTheme?.secondary_color ?? DEFAULT_APP_THEME.secondary_color}
-                buttonPrimaryColor={selectedTheme?.button_primary_color ?? DEFAULT_APP_THEME.button_primary_color}
-                buttonSecondaryColor={selectedTheme?.button_secondary_color ?? DEFAULT_APP_THEME.button_secondary_color}
-                textColor={selectedTheme?.text_color ?? DEFAULT_APP_THEME.text_color}
-                bodyTextColor={selectedTheme?.body_text_color ?? DEFAULT_APP_THEME.body_text_color}
+                theme={selectedTheme}
+                hasThemeSelected={Boolean(selectedTheme)}
+                primaryColor={selectedTheme?.primary_color}
+                secondaryColor={selectedTheme?.secondary_color}
+                buttonPrimaryColor={selectedTheme?.button_primary_color}
+                buttonSecondaryColor={selectedTheme?.button_secondary_color}
+                textColor={selectedTheme?.text_color ?? undefined}
+                bodyTextColor={selectedTheme?.body_text_color ?? undefined}
                 eventTitle={values.title}
                 greetingsText={values.greetings_text}
                 bannerImage={values.cover_images?.[0] || null}
                 groomName={values.groom_name}
                 brideName={values.bride_name}
+                layout="all"
               />
             </div>
           )}

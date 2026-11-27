@@ -3,95 +3,103 @@
 import { useState } from 'react';
 import styles from './MobileThemePreview.module.scss';
 
+export type MobileThemeOption = {
+  primary_color?: string;
+  secondary_color?: string;
+  button_primary_color?: string;
+  button_secondary_color?: string;
+  text_color?: string | null;
+  body_text_color?: string | null;
+};
+
 export type MobileThemePreviewProps = {
-  primaryColor: string;
-  secondaryColor: string;
-  buttonPrimaryColor: string;
-  buttonSecondaryColor: string;
+  theme?: MobileThemeOption | null;
+  primaryColor?: string;
+  secondaryColor?: string;
+  buttonPrimaryColor?: string;
+  buttonSecondaryColor?: string;
   textColor?: string;
   bodyTextColor?: string;
-  eventTitle?: string;
-  greetingsText?: string;
+  hasThemeSelected?: boolean;
+  eventTitle?: string | null;
+  greetingsText?: string | null;
   bannerImage?: string | null;
   groomName?: string | null;
   brideName?: string | null;
+  layout?: 'single' | 'all';
 };
 
+type ScreenType = 'dashboard' | 'schedule' | 'feed';
+
 export function MobileThemePreview({
+  theme,
   primaryColor,
   secondaryColor,
   buttonPrimaryColor,
   buttonSecondaryColor,
-  textColor = '#FFFFFF',
-  bodyTextColor = '#CBD5E1',
+  textColor,
+  bodyTextColor,
+  hasThemeSelected,
   eventTitle,
   greetingsText,
   bannerImage,
   groomName,
   brideName,
+  layout = 'single',
 }: MobileThemePreviewProps) {
-  const [activeScreen, setActiveScreen] = useState<'dashboard' | 'schedule' | 'feed'>('dashboard');
+  const [activeTabScreen, setActiveTabScreen] = useState<ScreenType>('dashboard');
 
-  const isBgGradient = primaryColor.toLowerCase() !== secondaryColor.toLowerCase();
-  const screenBackground = isBgGradient
-    ? `linear-gradient(180deg, ${primaryColor} 0%, ${secondaryColor} 100%)`
-    : primaryColor;
+  // Determine whether a custom theme is actively applied or "No theme" (default dark)
+  const isSelected = hasThemeSelected ?? Boolean(theme || (primaryColor && primaryColor !== '#0B0D14'));
 
-  const isBtnGradient = buttonPrimaryColor.toLowerCase() !== buttonSecondaryColor.toLowerCase();
-  const buttonStyle = isBtnGradient
-    ? `linear-gradient(135deg, ${buttonPrimaryColor} 0%, ${buttonSecondaryColor} 100%)`
-    : buttonPrimaryColor;
+  const pri = theme?.primary_color ?? primaryColor ?? '#0B0D14';
+  const sec = theme?.secondary_color ?? secondaryColor ?? pri;
+  const btnPri = theme?.button_primary_color ?? buttonPrimaryColor ?? '#22C55E';
+  const btnSec = theme?.button_secondary_color ?? buttonSecondaryColor ?? btnPri;
+  const txtColor = theme?.text_color ?? textColor ?? '#FFFFFF';
+  const bodyColor = theme?.body_text_color ?? bodyTextColor ?? (isSelected ? '#CBD5E1' : '#94A3B8');
 
+  // When no theme is selected: default clean dark background (#0B0D14). No colorful gradient.
+  const isBgGradient = isSelected && pri.toLowerCase() !== sec.toLowerCase();
+  const screenBackground = !isSelected
+    ? '#0B0D14'
+    : isBgGradient
+      ? `linear-gradient(180deg, ${pri} 0%, ${sec} 100%)`
+      : pri;
+
+  // When no theme is selected: default clean button styling.
+  const isBtnGradient = isSelected && btnPri.toLowerCase() !== btnSec.toLowerCase();
+  const buttonStyle = !isSelected
+    ? '#22C55E'
+    : isBtnGradient
+      ? `linear-gradient(135deg, ${btnPri} 0%, ${btnSec} 100%)`
+      : btnPri;
+
+  // POC card background:
+  const pocCardBackground = !isSelected ? '#181C26' : buttonStyle;
+  const pocCardBorder = !isSelected ? '1px solid rgba(255, 255, 255, 0.08)' : 'none';
+
+  // Dynamic user data with clean fallbacks
   const titleText = eventTitle?.trim() || 'Abhi & Aish Wedding 💍✨';
-  const subtitleText = greetingsText?.trim() || 'Two hearts, one beautiful journey, and a lifetime of memories to create.';
+  const subtitleText =
+    greetingsText?.trim() || 'Two hearts, one beautiful journey, and a lifetime of memories to create.';
   const coupleHeading =
     groomName && brideName
       ? `${groomName.toUpperCase()} & ${brideName.toUpperCase()}`
       : 'ABHIAISH Wedding';
+
+  // Hero image: User's uploaded banner image, or clean sample couple image (with NO baked-in text)
   const heroImg = bannerImage?.trim() || '/mobile-preview/dashboard_hero_sample.jpg';
 
-  return (
-    <div className={styles.previewWrapper}>
-      <div className={styles.previewHeader}>
-        <span className={styles.previewTitle}>
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-            <rect x="5" y="2" width="14" height="20" rx="2" ry="2" />
-            <line x1="12" y1="18" x2="12" y2="18" />
-          </svg>
-          Mobile Live Preview
-        </span>
-        <div className={styles.screenTabs}>
-          <button
-            type="button"
-            className={`${styles.screenTabBtn} ${activeScreen === 'dashboard' ? styles.activeTab : ''}`}
-            onClick={() => setActiveScreen('dashboard')}
-          >
-            Dashboard
-          </button>
-          <button
-            type="button"
-            className={`${styles.screenTabBtn} ${activeScreen === 'schedule' ? styles.activeTab : ''}`}
-            onClick={() => setActiveScreen('schedule')}
-          >
-            Schedule
-          </button>
-          <button
-            type="button"
-            className={`${styles.screenTabBtn} ${activeScreen === 'feed' ? styles.activeTab : ''}`}
-            onClick={() => setActiveScreen('feed')}
-          >
-            Feeds
-          </button>
-        </div>
-      </div>
-
+  const renderPhoneViewport = (currentScreen: ScreenType, interactive = false) => {
+    return (
       <div className={styles.phoneFrame}>
         {/* Dynamic Island */}
         <div className={styles.dynamicIsland} />
 
         <div className={styles.screenViewport} style={{ background: screenBackground }}>
           {/* Status Bar */}
-          <div className={styles.statusBar} style={{ color: textColor }}>
+          <div className={styles.statusBar} style={{ color: txtColor }}>
             <span>9:41</span>
             <div className={styles.statusIcons}>
               <span>VoLTE</span>
@@ -102,14 +110,19 @@ export function MobileThemePreview({
             </div>
           </div>
 
-          {/* SCREEN 1: DASHBOARD */}
-          {activeScreen === 'dashboard' && (
+          {/* SCREEN 1: DASHBOARD / HOME */}
+          {currentScreen === 'dashboard' && (
             <div className={styles.dashboardScreen}>
               <div className={styles.topBar}>
-                <span className={styles.screenTitle} style={{ color: textColor }}>
+                <span className={styles.screenTitle} style={{ color: txtColor }}>
                   Home
                 </span>
-                <button type="button" className={styles.bellBtn} style={{ color: textColor }} aria-label="Notifications">
+                <button
+                  type="button"
+                  className={styles.bellBtn}
+                  style={{ color: txtColor }}
+                  aria-label="Notifications"
+                >
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                     <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" />
                     <path d="M13.73 21a2 2 0 0 1-3.46 0" />
@@ -118,17 +131,17 @@ export function MobileThemePreview({
                 </button>
               </div>
 
-              {/* Hero Banner */}
+              {/* Hero Banner: Clean background image + single layer of dynamic HTML text */}
               <div className={styles.heroBanner} style={{ backgroundImage: `url("${heroImg}")` }}>
                 <div className={styles.heroOverlay} />
                 <div className={styles.heroContent}>
-                  <span className={styles.heroTitle} style={{ color: textColor }}>
+                  <span className={styles.heroTitle} style={{ color: txtColor }}>
                     {titleText}
                   </span>
-                  <span className={styles.heroSubtitle} style={{ color: bodyTextColor }}>
+                  <span className={styles.heroSubtitle} style={{ color: bodyColor }}>
                     {subtitleText}
                   </span>
-                  <span className={styles.heroHeading} style={{ color: textColor }}>
+                  <span className={styles.heroHeading} style={{ color: txtColor }}>
                     {coupleHeading}
                   </span>
                 </div>
@@ -142,7 +155,10 @@ export function MobileThemePreview({
               </div>
 
               {/* POC Card */}
-              <div className={styles.pocCard} style={{ background: buttonStyle }}>
+              <div
+                className={styles.pocCard}
+                style={{ background: pocCardBackground, border: pocCardBorder }}
+              >
                 <div className={styles.pocLeft}>
                   <img
                     src="/mobile-preview/poc_sample.jpg"
@@ -154,13 +170,13 @@ export function MobileThemePreview({
                     }}
                   />
                   <div className={styles.pocInfo}>
-                    <span className={styles.pocName} style={{ color: textColor }}>
+                    <span className={styles.pocName} style={{ color: txtColor }}>
                       ABHISHEK UPADHYAY
                     </span>
-                    <span className={styles.pocContact} style={{ color: bodyTextColor }}>
+                    <span className={styles.pocContact} style={{ color: bodyColor }}>
                       +91 94254 24931
                     </span>
-                    <span className={styles.pocContact} style={{ color: bodyTextColor }}>
+                    <span className={styles.pocContact} style={{ color: bodyColor }}>
                       abhishekup141@gmail.com
                     </span>
                   </div>
@@ -180,13 +196,18 @@ export function MobileThemePreview({
           )}
 
           {/* SCREEN 2: SCHEDULE */}
-          {activeScreen === 'schedule' && (
+          {currentScreen === 'schedule' && (
             <div className={styles.scheduleScreen}>
               <div className={styles.topBar}>
-                <span className={styles.screenTitle} style={{ color: textColor }}>
+                <span className={styles.screenTitle} style={{ color: txtColor }}>
                   Event Schedule
                 </span>
-                <button type="button" className={styles.bellBtn} style={{ color: textColor }} aria-label="Notifications">
+                <button
+                  type="button"
+                  className={styles.bellBtn}
+                  style={{ color: txtColor }}
+                  aria-label="Notifications"
+                >
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                     <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" />
                     <path d="M13.73 21a2 2 0 0 1-3.46 0" />
@@ -196,27 +217,33 @@ export function MobileThemePreview({
 
               {/* Date Filter Chips */}
               <div className={styles.filterChips}>
-                <div className={styles.chipActive} style={{ background: buttonStyle, color: textColor }}>
+                <div
+                  className={styles.chipActive}
+                  style={{ background: buttonStyle, color: isSelected ? txtColor : '#FFFFFF' }}
+                >
                   All
                 </div>
-                <div className={styles.chipOutline} style={{ color: bodyTextColor }}>
+                <div className={styles.chipOutline} style={{ color: bodyColor }}>
                   20th Nov
                 </div>
-                <div className={styles.chipOutline} style={{ color: bodyTextColor }}>
+                <div className={styles.chipOutline} style={{ color: bodyColor }}>
                   21st Nov
                 </div>
               </div>
 
-              {/* Session Card 1: Mehendi */}
-              <div className={styles.sessionCard} style={{ backgroundImage: 'url("/mobile-preview/schedule_sample.jpg")' }}>
+              {/* Session Card 1: Mehendi (Clean wedding arch on beach) */}
+              <div
+                className={styles.sessionCard}
+                style={{ backgroundImage: 'url("/mobile-preview/schedule_sample.jpg")' }}
+              >
                 <div className={styles.sessionOverlay} />
                 <div className={styles.sessionTop}>
-                  <span className={styles.sessionTitle} style={{ color: textColor }}>
+                  <span className={styles.sessionTitle} style={{ color: txtColor }}>
                     MEHENDI
                   </span>
                 </div>
                 <div className={styles.sessionBottom}>
-                  <p className={styles.sessionDesc} style={{ color: bodyTextColor }}>
+                  <p className={styles.sessionDesc} style={{ color: bodyColor }}>
                     Celebrate love, laughter, and beautiful traditions with an enchanting Mehendi ceremony…
                   </p>
                   <div className={styles.sessionActions}>
@@ -229,7 +256,7 @@ export function MobileThemePreview({
                     <button
                       type="button"
                       className={styles.sessionArrowBtn}
-                      style={{ background: buttonStyle, color: textColor }}
+                      style={{ background: buttonStyle, color: isSelected ? txtColor : '#FFFFFF' }}
                       aria-label="View Session"
                     >
                       ↗
@@ -249,7 +276,7 @@ export function MobileThemePreview({
               >
                 <div className={styles.sessionOverlay} />
                 <div className={styles.sessionTop}>
-                  <span className={styles.sessionTitle} style={{ color: textColor }}>
+                  <span className={styles.sessionTitle} style={{ color: txtColor }}>
                     HALDI
                   </span>
                 </div>
@@ -258,13 +285,18 @@ export function MobileThemePreview({
           )}
 
           {/* SCREEN 3: FEEDS */}
-          {activeScreen === 'feed' && (
+          {currentScreen === 'feed' && (
             <div className={styles.feedScreen}>
               <div className={styles.topBar}>
-                <span className={styles.screenTitle} style={{ color: textColor }}>
+                <span className={styles.screenTitle} style={{ color: txtColor }}>
                   Feeds
                 </span>
-                <button type="button" className={styles.bellBtn} style={{ color: textColor }} aria-label="Notifications">
+                <button
+                  type="button"
+                  className={styles.bellBtn}
+                  style={{ color: txtColor }}
+                  aria-label="Notifications"
+                >
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                     <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" />
                     <path d="M13.73 21a2 2 0 0 1-3.46 0" />
@@ -282,16 +314,16 @@ export function MobileThemePreview({
                     className={styles.postAvatar}
                   />
                   <div className={styles.postMeta}>
-                    <span className={styles.postAuthor} style={{ color: textColor }}>
+                    <span className={styles.postAuthor} style={{ color: txtColor }}>
                       gaurang
                     </span>
-                    <span className={styles.postTime} style={{ color: bodyTextColor }}>
+                    <span className={styles.postTime} style={{ color: bodyColor }}>
                       2 weeks ago
                     </span>
                   </div>
                 </div>
 
-                <p className={styles.postCaption} style={{ color: bodyTextColor }}>
+                <p className={styles.postCaption} style={{ color: bodyColor }}>
                   ai test
                 </p>
 
@@ -305,7 +337,7 @@ export function MobileThemePreview({
                   }}
                 />
 
-                <div className={styles.postActions} style={{ color: textColor }}>
+                <div className={styles.postActions} style={{ color: txtColor }}>
                   <div className={styles.postLeftActions}>
                     <span className={styles.actionItem}>
                       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -336,7 +368,7 @@ export function MobileThemePreview({
               <button
                 type="button"
                 className={styles.fabButton}
-                style={{ background: buttonStyle, color: textColor }}
+                style={{ background: buttonStyle, color: isSelected ? txtColor : '#FFFFFF' }}
                 aria-label="New Post"
               >
                 +
@@ -348,9 +380,11 @@ export function MobileThemePreview({
           <div className={styles.bottomNav}>
             <button
               type="button"
-              className={`${styles.navItem} ${activeScreen === 'dashboard' ? styles.navItemActive : ''}`}
-              style={{ color: activeScreen === 'dashboard' ? buttonPrimaryColor : '#64748b' }}
-              onClick={() => setActiveScreen('dashboard')}
+              className={`${styles.navItem} ${currentScreen === 'dashboard' ? styles.navItemActive : ''}`}
+              style={{
+                color: currentScreen === 'dashboard' ? (isSelected ? btnPri : '#38BDF8') : '#64748b',
+              }}
+              onClick={() => interactive && setActiveTabScreen('dashboard')}
             >
               <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
                 <path d="M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z" />
@@ -359,9 +393,11 @@ export function MobileThemePreview({
             </button>
             <button
               type="button"
-              className={`${styles.navItem} ${activeScreen === 'schedule' ? styles.navItemActive : ''}`}
-              style={{ color: activeScreen === 'schedule' ? buttonPrimaryColor : '#64748b' }}
-              onClick={() => setActiveScreen('schedule')}
+              className={`${styles.navItem} ${currentScreen === 'schedule' ? styles.navItemActive : ''}`}
+              style={{
+                color: currentScreen === 'schedule' ? (isSelected ? btnPri : '#38BDF8') : '#64748b',
+              }}
+              onClick={() => interactive && setActiveTabScreen('schedule')}
             >
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                 <rect x="3" y="4" width="18" height="18" rx="2" ry="2" />
@@ -373,9 +409,11 @@ export function MobileThemePreview({
             </button>
             <button
               type="button"
-              className={`${styles.navItem} ${activeScreen === 'feed' ? styles.navItemActive : ''}`}
-              style={{ color: activeScreen === 'feed' ? buttonPrimaryColor : '#64748b' }}
-              onClick={() => setActiveScreen('feed')}
+              className={`${styles.navItem} ${currentScreen === 'feed' ? styles.navItemActive : ''}`}
+              style={{
+                color: currentScreen === 'feed' ? (isSelected ? btnPri : '#38BDF8') : '#64748b',
+              }}
+              onClick={() => interactive && setActiveTabScreen('feed')}
             >
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                 <rect x="3" y="3" width="7" height="7" />
@@ -402,6 +440,91 @@ export function MobileThemePreview({
           </div>
         </div>
       </div>
+    );
+  };
+
+  // MULTI-SCREEN VIEW (Used in Event Form: shows Home, Schedule, and Feeds simultaneously)
+  if (layout === 'all') {
+    return (
+      <div className={styles.allScreensContainer}>
+        <div className={styles.allScreensHeader}>
+          <div className={styles.previewTitle}>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <rect x="5" y="2" width="14" height="20" rx="2" ry="2" />
+              <line x1="12" y1="18" x2="12" y2="18" />
+            </svg>
+            Mobile Screens Live Preview
+          </div>
+          <div className={styles.themeStatusBadge}>
+            {isSelected ? (
+              <span className={styles.activeThemeBadge}>
+                <span
+                  className={styles.themeSwatchDot}
+                  style={{ background: isBgGradient ? `linear-gradient(135deg, ${pri}, ${sec})` : pri }}
+                />
+                Custom Theme Active
+              </span>
+            ) : (
+              <span className={styles.defaultThemeBadge}>Default Dark Theme (No Custom Theme Selected)</span>
+            )}
+          </div>
+        </div>
+
+        <div className={styles.multiScreensRow}>
+          <div className={styles.screenCard}>
+            <div className={styles.screenCardBadge}>1. Home Screen</div>
+            {renderPhoneViewport('dashboard')}
+          </div>
+          <div className={styles.screenCard}>
+            <div className={styles.screenCardBadge}>2. Schedule Screen</div>
+            {renderPhoneViewport('schedule')}
+          </div>
+          <div className={styles.screenCard}>
+            <div className={styles.screenCardBadge}>3. Feeds Screen</div>
+            {renderPhoneViewport('feed')}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // SINGLE SCREEN VIEW WITH TABS (Used in compact color picker modals)
+  return (
+    <div className={styles.previewWrapper}>
+      <div className={styles.previewHeader}>
+        <span className={styles.previewTitle}>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <rect x="5" y="2" width="14" height="20" rx="2" ry="2" />
+            <line x1="12" y1="18" x2="12" y2="18" />
+          </svg>
+          Live Preview
+        </span>
+        <div className={styles.screenTabs}>
+          <button
+            type="button"
+            className={`${styles.screenTabBtn} ${activeTabScreen === 'dashboard' ? styles.activeTab : ''}`}
+            onClick={() => setActiveTabScreen('dashboard')}
+          >
+            Dashboard
+          </button>
+          <button
+            type="button"
+            className={`${styles.screenTabBtn} ${activeTabScreen === 'schedule' ? styles.activeTab : ''}`}
+            onClick={() => setActiveTabScreen('schedule')}
+          >
+            Schedule
+          </button>
+          <button
+            type="button"
+            className={`${styles.screenTabBtn} ${activeTabScreen === 'feed' ? styles.activeTab : ''}`}
+            onClick={() => setActiveTabScreen('feed')}
+          >
+            Feeds
+          </button>
+        </div>
+      </div>
+
+      {renderPhoneViewport(activeTabScreen, true)}
     </div>
   );
 }

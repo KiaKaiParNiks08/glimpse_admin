@@ -210,6 +210,8 @@ export function AppThemeFormModal({ open, mode, row, onClose, onSuccess }: AppTh
               buttonSecondaryColor={buttonSecondary}
               textColor={textColor}
               bodyTextColor={bodyTextColor}
+              hasThemeSelected={true}
+              layout="single"
             />
           </div>
         </div>

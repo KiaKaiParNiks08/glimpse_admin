@@ -1,3 +1,105 @@
+/* Multi-screens side-by-side layout (used in EventForm) */
+.allScreensContainer {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  gap: 1.25rem;
+  padding: 1.25rem;
+  background: var(--surface-bg-subtle, #f8fafc);
+  border: 1px solid var(--border-color, #e2e8f0);
+  border-radius: 20px;
+  box-sizing: border-box;
+}
+
+:global([data-theme='dark']) .allScreensContainer {
+  background: rgba(15, 23, 42, 0.5);
+  border-color: rgba(255, 255, 255, 0.08);
+}
+
+.allScreensHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding-bottom: 0.75rem;
+  border-bottom: 1px solid var(--border-color, #e2e8f0);
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+:global([data-theme='dark']) .allScreensHeader {
+  border-bottom-color: rgba(255, 255, 255, 0.08);
+}
+
+.themeStatusBadge {
+  font-size: 0.78rem;
+  display: flex;
+  align-items: center;
+}
+
+.activeThemeBadge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  font-weight: 600;
+  color: #10b981;
+  background: rgba(16, 185, 129, 0.1);
+  padding: 0.25rem 0.65rem;
+  border-radius: 12px;
+  border: 1px solid rgba(16, 185, 129, 0.25);
+}
+
+.defaultThemeBadge {
+  color: var(--text-muted, #64748b);
+  font-weight: 500;
+  background: var(--control-bg, rgba(255, 255, 255, 0.05));
+  padding: 0.25rem 0.65rem;
+  border-radius: 12px;
+}
+
+.themeSwatchDot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  display: inline-block;
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.4);
+}
+
+.multiScreensRow {
+  display: flex;
+  flex-direction: row;
+  justify-content: center;
+  align-items: flex-start;
+  gap: 1.5rem;
+  width: 100%;
+  flex-wrap: wrap;
+}
+
+.screenCard {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.65rem;
+}
+
+.screenCardBadge {
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  color: var(--text-color, #1e293b);
+  background: var(--control-bg, #ffffff);
+  border: 1px solid var(--border-color, #cbd5e1);
+  border-radius: 14px;
+  padding: 0.25rem 0.85rem;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+}
+
+:global([data-theme='dark']) .screenCardBadge {
+  color: #f1f5f9;
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(255, 255, 255, 0.12);
+}
+
 .previewWrapper {
   display: flex;
   flex-direction: column;
@@ -11,7 +113,109 @@
   margin: 0 auto;
 }
 
-:global([data-theme='dark']) .previewWrapper {
+:global([data-theme='dark']) /* Multi-screens side-by-side layout (used in EventForm) */
+.allScreensContainer {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  gap: 1.25rem;
+  padding: 1.25rem;
+  background: var(--surface-bg-subtle, #f8fafc);
+  border: 1px solid var(--border-color, #e2e8f0);
+  border-radius: 20px;
+  box-sizing: border-box;
+}
+
+:global([data-theme='dark']) .allScreensContainer {
+  background: rgba(15, 23, 42, 0.5);
+  border-color: rgba(255, 255, 255, 0.08);
+}
+
+.allScreensHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding-bottom: 0.75rem;
+  border-bottom: 1px solid var(--border-color, #e2e8f0);
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+:global([data-theme='dark']) .allScreensHeader {
+  border-bottom-color: rgba(255, 255, 255, 0.08);
+}
+
+.themeStatusBadge {
+  font-size: 0.78rem;
+  display: flex;
+  align-items: center;
+}
+
+.activeThemeBadge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  font-weight: 600;
+  color: #10b981;
+  background: rgba(16, 185, 129, 0.1);
+  padding: 0.25rem 0.65rem;
+  border-radius: 12px;
+  border: 1px solid rgba(16, 185, 129, 0.25);
+}
+
+.defaultThemeBadge {
+  color: var(--text-muted, #64748b);
+  font-weight: 500;
+  background: var(--control-bg, rgba(255, 255, 255, 0.05));
+  padding: 0.25rem 0.65rem;
+  border-radius: 12px;
+}
+
+.themeSwatchDot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  display: inline-block;
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.4);
+}
+
+.multiScreensRow {
+  display: flex;
+  flex-direction: row;
+  justify-content: center;
+  align-items: flex-start;
+  gap: 1.5rem;
+  width: 100%;
+  flex-wrap: wrap;
+}
+
+.screenCard {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.65rem;
+}
+
+.screenCardBadge {
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  color: var(--text-color, #1e293b);
+  background: var(--control-bg, #ffffff);
+  border: 1px solid var(--border-color, #cbd5e1);
+  border-radius: 14px;
+  padding: 0.25rem 0.85rem;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+}
+
+:global([data-theme='dark']) .screenCardBadge {
+  color: #f1f5f9;
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(255, 255, 255, 0.12);
+}
+
+.previewWrapper {
   background: rgba(15, 23, 42, 0.6);
   border-color: rgba(255, 255, 255, 0.1);
 }
