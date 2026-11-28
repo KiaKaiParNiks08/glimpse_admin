@@ -47,40 +47,97 @@ export async function getEventTheme(
   }
 
   const [event, entitlements] = await Promise.all([
-    prisma.events.findUnique({
-      where: { id: eventId },
-      select: {
-        id: true,
-        title: true,
-        cover_image: true,
-        app_theme_id: true,
-        created_by: true,
-        users: {
-          select: {
-            roles: { select: { name: true } },
-          },
-        },
-        app_themes: {
+    (async () => {
+      try {
+        return await prisma.events.findUnique({
+          where: { id: eventId },
           select: {
             id: true,
-            name: true,
-            primary_color: true,
-            secondary_color: true,
-            button_primary_color: true,
-            button_secondary_color: true,
-            text_color: true,
-            body_text_color: true,
-            created_at: true,
-            updated_at: true,
+            title: true,
+            cover_image: true,
+            app_theme_id: true,
+            created_by: true,
+            users: {
+              select: {
+                roles: { select: { name: true } },
+              },
+            },
+            app_themes: {
+              select: {
+                id: true,
+                name: true,
+                primary_color: true,
+                secondary_color: true,
+                button_primary_color: true,
+                button_secondary_color: true,
+                text_color: true,
+                body_text_color: true,
+                created_at: true,
+                updated_at: true,
+              },
+            },
+            event_cover_images: {
+              select: { image_url: true },
+              orderBy: { display_order: 'asc' },
+              take: 3,
+            },
           },
-        },
-        event_cover_images: {
-          select: { image_url: true },
-          orderBy: { display_order: 'asc' },
-          take: 3,
-        },
-      },
-    }),
+        });
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        if (
+          msg.includes('text_color') ||
+          msg.includes('body_text_color') ||
+          msg.includes('Unknown field') ||
+          msg.includes('column')
+        ) {
+          const fallback = await prisma.events.findUnique({
+            where: { id: eventId },
+            select: {
+              id: true,
+              title: true,
+              cover_image: true,
+              app_theme_id: true,
+              created_by: true,
+              users: {
+                select: {
+                  roles: { select: { name: true } },
+                },
+              },
+              app_themes: {
+                select: {
+                  id: true,
+                  name: true,
+                  primary_color: true,
+                  secondary_color: true,
+                  button_primary_color: true,
+                  button_secondary_color: true,
+                  created_at: true,
+                  updated_at: true,
+                },
+              },
+              event_cover_images: {
+                select: { image_url: true },
+                orderBy: { display_order: 'asc' },
+                take: 3,
+              },
+            },
+          });
+          if (!fallback) return null;
+          return {
+            ...fallback,
+            app_themes: fallback.app_themes
+              ? {
+                  ...fallback.app_themes,
+                  text_color: '#FFFFFF',
+                  body_text_color: '#CBD5E1',
+                }
+              : null,
+          };
+        }
+        throw err;
+      }
+    })(),
     getEventEffectiveEntitlements(eventId),
   ]);
 
@@ -182,8 +239,40 @@ export async function saveEventTheme(
       });
       if (otherEventsCount === 0) {
         // Dedicated to this event, update in place
-        const updated = await prisma.app_themes.update({
-          where: { id: event.app_theme_id },
+        try {
+          const updated = await prisma.app_themes.update({
+            where: { id: event.app_theme_id },
+            data: {
+              name: input.name,
+              primary_color: input.primary_color,
+              secondary_color: input.secondary_color!,
+              button_primary_color: input.button_primary_color!,
+              button_secondary_color: input.button_secondary_color!,
+              text_color: input.text_color ?? '#FFFFFF',
+              body_text_color: input.body_text_color ?? '#CBD5E1',
+            },
+          });
+          themeIdToUse = updated.id;
+        } catch {
+          const updated = await prisma.app_themes.update({
+            where: { id: event.app_theme_id },
+            data: {
+              name: input.name,
+              primary_color: input.primary_color,
+              secondary_color: input.secondary_color!,
+              button_primary_color: input.button_primary_color!,
+              button_secondary_color: input.button_secondary_color!,
+            },
+          });
+          themeIdToUse = updated.id;
+        }
+      }
+    }
+
+    if (!themeIdToUse) {
+      // Create new dedicated theme for this event
+      try {
+        const created = await prisma.app_themes.create({
           data: {
             name: input.name,
             primary_color: input.primary_color,
@@ -192,27 +281,23 @@ export async function saveEventTheme(
             button_secondary_color: input.button_secondary_color!,
             text_color: input.text_color ?? '#FFFFFF',
             body_text_color: input.body_text_color ?? '#CBD5E1',
+            tenant_owner_id: tenantOwnerId ?? null,
           },
         });
-        themeIdToUse = updated.id;
+        themeIdToUse = created.id;
+      } catch {
+        const created = await prisma.app_themes.create({
+          data: {
+            name: input.name,
+            primary_color: input.primary_color,
+            secondary_color: input.secondary_color!,
+            button_primary_color: input.button_primary_color!,
+            button_secondary_color: input.button_secondary_color!,
+            tenant_owner_id: tenantOwnerId ?? null,
+          },
+        });
+        themeIdToUse = created.id;
       }
-    }
-
-    if (!themeIdToUse) {
-      // Create new dedicated theme for this event
-      const created = await prisma.app_themes.create({
-        data: {
-          name: input.name,
-          primary_color: input.primary_color,
-          secondary_color: input.secondary_color!,
-          button_primary_color: input.button_primary_color!,
-          button_secondary_color: input.button_secondary_color!,
-          text_color: input.text_color ?? '#FFFFFF',
-          body_text_color: input.body_text_color ?? '#CBD5E1',
-          tenant_owner_id: tenantOwnerId ?? null,
-        },
-      });
-      themeIdToUse = created.id;
     }
 
     await prisma.events.update({

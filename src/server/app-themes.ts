@@ -74,20 +74,58 @@ export async function createAppTheme(
   data: CreateAppThemeInput,
   tenantOwnerId?: string | null
 ): Promise<AppThemeListItem> {
-  const row = await prisma.app_themes.create({
-    data: {
-      name: data.name.trim(),
-      primary_color: data.primary_color,
-      secondary_color: data.secondary_color,
-      button_primary_color: data.button_primary_color,
-      button_secondary_color: data.button_secondary_color,
-      text_color: data.text_color ?? '#FFFFFF',
-      body_text_color: data.body_text_color ?? '#CBD5E1',
-      tenant_owner_id: tenantOwnerId ?? null,
-    },
-    select: appThemeSelect,
-  });
-  return row;
+  try {
+    const row = await prisma.app_themes.create({
+      data: {
+        name: data.name.trim(),
+        primary_color: data.primary_color,
+        secondary_color: data.secondary_color,
+        button_primary_color: data.button_primary_color,
+        button_secondary_color: data.button_secondary_color,
+        text_color: data.text_color ?? '#FFFFFF',
+        body_text_color: data.body_text_color ?? '#CBD5E1',
+        tenant_owner_id: tenantOwnerId ?? null,
+      },
+      select: appThemeSelect,
+    });
+    return row;
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    if (
+      msg.includes('text_color') ||
+      msg.includes('body_text_color') ||
+      msg.includes('Unknown field') ||
+      msg.includes('column')
+    ) {
+      const fallbackRow = await prisma.app_themes.create({
+        data: {
+          name: data.name.trim(),
+          primary_color: data.primary_color,
+          secondary_color: data.secondary_color,
+          button_primary_color: data.button_primary_color,
+          button_secondary_color: data.button_secondary_color,
+          tenant_owner_id: tenantOwnerId ?? null,
+        },
+        select: {
+          id: true,
+          name: true,
+          primary_color: true,
+          secondary_color: true,
+          button_primary_color: true,
+          button_secondary_color: true,
+          tenant_owner_id: true,
+          created_at: true,
+          updated_at: true,
+        },
+      });
+      return {
+        ...fallbackRow,
+        text_color: data.text_color ?? '#FFFFFF',
+        body_text_color: data.body_text_color ?? '#CBD5E1',
+      };
+    }
+    throw err;
+  }
 }
 
 export async function getAppThemes(
@@ -171,21 +209,70 @@ export async function updateAppTheme(
   if (input.text_color !== undefined) data.text_color = input.text_color;
   if (input.body_text_color !== undefined) data.body_text_color = input.body_text_color;
 
-  if (Object.keys(data).length === 0) {
-    return prisma.app_themes.findUnique({
+  try {
+    if (Object.keys(data).length === 0) {
+      return await prisma.app_themes.findUnique({
+        where: { id },
+        select: appThemeSelect,
+      });
+    }
+
+    return await prisma.app_themes.update({
       where: { id },
+      data: {
+        ...data,
+        updated_at: new Date(),
+      },
       select: appThemeSelect,
     });
-  }
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    if (
+      msg.includes('text_color') ||
+      msg.includes('body_text_color') ||
+      msg.includes('Unknown field') ||
+      msg.includes('column')
+    ) {
+      const fallbackData = { ...data };
+      delete fallbackData.text_color;
+      delete fallbackData.body_text_color;
 
-  return prisma.app_themes.update({
-    where: { id },
-    data: {
-      ...data,
-      updated_at: new Date(),
-    },
-    select: appThemeSelect,
-  });
+      const fallbackSelect = {
+        id: true,
+        name: true,
+        primary_color: true,
+        secondary_color: true,
+        button_primary_color: true,
+        button_secondary_color: true,
+        tenant_owner_id: true,
+        created_at: true,
+        updated_at: true,
+      };
+
+      const fallbackRow =
+        Object.keys(fallbackData).length === 0
+          ? await prisma.app_themes.findUnique({
+              where: { id },
+              select: fallbackSelect,
+            })
+          : await prisma.app_themes.update({
+              where: { id },
+              data: {
+                ...fallbackData,
+                updated_at: new Date(),
+              },
+              select: fallbackSelect,
+            });
+
+      if (!fallbackRow) return null;
+      return {
+        ...fallbackRow,
+        text_color: input.text_color ?? '#FFFFFF',
+        body_text_color: input.body_text_color ?? '#CBD5E1',
+      };
+    }
+    throw err;
+  }
 }
 
 export async function deleteAppTheme(id: string): Promise<boolean> {

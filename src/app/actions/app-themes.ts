@@ -92,8 +92,10 @@ export async function createAppThemeAdminAction(body: unknown): Promise<MutateAp
   try {
     const row = await createAppTheme(parsed.data, masterAssetCreateOwnerId(auth.ctx));
     return { ok: true, data: row as AppThemeRow };
-  } catch {
-    return { ok: false, error: 'Unable to create app theme' };
+  } catch (e: unknown) {
+    console.error('createAppThemeAdminAction error:', e);
+    const msg = e instanceof Error ? e.message : 'Unable to create app theme';
+    return { ok: false, error: msg };
   }
 }
 
@@ -120,8 +122,10 @@ export async function updateAppThemeAction(id: string, body: unknown): Promise<M
     const row = await updateAppTheme(idParsed.data.id, parsed.data);
     if (!row) return { ok: false, error: 'App theme not found' };
     return { ok: true, data: row as AppThemeRow };
-  } catch {
-    return { ok: false, error: 'Unable to update app theme' };
+  } catch (e: unknown) {
+    console.error('updateAppThemeAction error:', e);
+    const msg = e instanceof Error ? e.message : 'Unable to update app theme';
+    return { ok: false, error: msg };
   }
 }
 

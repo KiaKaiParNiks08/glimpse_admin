@@ -38,8 +38,9 @@ import type {
 import {
   listAppThemesForSelect,
   createAppTheme,
+  updateAppTheme,
 } from '@/server/app-themes';
-import { createAppThemeSchema } from '@/lib/validations/app-themes';
+import { createAppThemeSchema, updateAppThemeSchema } from '@/lib/validations/app-themes';
 import {
   listEvents,
   getEventById,
@@ -84,6 +85,7 @@ import {
   requireAdminContextFromCookies,
   buildAccessibleEventsWhere,
   canContextAccessEvent,
+  canContextMutateMasterAsset,
   getEventEffectiveFeatures,
   getEventEffectiveEntitlements,
   type EventEffectiveEntitlements,
@@ -465,10 +467,68 @@ export async function createAppThemeAction(
         ? null
         : (auth.ctx.tenant_owner_id ?? auth.ctx.id);
     const theme = await createAppTheme(parsed.data, tenantOwnerId);
-    return { ok: true, data: theme };
-  } catch (e) {
-    console.error(e);
-    return { ok: false, error: 'Unable to create theme' };
+    return {
+      ok: true,
+      data: {
+        id: theme.id,
+        name: theme.name,
+        primary_color: theme.primary_color,
+        secondary_color: theme.secondary_color,
+        button_primary_color: theme.button_primary_color,
+        button_secondary_color: theme.button_secondary_color,
+        text_color: theme.text_color ?? '#FFFFFF',
+        body_text_color: theme.body_text_color ?? '#CBD5E1',
+      },
+    };
+  } catch (e: unknown) {
+    console.error('createAppThemeAction error:', e);
+    const msg = e instanceof Error ? e.message : 'Unable to create theme';
+    return { ok: false, error: msg };
+  }
+}
+
+export async function updateAppThemeForEventAction(
+  id: string,
+  body: unknown
+): Promise<CreateAppThemeResult> {
+  const auth = await requireAdminContextFromCookies();
+  if (!auth.ok) return { ok: false, error: auth.error };
+  if (!auth.ctx.hasPermission('app_themes.manage')) {
+    return { ok: false, error: 'Forbidden: app themes management is not enabled for your account' };
+  }
+  const parsed = updateAppThemeSchema.safeParse(body);
+  if (!parsed.success) {
+    const msg = parsed.error.flatten().formErrors[0] ?? 'Validation failed';
+    return { ok: false, error: msg };
+  }
+  try {
+    const existing = await prisma.app_themes.findUnique({
+      where: { id },
+      select: { id: true, tenant_owner_id: true },
+    });
+    if (!existing) return { ok: false, error: 'Theme not found' };
+    if (!canContextMutateMasterAsset(auth.ctx, existing.tenant_owner_id, 'app_themes.manage')) {
+      return { ok: false, error: 'Forbidden: you cannot modify this theme' };
+    }
+    const theme = await updateAppTheme(id, parsed.data);
+    if (!theme) return { ok: false, error: 'Theme not found' };
+    return {
+      ok: true,
+      data: {
+        id: theme.id,
+        name: theme.name,
+        primary_color: theme.primary_color,
+        secondary_color: theme.secondary_color,
+        button_primary_color: theme.button_primary_color,
+        button_secondary_color: theme.button_secondary_color,
+        text_color: theme.text_color ?? '#FFFFFF',
+        body_text_color: theme.body_text_color ?? '#CBD5E1',
+      },
+    };
+  } catch (e: unknown) {
+    console.error('updateAppThemeForEventAction error:', e);
+    const msg = e instanceof Error ? e.message : 'Unable to update theme';
+    return { ok: false, error: msg };
   }
 }
 

@@ -288,6 +288,7 @@ export function EventForm({
   const [values, setValues] = useState<EventFormValues>(emptyValues());
   const [error, setError] = useState<string | null>(null);
   const [themeModalOpen, setThemeModalOpen] = useState(false);
+  const [themeToEdit, setThemeToEdit] = useState<AppThemeOption | null>(null);
   const [themeOptions, setThemeOptions] = useState<AppThemeOption[]>(themes);
   const [showMobilePreview, setShowMobilePreview] = useState(true);
 
@@ -378,10 +379,13 @@ export function EventForm({
   const isWeddingCategory = isWedding(selectedCategory);
   const isCorporate = isCorporateCategory(selectedCategory);
 
-  function handleThemeCreated(theme: AppThemeOption) {
+  function handleThemeSaved(theme: AppThemeOption) {
     setThemeOptions((prev) => {
-      if (prev.some((t) => t.id === theme.id)) return prev;
-      return [...prev, theme].sort((a, b) => a.name.localeCompare(b.name));
+      const exists = prev.some((t) => t.id === theme.id);
+      const next = exists
+        ? prev.map((t) => (t.id === theme.id ? theme : t))
+        : [...prev, theme];
+      return next.sort((a, b) => a.name.localeCompare(b.name));
     });
     setValues((v) => ({ ...v, app_theme_id: theme.id }));
     onThemeCreated?.(theme);
@@ -634,10 +638,26 @@ export function EventForm({
               type="button"
               className={styles.themeAddBtn}
               hidden={!canManageThemes}
-              onClick={() => setThemeModalOpen(true)}
+              onClick={() => {
+                setThemeToEdit(null);
+                setThemeModalOpen(true);
+              }}
             >
               Add new theme…
             </button>
+            {selectedTheme && (
+              <button
+                type="button"
+                className={styles.themeAddBtn}
+                hidden={!canManageThemes}
+                onClick={() => {
+                  setThemeToEdit(selectedTheme);
+                  setThemeModalOpen(true);
+                }}
+              >
+                Edit theme…
+              </button>
+            )}
             <button
               type="button"
               className={styles.themeAddBtn}
@@ -774,8 +794,12 @@ export function EventForm({
     {/* Must not nest inside the event <form> — nested forms are invalid HTML and "Save theme" would submit the parent form */}
     <AppThemeAddModal
       open={themeModalOpen}
-      onClose={() => setThemeModalOpen(false)}
-      onCreated={handleThemeCreated}
+      onClose={() => {
+        setThemeModalOpen(false);
+        setThemeToEdit(null);
+      }}
+      onSaved={handleThemeSaved}
+      themeToEdit={themeToEdit}
     />
     </>
   );

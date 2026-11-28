@@ -54,6 +54,64 @@ function mapPrevious(items: PreviousEventItem[]): AppInfoResult['previous_events
   }));
 }
 
+async function getEventForAppInfo(eventId: string) {
+  try {
+    return await prisma.events.findUnique({
+      where: { id: eventId },
+      select: {
+        id: true,
+        status: true,
+        app_themes: {
+          select: {
+            primary_color: true,
+            secondary_color: true,
+            button_primary_color: true,
+            button_secondary_color: true,
+            text_color: true,
+            body_text_color: true,
+          },
+        },
+      },
+    });
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    if (
+      msg.includes('text_color') ||
+      msg.includes('body_text_color') ||
+      msg.includes('Unknown field') ||
+      msg.includes('column')
+    ) {
+      const fallback = await prisma.events.findUnique({
+        where: { id: eventId },
+        select: {
+          id: true,
+          status: true,
+          app_themes: {
+            select: {
+              primary_color: true,
+              secondary_color: true,
+              button_primary_color: true,
+              button_secondary_color: true,
+            },
+          },
+        },
+      });
+      if (!fallback) return null;
+      return {
+        ...fallback,
+        app_themes: fallback.app_themes
+          ? {
+              ...fallback.app_themes,
+              text_color: '#FFFFFF',
+              body_text_color: '#CBD5E1',
+            }
+          : null,
+      };
+    }
+    throw err;
+  }
+}
+
 /**
  * Theme colors for the event (from app_themes) plus store rows and events this device/user has joined.
  */
@@ -63,23 +121,7 @@ export async function getAppInfo(query: AppInfoQuery): Promise<AppInfoResult | n
       ? prisma.users.findUnique({ where: { id: query.user_id }, select: { id: true } })
       : Promise.resolve(null),
     query.event_id
-      ? prisma.events.findUnique({
-          where: { id: query.event_id },
-          select: {
-            id: true,
-            status: true,
-            app_themes: {
-              select: {
-                primary_color: true,
-                secondary_color: true,
-                button_primary_color: true,
-                button_secondary_color: true,
-                text_color: true,
-                body_text_color: true,
-              },
-            },
-          },
-        })
+      ? getEventForAppInfo(query.event_id)
       : Promise.resolve(null),
     prisma.app_configurations.findMany({
       where: {

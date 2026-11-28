@@ -3,14 +3,15 @@
 import { useEffect, useState } from 'react';
 import { HexColorInput, HexColorPicker } from 'react-colorful';
 import styles from './EventForm.module.scss';
-import { createAppThemeAction } from '@/app/actions/events';
+import { createAppThemeAction, updateAppThemeForEventAction } from '@/app/actions/events';
 import type { AppThemeOption } from '@/app/actions/events';
 import { MobileThemePreview } from '@/components/theme/MobileThemePreview';
 
-type AppThemeAddModalProps = {
+export type AppThemeAddModalProps = {
   open: boolean;
   onClose: () => void;
-  onCreated: (theme: AppThemeOption) => void;
+  onSaved: (theme: AppThemeOption) => void;
+  themeToEdit?: AppThemeOption | null;
 };
 
 type ColorBlockProps = {
@@ -45,7 +46,8 @@ function ColorBlock({ label, value, onChange, inputId }: ColorBlockProps) {
   );
 }
 
-export function AppThemeAddModal({ open, onClose, onCreated }: AppThemeAddModalProps) {
+export function AppThemeAddModal({ open, onClose, onSaved, themeToEdit }: AppThemeAddModalProps) {
+  const isEditing = Boolean(themeToEdit?.id);
   const [name, setName] = useState('');
   const [primary, setPrimary] = useState('#6366f1');
   const [secondary, setSecondary] = useState('#38bdf8');
@@ -58,16 +60,26 @@ export function AppThemeAddModal({ open, onClose, onCreated }: AppThemeAddModalP
 
   useEffect(() => {
     if (open) {
-      setName('');
-      setPrimary('#6366f1');
-      setSecondary('#38bdf8');
-      setButtonPrimary('#4338ca');
-      setButtonSecondary('#0369a1');
-      setTextColor('#FFFFFF');
-      setBodyTextColor('#CBD5E1');
+      if (themeToEdit) {
+        setName(themeToEdit.name);
+        setPrimary(themeToEdit.primary_color);
+        setSecondary(themeToEdit.secondary_color);
+        setButtonPrimary(themeToEdit.button_primary_color);
+        setButtonSecondary(themeToEdit.button_secondary_color);
+        setTextColor(themeToEdit.text_color ?? '#FFFFFF');
+        setBodyTextColor(themeToEdit.body_text_color ?? '#CBD5E1');
+      } else {
+        setName('');
+        setPrimary('#6366f1');
+        setSecondary('#38bdf8');
+        setButtonPrimary('#4338ca');
+        setButtonSecondary('#0369a1');
+        setTextColor('#FFFFFF');
+        setBodyTextColor('#CBD5E1');
+      }
       setError(null);
     }
-  }, [open]);
+  }, [open, themeToEdit]);
 
   if (!open) return null;
 
@@ -76,7 +88,7 @@ export function AppThemeAddModal({ open, onClose, onCreated }: AppThemeAddModalP
     setError(null);
     setLoading(true);
     try {
-      const res = await createAppThemeAction({
+      const payload = {
         name: name.trim(),
         primary_color: primary,
         secondary_color: secondary,
@@ -84,12 +96,17 @@ export function AppThemeAddModal({ open, onClose, onCreated }: AppThemeAddModalP
         button_secondary_color: buttonSecondary,
         text_color: textColor,
         body_text_color: bodyTextColor,
-      });
+      };
+
+      const res = isEditing && themeToEdit
+        ? await updateAppThemeForEventAction(themeToEdit.id, payload)
+        : await createAppThemeAction(payload);
+
       if (!res.ok) {
         setError(res.error);
         return;
       }
-      onCreated(res.data);
+      onSaved(res.data);
       onClose();
     } finally {
       setLoading(false);
@@ -107,9 +124,13 @@ export function AppThemeAddModal({ open, onClose, onCreated }: AppThemeAddModalP
         onClick={(e) => e.stopPropagation()}
       >
         <h3 id="app-theme-add-title" className={styles.addModalTitle}>
-          New app theme
+          {isEditing ? 'Edit app theme' : 'New app theme'}
         </h3>
-        <p className={styles.addModalHint}>Name, background colors, button gradients and text colors.</p>
+        <p className={styles.addModalHint}>
+          {isEditing
+            ? 'Update theme colors, button gradients and text colors.'
+            : 'Name, background colors, button gradients and text colors.'}
+        </p>
         {error && <p className={styles.error}>{error}</p>}
 
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '1.5rem', alignItems: 'start', marginTop: '1rem' }}>
@@ -172,7 +193,7 @@ export function AppThemeAddModal({ open, onClose, onCreated }: AppThemeAddModalP
                 Cancel
               </button>
               <button type="submit" className={styles.btnPrimary} disabled={loading}>
-                {loading ? 'Saving…' : 'Save theme'}
+                {loading ? 'Saving…' : isEditing ? 'Update theme' : 'Save theme'}
               </button>
             </div>
           </form>
